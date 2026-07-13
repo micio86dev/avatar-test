@@ -1,0 +1,512 @@
+---
+// One-question-per-session Italian HR interview across two interchangeable providers
+// (HeyGen | Tavus). A candidate starts (or resumes with a code), answers one question per
+// short timed session, and can pause between questions. Every utterance is persisted to
+// local SQLite. The page is a small multi-screen state machine that never scrolls on Y.
+---
+
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Interview Demo — HeyGen / Tavus</title>
+  </head>
+  <body>
+    <main class="app" id="app" data-screen="start">
+      <!-- ── START ─────────────────────────────────────────────────────────── -->
+      <section class="screen panel" id="screen-start">
+        <h1 class="brand">Colloquio conoscitivo</h1>
+
+        <div class="provider-toggle" role="radiogroup" aria-label="Provider">
+          <label>
+            <input type="radio" name="provider" value="heygen" checked />
+            <span>HeyGen</span>
+          </label>
+          <label>
+            <input type="radio" name="provider" value="tavus" />
+            <span>Tavus</span>
+          </label>
+        </div>
+
+        <label class="consent">
+          <input type="checkbox" id="consent" />
+          <span
+            >Questa è una demo. Parlerai con un intervistatore AI; la conversazione viene
+            trascritta e salvata localmente per analisi. Durante il colloquio la sessione è
+            monitorata per integrità: la webcam resta attiva e vengono registrati segnali di
+            presenza e attenzione (nessuna immagine lascia il tuo dispositivo). Procedendo,
+            acconsenti.</span
+          >
+        </label>
+
+        <div class="paths">
+          <div class="path">
+            <h2>Nuovo colloquio</h2>
+            <input type="text" id="display-name" placeholder="Il tuo nome" autocomplete="name" />
+            <button type="button" id="btn-new" class="btn primary">Inizia</button>
+          </div>
+          <div class="path-sep">oppure</div>
+          <div class="path">
+            <h2>Riprendi</h2>
+            <input type="text" id="resume-code" placeholder="Codice (es. 7QK2PM)" maxlength="8" />
+            <button type="button" id="btn-resume" class="btn">Riprendi</button>
+          </div>
+        </div>
+
+        <p id="start-error" class="error-line"></p>
+      </section>
+
+      <!-- ── CODE (shown once after a new candidate is created) ────────────────── -->
+      <section class="screen panel" id="screen-code">
+        <h2>Salva questo codice</h2>
+        <p class="hint">Ti servirà per riprendere il colloquio più tardi.</p>
+        <p class="code-big" id="code-value">——————</p>
+        <button type="button" id="btn-begin" class="btn primary">Inizia il colloquio</button>
+      </section>
+
+      <!-- ── INTERVIEW ─────────────────────────────────────────────────────────── -->
+      <div class="screen interview" id="screen-interview">
+        <header class="topbar">
+          <span class="progress" id="progress">Domanda 1 di 7</span>
+          <span class="completed" id="completed">✓ 0/7</span>
+          <span class="timer" id="timer" data-warn="normal">—:——</span>
+        </header>
+
+        <section class="stage">
+          <!-- Audio is attached to this same element, so it must NOT be muted. -->
+          <video id="avatar-video" autoplay playsinline></video>
+
+          <div id="meter" class="meter" hidden>
+            <span class="meter-icon">⚡</span>
+            <span id="meter-cost" class="meter-cost">$0.00</span>
+            <span id="meter-credits" class="meter-credits" hidden></span>
+          </div>
+
+          <!-- Candidate self-view. The proctor collector owns this stream; the camera
+               indicator is unsuppressable, so we show the feed to keep it expected.
+               Hidden until the collector attaches a stream at session start. -->
+          <video id="self-view" class="self-view" autoplay playsinline muted hidden></video>
+
+          <p id="caption" class="caption"></p>
+        </section>
+
+        <footer class="bar">
+          <p id="status" class="status" data-state="idle">pronta a iniziare</p>
+          <button id="talk-button" class="pulsantone" type="button" data-on="false">
+            🎤 Parla
+          </button>
+        </footer>
+      </div>
+
+      <!-- ── END OF QUESTION ───────────────────────────────────────────────────── -->
+      <section class="screen panel" id="screen-endq">
+        <h2 id="endq-title">Domanda conclusa</h2>
+        <p class="hint" id="endq-hint">Vuoi continuare con la prossima domanda?</p>
+        <div class="row">
+          <button type="button" id="btn-next" class="btn primary">Prossima domanda</button>
+          <button type="button" id="btn-pause" class="btn">Metti in pausa</button>
+        </div>
+      </section>
+
+      <!-- ── PAUSED ────────────────────────────────────────────────────────────── -->
+      <section class="screen panel" id="screen-paused">
+        <h2>Colloquio in pausa</h2>
+        <p class="hint">Il tuo codice per riprendere più tardi:</p>
+        <p class="code-big" id="paused-code">——————</p>
+        <button type="button" id="btn-home" class="btn primary">Torna all'inizio</button>
+      </section>
+
+      <!-- ── DONE ──────────────────────────────────────────────────────────────── -->
+      <section class="screen panel" id="screen-done">
+        <h2>Colloquio completato 🎉</h2>
+        <p class="hint">Grazie per il tuo tempo! Le risposte sono salvate.</p>
+        <button type="button" id="btn-home-2" class="btn primary">Torna all'inizio</button>
+      </section>
+    </main>
+
+    <script>
+      import '../scripts/interview-client.ts';
+    </script>
+
+    <style>
+      /* STRICT: the page never scrolls on the Y axis. */
+      :global(html),
+      :global(body) {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+      :global(body) {
+        background: #0b0c10;
+        color: #e8eaed;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      }
+
+      .app {
+        height: 100dvh;
+        overflow: hidden;
+      }
+
+      /* Only the active screen is shown; each fills the viewport. */
+      .screen {
+        display: none;
+        height: 100dvh;
+      }
+      .app[data-screen='start'] #screen-start,
+      .app[data-screen='code'] #screen-code,
+      .app[data-screen='interview'] #screen-interview,
+      .app[data-screen='endq'] #screen-endq,
+      .app[data-screen='paused'] #screen-paused,
+      .app[data-screen='done'] #screen-done {
+        display: flex;
+      }
+
+      /* Centered panels (start / code / endq / paused / done). */
+      .panel {
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 16px;
+        padding: 24px;
+        text-align: center;
+      }
+      .brand {
+        margin: 0;
+        font-size: 1.6rem;
+      }
+      .panel h2 {
+        margin: 0;
+        font-size: 1.25rem;
+      }
+      .hint {
+        margin: 0;
+        color: #9aa0aa;
+        font-size: 0.9rem;
+      }
+      .code-big {
+        margin: 4px 0;
+        font-size: 2.4rem;
+        font-weight: 800;
+        letter-spacing: 0.18em;
+        color: #a7f3d0;
+        font-variant-numeric: tabular-nums;
+      }
+      .error-line {
+        margin: 0;
+        min-height: 1.2em;
+        color: #f87171;
+        font-size: 0.85rem;
+      }
+
+      /* Start-screen New / Resume paths. */
+      .paths {
+        display: flex;
+        align-items: stretch;
+        gap: 18px;
+        margin-top: 4px;
+      }
+      .path {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        min-width: 200px;
+      }
+      .path h2 {
+        font-size: 1rem;
+        color: #cbd5e1;
+      }
+      .path-sep {
+        align-self: center;
+        color: #6b7280;
+        font-size: 0.8rem;
+      }
+      input[type='text'] {
+        padding: 10px 12px;
+        font-size: 1rem;
+        color: #e8eaed;
+        background: #17181f;
+        border: 1px solid #2a2c36;
+        border-radius: 10px;
+        text-align: center;
+      }
+      #resume-code {
+        text-transform: uppercase;
+        letter-spacing: 0.12em;
+      }
+
+      .btn {
+        padding: 11px 22px;
+        font-size: 1rem;
+        font-weight: 700;
+        color: #e8eaed;
+        background: #24262f;
+        border: 1px solid #2a2c36;
+        border-radius: 999px;
+        cursor: pointer;
+        transition: filter 0.15s ease;
+      }
+      .btn:hover {
+        filter: brightness(1.12);
+      }
+      .btn.primary {
+        color: #04150f;
+        background: #10b981;
+        border-color: transparent;
+      }
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      .row {
+        display: flex;
+        gap: 12px;
+      }
+
+      /* Interview screen: fixed top bar, stage fills, fixed bottom bar. */
+      .interview {
+        flex-direction: column;
+      }
+      .topbar {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 18px calc(10px);
+        padding-top: calc(10px + env(safe-area-inset-top, 0px));
+        border-bottom: 1px solid #1b1d24;
+      }
+      .progress {
+        font-size: 0.95rem;
+        font-weight: 600;
+      }
+      .completed {
+        color: #9aa0aa;
+        font-size: 0.85rem;
+      }
+      .timer {
+        font-size: 1.15rem;
+        font-weight: 800;
+        font-variant-numeric: tabular-nums;
+        color: #a7f3d0;
+      }
+      .timer[data-warn='warn'] {
+        color: #fbbf24;
+      }
+      .timer[data-warn='critical'] {
+        color: #f87171;
+      }
+
+      .stage {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        padding: 16px;
+      }
+      #avatar-video {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain;
+        border-radius: 20px;
+        background: #000;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+      }
+
+      .meter {
+        position: absolute;
+        top: 22px;
+        left: 22px;
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        padding: 8px 14px;
+        font-size: 0.95rem;
+        font-variant-numeric: tabular-nums;
+        color: #e8eaed;
+        background: rgba(11, 12, 16, 0.66);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 999px;
+        backdrop-filter: blur(8px);
+        pointer-events: none;
+      }
+      .meter[hidden] {
+        display: none;
+      }
+      .meter-icon {
+        font-size: 0.85rem;
+      }
+      .meter-cost {
+        font-weight: 700;
+        color: #a7f3d0;
+      }
+      .meter-credits {
+        color: #9aa0aa;
+        font-size: 0.8rem;
+      }
+      .meter-credits[hidden] {
+        display: none;
+      }
+      .meter-credits[data-low='true'] {
+        color: #fbbf24;
+      }
+      .meter-credits[data-low='critical'] {
+        color: #f87171;
+      }
+
+      .caption {
+        position: absolute;
+        bottom: 14px;
+        left: 50%;
+        transform: translateX(-50%);
+        max-width: min(80%, 720px);
+        margin: 0;
+        padding: 6px 14px;
+        font-size: 0.9rem;
+        color: #cbd5e1;
+        background: rgba(11, 12, 16, 0.6);
+        border-radius: 10px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        pointer-events: none;
+      }
+      .caption:empty {
+        display: none;
+      }
+
+      /* Small mirrored self-view in the corner (the camera indicator is unsuppressable,
+         so we keep the feed visible and expected). Hidden until a stream is attached. */
+      .self-view {
+        position: absolute;
+        right: 22px;
+        bottom: 22px;
+        width: 132px;
+        height: 99px;
+        object-fit: cover;
+        border-radius: 12px;
+        background: #000;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+        transform: scaleX(-1);
+        pointer-events: none;
+        z-index: 2;
+      }
+      .self-view[hidden] {
+        display: none;
+      }
+
+      .bar {
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+      }
+      .status {
+        margin: 0;
+        font-size: 0.9rem;
+        letter-spacing: 0.02em;
+        color: #9aa0aa;
+        min-height: 1.2em;
+      }
+      .status[data-state='listening'] {
+        color: #4ea1ff;
+      }
+      .status[data-state='speaking'] {
+        color: #34d399;
+      }
+      .status[data-state='ready'] {
+        color: #a7f3d0;
+      }
+      .status[data-state='connecting'] {
+        color: #fbbf24;
+      }
+      .status[data-state='error'] {
+        color: #f87171;
+      }
+
+      .pulsantone {
+        --accent: #10b981;
+        min-width: 240px;
+        padding: 16px 40px;
+        font-size: 1.3rem;
+        font-weight: 700;
+        color: #04150f;
+        background: var(--accent);
+        border: none;
+        border-radius: 999px;
+        cursor: pointer;
+        transition: transform 0.08s ease, filter 0.15s ease, background 0.15s ease;
+        box-shadow: 0 8px 24px rgba(16, 185, 129, 0.35);
+      }
+      .pulsantone:hover {
+        filter: brightness(1.06);
+      }
+      .pulsantone:active {
+        transform: translateY(1px);
+      }
+      .pulsantone[data-on='true'] {
+        --accent: #ef4444;
+        color: #fff;
+        box-shadow: 0 8px 24px rgba(239, 68, 68, 0.35);
+      }
+      .pulsantone:disabled {
+        opacity: 0.6;
+        cursor: default;
+        box-shadow: none;
+      }
+
+      /* Segmented provider toggle + consent (shared with the start screen). */
+      .provider-toggle {
+        display: inline-flex;
+        padding: 3px;
+        background: #17181f;
+        border: 1px solid #2a2c36;
+        border-radius: 999px;
+      }
+      .provider-toggle label {
+        cursor: pointer;
+      }
+      .provider-toggle input {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+      }
+      .provider-toggle span {
+        display: inline-block;
+        padding: 6px 18px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: #9aa0aa;
+        border-radius: 999px;
+        transition: background 0.15s ease, color 0.15s ease;
+      }
+      .provider-toggle input:checked + span {
+        color: #04150f;
+        background: #10b981;
+      }
+      .consent {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        max-width: 520px;
+        font-size: 0.78rem;
+        line-height: 1.35;
+        color: #9aa0aa;
+        cursor: pointer;
+        text-align: left;
+      }
+      .consent input {
+        margin-top: 2px;
+        accent-color: #10b981;
+        flex-shrink: 0;
+      }
+    </style>
+  </body>
+</html>

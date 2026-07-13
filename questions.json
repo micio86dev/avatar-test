@@ -1,0 +1,19 @@
+{
+  "language": "it",
+  "version": "1",
+  "title": "Colloquio preliminare - Sviluppatore",
+  "totalQuestions": 7,
+  "intro": "Ciao! Sono l'assistente per un primo colloquio conoscitivo. Ti farò alcune domande, rispondi pure con calma. Iniziamo subito.",
+  "resumeGreeting": "Bene, andiamo avanti con la prossima domanda.",
+  "closing": "Perfetto, abbiamo raccolto tutto quello che ci serve. Grazie per il tuo tempo!",
+  "instructions": "Sei un intervistatore che conduce un colloquio conoscitivo in italiano. Sei professionale, cordiale e conciso. Conduci TU la conversazione.",
+  "questions": [
+    { "id": "ruolo",         "text": "Di cosa ti occupi attualmente e da quanto tempo?",                 "objective": "Capire il ruolo attuale, il contesto o l'azienda, e da quanto tempo lo ricopre." },
+    { "id": "esperienza",    "text": "Quanti anni di esperienza hai nel tuo ruolo principale?",           "objective": "Ottenere un numero indicativo di anni di esperienza e in quale ruolo o area." },
+    { "id": "stack",         "text": "Quali sono le tue tre competenze o tecnologie principali?",         "objective": "Raccogliere almeno tre competenze o tecnologie concrete e il livello di padronanza." },
+    { "id": "progetto",      "text": "Raccontami brevemente un progetto di cui vai particolarmente fiero.", "objective": "Capire il progetto, il ruolo della persona, le tecnologie usate e il risultato ottenuto." },
+    { "id": "disponibilita", "text": "Qual e' la tua disponibilita e il tuo preavviso attuale?",          "objective": "Ottenere la disponibilita (tempistica) e la durata del preavviso attuale." },
+    { "id": "ral",           "text": "Qual e' la tua aspettativa economica indicativa?",                  "objective": "Ottenere un valore o una fascia di aspettativa economica (RAL lorda annua)." },
+    { "id": "motivazione",   "text": "Cosa cerchi nella tua prossima opportunita?",                      "objective": "Capire cosa cerca nella prossima opportunita e cosa la spingerebbe a cambiare." }
+  ]
+}

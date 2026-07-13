@@ -1,0 +1,26 @@
+{
+  "name": "avatar-test",
+  "type": "module",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "check": "astro check",
+    "proctor:assets": "mkdir -p public/proctor/wasm && cp node_modules/@mediapipe/tasks-vision/wasm/* public/proctor/wasm/ && curl -sSL -o public/proctor/face_landmarker.task https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+  },
+  "dependencies": {
+    "@astrojs/node": "^11.0.2",
+    "@daily-co/daily-js": "^0.90.0",
+    "@heygen/liveavatar-web-sdk": "^0.0.18",
+    "@mediapipe/tasks-vision": "^0.10.35",
+    "astro": "^7.0.7",
+    "better-sqlite3": "^12.0.0"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.9",
+    "@types/better-sqlite3": "^7.6.11",
+    "typescript": "^6.0.3"
+  }
+}

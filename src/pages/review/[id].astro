@@ -1,0 +1,264 @@
+---
+// Simple review view for a stored interview: the transcript plus an estimated cost
+// recomputed from the session duration × the provider rate (the comparison metric).
+import { computeIntegritySummary, getIntegrityEvents, getSession, getUtterances } from '../../lib/db';
+import { rates } from '../../lib/pricing';
+import { INTEGRITY_LABELS, type IntegrityType } from '../../lib/proctor-config';
+
+const id = Number(Astro.params.id);
+const session = Number.isInteger(id) ? getSession(id) : undefined;
+const utterances = session ? getUtterances(id) : [];
+
+let durationMin = 0;
+let costUsd = 0;
+if (session?.ended_at) {
+  durationMin =
+    (new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / 60_000;
+  costUsd =
+    session.provider === 'heygen'
+      ? durationMin * rates.heygenCreditsPerMin * rates.heygenUsdPerCredit
+      : Math.max(0.5, Math.ceil(durationMin * 600) / 600) * rates.tavusUsdPerMin;
+}
+
+// Soft-proctoring integrity: raw event timeline + derived risk band (query-time, no
+// stored column — same approach as the cost estimate above).
+const integrityEvents = session ? getIntegrityEvents(id) : [];
+const integrity = session ? computeIntegritySummary(id) : null;
+const BAND_LABEL: Record<string, string> = { low: 'basso', medium: 'medio', high: 'alto' };
+
+function eventTime(ts: string): string {
+  const d = new Date(ts);
+  return Number.isNaN(d.getTime()) ? ts : d.toLocaleTimeString('it-IT');
+}
+function eventDetail(type: string, metaJson: string | null): string {
+  if (!metaJson) return '';
+  let meta: Record<string, unknown> = {};
+  try {
+    meta = JSON.parse(metaJson) as Record<string, unknown>;
+  } catch {
+    return '';
+  }
+  const parts: string[] = [];
+  if (typeof meta.durationMs === 'number') parts.push(`${(meta.durationMs / 1000).toFixed(1)}s`);
+  if (type === 'multiple_faces' && typeof meta.count === 'number') parts.push(`${meta.count} volti`);
+  if (type === 'looking_away' && typeof meta.yaw === 'number') parts.push(`yaw ${meta.yaw}°`);
+  return parts.join(' · ');
+}
+---
+
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Review — Interview #{id}</title>
+  </head>
+  <body>
+    <main>
+      {!session && <p class="empty">Session #{id} not found.</p>}
+      {
+        session && (
+          <>
+            <header>
+              <h1>Interview #{session.id}</h1>
+              <p class="meta">
+                <span class="badge">{session.provider}</span>
+                {session.question_index != null && (
+                  <span>· Domanda {session.question_index + 1}</span>
+                )}
+                {session.ended_reason && <span>· {session.ended_reason}</span>}
+                <span>· started {session.started_at}</span>
+                {session.ended_at && <span>· ended {session.ended_at}</span>}
+                {session.ended_at && (
+                  <span class="cost">
+                    · ≈ ${costUsd.toFixed(2)} ({durationMin.toFixed(1)} min)
+                  </span>
+                )}
+              </p>
+            </header>
+
+            {integrity && (
+              <section class="integrity">
+                <div class="integrity-head">
+                  <h2>Integrità</h2>
+                  <span class={`band band-${integrity.band}`}>
+                    rischio {BAND_LABEL[integrity.band]} · {integrity.score}
+                  </span>
+                </div>
+                {integrity.total === 0 ? (
+                  <p class="empty">Nessun segnale registrato.</p>
+                ) : (
+                  <ol class="events">
+                    {integrityEvents.map((e) => (
+                      <li class="event">
+                        <span class="ev-label">
+                          {INTEGRITY_LABELS[e.type as IntegrityType] ?? e.type}
+                        </span>
+                        <span class="ev-detail">{eventDetail(e.type, e.meta)}</span>
+                        <span class="ev-time">{eventTime(e.ts)}</span>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </section>
+            )}
+
+            {utterances.length === 0 && <p class="empty">No utterances stored.</p>}
+            <ol class="transcript">
+              {utterances.map((u) => (
+                <li class={`turn ${u.role}`}>
+                  <span class="who">{u.role === 'avatar' ? 'Alessandra' : 'Tu'}</span>
+                  <span class="text">{u.text}</span>
+                </li>
+              ))}
+            </ol>
+          </>
+        )
+      }
+    </main>
+
+    <style>
+      :global(body) {
+        margin: 0;
+        background: #0b0c10;
+        color: #e8eaed;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      }
+      main {
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 32px 20px 64px;
+      }
+      h1 {
+        margin: 0 0 6px;
+        font-size: 1.4rem;
+      }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 0 0 24px;
+        font-size: 0.85rem;
+        color: #9aa0aa;
+      }
+      .badge {
+        padding: 2px 10px;
+        font-weight: 700;
+        color: #04150f;
+        background: #10b981;
+        border-radius: 999px;
+        text-transform: uppercase;
+        font-size: 0.72rem;
+      }
+      .cost {
+        color: #a7f3d0;
+      }
+
+      /* Integrity panel */
+      .integrity {
+        margin: 0 0 28px;
+        padding: 16px;
+        border: 1px solid #2a2c36;
+        border-radius: 12px;
+        background: #101119;
+      }
+      .integrity-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+      .integrity-head h2 {
+        margin: 0;
+        font-size: 1rem;
+        letter-spacing: 0.02em;
+      }
+      .band {
+        padding: 3px 12px;
+        font-size: 0.74rem;
+        font-weight: 700;
+        border-radius: 999px;
+        text-transform: uppercase;
+      }
+      .band-low {
+        color: #04150f;
+        background: #10b981;
+      }
+      .band-medium {
+        color: #1a1400;
+        background: #fbbf24;
+      }
+      .band-high {
+        color: #fff;
+        background: #ef4444;
+      }
+      .events {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .event {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        align-items: baseline;
+        gap: 12px;
+        padding: 6px 10px;
+        border-radius: 8px;
+        background: #17181f;
+        font-size: 0.85rem;
+      }
+      .ev-label {
+        font-weight: 600;
+      }
+      .ev-detail {
+        color: #9aa0aa;
+        font-variant-numeric: tabular-nums;
+      }
+      .ev-time {
+        color: #6b7280;
+        font-size: 0.78rem;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .transcript {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .turn {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 12px 16px;
+        border-radius: 12px;
+        background: #17181f;
+        border: 1px solid #2a2c36;
+      }
+      .turn.avatar {
+        border-left: 3px solid #10b981;
+      }
+      .turn.user {
+        border-left: 3px solid #4ea1ff;
+      }
+      .who {
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #9aa0aa;
+      }
+      .text {
+        line-height: 1.4;
+      }
+      .empty {
+        color: #9aa0aa;
+      }
+    </style>
+  </body>
+</html>

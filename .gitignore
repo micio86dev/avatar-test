@@ -1,0 +1,20 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+.astro/
+.vercel/
+
+# local SQLite transcript store
+data/
+
+# env — secrets never committed
+.env
+.env.*
+!.env.example
+
+# logs / os
+*.log
+.DS_Store
+.vercel
