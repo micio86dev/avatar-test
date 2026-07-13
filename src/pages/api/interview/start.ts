@@ -33,6 +33,12 @@ const HEYGEN_VIDEO_QUALITY = 'low';
 // If a participant leaves the Tavus room, end shortly after (frees the slot promptly).
 const TAVUS_PARTICIPANT_LEFT_TIMEOUT = 5;
 
+// Free-tier concurrency-slot release lags the 'ended' status by a few seconds. When a
+// start races that window, wait and retry the create instead of failing. Up to
+// RETRIES * BACKOFF_MS (~6s) of added latency, and ONLY on the concurrency error.
+const TAVUS_CONCURRENCY_RETRIES = 3;
+const TAVUS_CONCURRENCY_BACKOFF_MS = 2000;
+
 // Tavus-only: after its closing phrase the persona calls the end_interview tool (registered
 // once on the PAL). It reaches the client as a conversation.tool_call app-message and drives
 // the soft auto-advance. HeyGen has no equivalent hook, so this instruction is Tavus-scoped.
@@ -262,20 +268,21 @@ async function startTavus(req: StartRequest): Promise<Response> {
   let res = await createTavusConversation(req);
   let payload = await res.json().catch(() => null);
 
-  // On the concurrency rejection, reap the stale slot and retry once. This is the race
-  // between a prior question's teardown and this start — not a genuine over-quota.
-  if (!res.ok) {
-    const detail = payload?.message ?? payload?.error ?? `HTTP ${res.status}`;
-    if (isConcurrencyLimit(String(detail))) {
-      const reaped = await endActiveTavusConversations().catch(() => 0);
-      if (reaped > 0) {
-        // Tavus keeps a just-ended conversation counted as active for a beat; let it
-        // settle before retrying, otherwise the create races the same stale slot.
-        await new Promise((r) => setTimeout(r, 1500));
-        res = await createTavusConversation(req);
-        payload = await res.json().catch(() => null);
-      }
-    }
+  // Concurrency rejection handling. On the free tier Tavus allows 1 concurrent
+  // conversation and releases that slot a few seconds AFTER the prior question's
+  // conversation reports 'ended' — so a fresh start briefly races a slot that is
+  // gone by status but not yet by accounting. The account often shows ZERO active
+  // conversations at this point, so there is nothing to reap: the only thing that
+  // works (as confirmed by manual re-click succeeding) is to wait and retry.
+  for (let attempt = 0; attempt < TAVUS_CONCURRENCY_RETRIES && !res.ok; attempt++) {
+    const detail = String(payload?.message ?? payload?.error ?? `HTTP ${res.status}`);
+    if (!isConcurrencyLimit(detail)) break;
+    // Best-effort reap in case a genuinely stuck 'active' conversation exists, then wait
+    // for Tavus to free the slot before retrying. The wait — not the reap — is the fix.
+    await endActiveTavusConversations().catch(() => 0);
+    await new Promise((r) => setTimeout(r, TAVUS_CONCURRENCY_BACKOFF_MS));
+    res = await createTavusConversation(req);
+    payload = await res.json().catch(() => null);
   }
   if (!res.ok) {
     const detail = payload?.message ?? payload?.error ?? `HTTP ${res.status}`;
