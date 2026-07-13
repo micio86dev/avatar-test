@@ -200,15 +200,40 @@ async function createHeygenContext(
   return id;
 }
 
-async function startTavus(req: StartRequest): Promise<Response> {
-  if (!TAVUS_API_KEY) return json(500, { error: 'Missing TAVUS_API_KEY in .env.' });
-  if (!TAVUS_REPLICA_ID || !TAVUS_PERSONA_ID) {
-    return json(500, { error: 'Missing TAVUS_REPLICA_ID or TAVUS_PERSONA_ID in .env.' });
-  }
+// Detects Tavus' concurrency-limit rejection (free tier allows only 1 concurrent
+// conversation). The previous question's /end can lag behind on Tavus' side, so a fresh
+// start briefly races an already-teardown conversation that still counts as active.
+function isConcurrencyLimit(detail: string): boolean {
+  return /maximum concurrent conversations/i.test(detail);
+}
 
-  const res = await fetch(TAVUS_CONVERSATIONS_URL, {
+// Reap leftover active conversations so the single free-tier slot is freed. Called only
+// when a create is rejected for concurrency — self-heals a lagging or failed prior /end
+// without slowing the happy path.
+async function endActiveTavusConversations(): Promise<number> {
+  const list = await fetch(`${TAVUS_CONVERSATIONS_URL}?status=active`, {
+    headers: { 'x-api-key': TAVUS_API_KEY as string },
+  });
+  const payload = await list.json().catch(() => null);
+  const rows: Array<{ conversation_id?: string; status?: string }> = Array.isArray(payload?.data)
+    ? payload.data
+    : [];
+  const active = rows.filter((c) => c.conversation_id && c.status === 'active');
+  await Promise.all(
+    active.map((c) =>
+      fetch(`${TAVUS_CONVERSATIONS_URL}/${c.conversation_id}/end`, {
+        method: 'POST',
+        headers: { 'x-api-key': TAVUS_API_KEY as string },
+      }).catch(() => {}),
+    ),
+  );
+  return active.length;
+}
+
+async function createTavusConversation(req: StartRequest): Promise<Response> {
+  return fetch(TAVUS_CONVERSATIONS_URL, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': TAVUS_API_KEY },
+    headers: { 'Content-Type': 'application/json', 'x-api-key': TAVUS_API_KEY as string },
     body: JSON.stringify({
       replica_id: TAVUS_REPLICA_ID,
       persona_id: TAVUS_PERSONA_ID,
@@ -226,7 +251,32 @@ async function startTavus(req: StartRequest): Promise<Response> {
       },
     }),
   });
-  const payload = await res.json().catch(() => null);
+}
+
+async function startTavus(req: StartRequest): Promise<Response> {
+  if (!TAVUS_API_KEY) return json(500, { error: 'Missing TAVUS_API_KEY in .env.' });
+  if (!TAVUS_REPLICA_ID || !TAVUS_PERSONA_ID) {
+    return json(500, { error: 'Missing TAVUS_REPLICA_ID or TAVUS_PERSONA_ID in .env.' });
+  }
+
+  let res = await createTavusConversation(req);
+  let payload = await res.json().catch(() => null);
+
+  // On the concurrency rejection, reap the stale slot and retry once. This is the race
+  // between a prior question's teardown and this start — not a genuine over-quota.
+  if (!res.ok) {
+    const detail = payload?.message ?? payload?.error ?? `HTTP ${res.status}`;
+    if (isConcurrencyLimit(String(detail))) {
+      const reaped = await endActiveTavusConversations().catch(() => 0);
+      if (reaped > 0) {
+        // Tavus keeps a just-ended conversation counted as active for a beat; let it
+        // settle before retrying, otherwise the create races the same stale slot.
+        await new Promise((r) => setTimeout(r, 1500));
+        res = await createTavusConversation(req);
+        payload = await res.json().catch(() => null);
+      }
+    }
+  }
   if (!res.ok) {
     const detail = payload?.message ?? payload?.error ?? `HTTP ${res.status}`;
     throw new Error(`Tavus rejected the conversation request: ${detail}`);
