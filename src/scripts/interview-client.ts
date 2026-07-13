@@ -116,6 +116,7 @@ const STATUS: Record<string, [string, string]> = {
   listening: ['in ascolto', 'listening'],
   speaking: ['sta parlando', 'speaking'],
   stopped: ['spenta', 'idle'],
+  waiting: ['un attimo…', 'waiting'],
   error: ['errore', 'error'],
 };
 
@@ -313,6 +314,14 @@ async function startSession(index: number): Promise<void> {
       body: JSON.stringify({ candidateId, questionIndex: index, provider: providerName }),
     });
     const data = await res.json().catch(() => null);
+    // Provider slot momentarily busy (Tavus free-tier concurrency lag): not a hard error —
+    // show a friendly wait message and leave the button ready for a retry.
+    if (res.status === 429 || data?.code === 'provider_busy') {
+      setStatus('waiting', data?.error || 'Attendi qualche secondo e riprova.');
+      phase = 'idle';
+      setButton();
+      return;
+    }
     if (!res.ok || !data?.dbSessionId) throw new Error(data?.error || `start HTTP ${res.status}`);
 
     sessionId = data.dbSessionId;

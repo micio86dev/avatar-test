@@ -285,7 +285,16 @@ async function startTavus(req: StartRequest): Promise<Response> {
     payload = await res.json().catch(() => null);
   }
   if (!res.ok) {
-    const detail = payload?.message ?? payload?.error ?? `HTTP ${res.status}`;
+    const detail = String(payload?.message ?? payload?.error ?? `HTTP ${res.status}`);
+    // Slot still not freed after the retries: surface a friendly, retryable signal instead
+    // of a raw 502 so the client can invite the candidate to wait a moment and try again.
+    if (isConcurrencyLimit(detail)) {
+      return json(429, {
+        code: 'provider_busy',
+        error:
+          'L’avatar sta ancora chiudendo la sessione precedente. Attendi qualche secondo e premi di nuovo “Parla”.',
+      });
+    }
     throw new Error(`Tavus rejected the conversation request: ${detail}`);
   }
   const conversationUrl: string | undefined = payload?.conversation_url;
