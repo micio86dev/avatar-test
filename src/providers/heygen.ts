@@ -11,12 +11,13 @@ import {
   AgentEventsEnum,
   SessionInteractivityMode,
 } from '@heygen/liveavatar-web-sdk';
-import type {
-  InterviewProvider,
-  ProviderEvent,
-  StartConfig,
-  StartResult,
-  TranscriptEntry,
+import {
+  matchesEndPhrase,
+  type InterviewProvider,
+  type ProviderEvent,
+  type StartConfig,
+  type StartResult,
+  type TranscriptEntry,
 } from './types';
 
 type Handler = (payload: unknown) => void;
@@ -24,6 +25,10 @@ type Handler = (payload: unknown) => void;
 export class HeyGenProvider implements InterviewProvider {
   private session: LiveAvatarSession | null = null;
   private avatarSpeaking = false;
+  // Set when the avatar's transcript contains the closing phrase while it is still
+  // speaking; the actual 'complete' is emitted on AVATAR_SPEAK_ENDED so the sentence
+  // finishes before the question tears down.
+  private pendingComplete = false;
   private handlers: Record<ProviderEvent, Handler[]> = { transcript: [], state: [], error: [] };
 
   on(evt: ProviderEvent, cb: Handler): void {
@@ -89,12 +94,25 @@ export class HeyGenProvider implements InterviewProvider {
     session.on(AgentEventsEnum.AVATAR_SPEAK_ENDED, () => {
       this.avatarSpeaking = false;
       this.emit('state', 'ready');
+      // The closing phrase has now been fully spoken → signal the question is done.
+      if (this.pendingComplete) {
+        this.pendingComplete = false;
+        this.emit('state', 'complete');
+      }
     });
 
     // The transcript-carrying events (final text). Chunk variants are ignored here to
     // avoid duplicate partials in the DB.
     session.on(AgentEventsEnum.USER_TRANSCRIPTION, (e) => this.transcript('user', e.text));
-    session.on(AgentEventsEnum.AVATAR_TRANSCRIPTION, (e) => this.transcript('avatar', e.text));
+    session.on(AgentEventsEnum.AVATAR_TRANSCRIPTION, (e) => {
+      this.transcript('avatar', e.text);
+      // No tool-calling in FULL mode: the avatar marks a question done by SPEAKING the
+      // fixed closing phrase. Defer 'complete' to AVATAR_SPEAK_ENDED if still talking.
+      if (matchesEndPhrase(e.text)) {
+        if (this.avatarSpeaking) this.pendingComplete = true;
+        else this.emit('state', 'complete');
+      }
+    });
 
     session.on(AgentEventsEnum.SESSION_STOPPED, () => {
       this.session = null;

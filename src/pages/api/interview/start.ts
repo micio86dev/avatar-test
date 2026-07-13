@@ -10,6 +10,7 @@ import {
   TAVUS_PERSONA_ID,
 } from 'astro:env/server';
 import { composeQuestionPrompt, questions, type PriorAnswer } from '../../../lib/prompt';
+import { HEYGEN_END_PHRASE } from '../../../providers/types';
 import { rates } from '../../../lib/pricing';
 import { timing } from '../../../lib/timing';
 import {
@@ -45,6 +46,12 @@ const TAVUS_CONCURRENCY_BACKOFF_MS = 2000;
 const TAVUS_END_TOOL_INSTRUCTION =
   '\n\nDopo la tua frase di conclusione per questa domanda, chiama SUBITO lo strumento ' +
   'end_interview per segnalare che hai finito. Non annunciarlo: chiamalo in silenzio.';
+
+// HeyGen FULL mode has no tool-calling, so completion is signalled by SPEAKING a fixed
+// phrase. The client (heygen.ts matchesEndPhrase) detects it and drives the auto-advance.
+const HEYGEN_END_PHRASE_INSTRUCTION =
+  '\n\nQuando hai raccolto l’obiettivo di questa domanda, dopo la tua breve frase di ' +
+  `conclusione pronuncia ESATTAMENTE, parola per parola, questa frase finale e poi fermati: "${HEYGEN_END_PHRASE}"`;
 
 interface StartRequest {
   candidateId: number;
@@ -138,7 +145,12 @@ async function startHeygen(req: StartRequest): Promise<Response> {
 
   // A fresh Context per start: the prompt is candidate- and question-specific now, so
   // there is nothing stable to cache (caching by version would inject the wrong question).
-  const contextId = await createHeygenContext(req.systemPrompt, req.greeting, req.questionId, req.candidateId);
+  const contextId = await createHeygenContext(
+    req.systemPrompt + HEYGEN_END_PHRASE_INSTRUCTION,
+    req.greeting,
+    req.questionId,
+    req.candidateId,
+  );
 
   // FULL mode: HeyGen provides ASR + LLM + TTS. All avatar/voice/quality/language config
   // lives in the token request.
