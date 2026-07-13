@@ -442,7 +442,11 @@ async function onProviderError(): Promise<void> {
 }
 
 // ── Screen flow ────────────────────────────────────────────────────────────────
-function beginQuestion(index: number): void {
+// autoStart=true makes the next question begin its session on its own, so a candidate
+// mid-interview never has to press "Parla" again — the transition feels seamless. The very
+// first question is left manual (autoStart=false): that first click is the user gesture that
+// grants the mic and satisfies the browser's autoplay policy for the whole session.
+function beginQuestion(index: number, autoStart = false): void {
   clearAutoAdvance();
   currentIndex = index;
   phase = 'idle';
@@ -455,6 +459,7 @@ function beginQuestion(index: number): void {
   setStatus('idle');
   setButton();
   setScreen('interview');
+  if (autoStart) void startSession(index);
 }
 
 function clearAutoAdvance(): void {
@@ -515,9 +520,9 @@ async function onNext(): Promise<void> {
         setScreen('done');
         return;
       }
-      beginQuestion(info.nextQuestionIndex);
+      beginQuestion(info.nextQuestionIndex, true);
     } else {
-      beginQuestion(nextIndex);
+      beginQuestion(nextIndex, true);
     }
   } finally {
     btnNext.disabled = false;
