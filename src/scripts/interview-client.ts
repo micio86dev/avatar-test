@@ -358,7 +358,12 @@ async function startSession(index: number): Promise<void> {
       res = await fetch('/api/interview/start', {
         method: 'POST',
         headers: JSON_HEADERS,
-        body: JSON.stringify({ candidateId, questionIndex: index, provider: providerName }),
+        body: JSON.stringify({
+          candidateId,
+          questionIndex: index,
+          provider: providerName,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }),
       });
       data = await res.json().catch(() => null);
       const busy = res.status === 429 || data?.code === 'provider_busy';

@@ -60,15 +60,17 @@ interface StartRequest {
   systemPrompt: string;
   greeting: string;
   meta: SessionMeta;
+  timezone: string | null;
 }
 
 // Parse + validate the request, then compose the per-question Italian context. Returns
 // either a ready-to-use StartRequest or an error Response.
 function prepare(
-  body: { candidateId?: unknown; questionIndex?: unknown } | null,
+  body: { candidateId?: unknown; questionIndex?: unknown; timezone?: unknown } | null,
 ): StartRequest | Response {
   const candidateId = Number(body?.candidateId);
   const questionIndex = Number(body?.questionIndex);
+  const timezone = typeof body?.timezone === 'string' && body.timezone ? body.timezone : null;
 
   if (!Number.isInteger(candidateId)) return json(400, { error: 'Invalid candidateId.' });
   if (!Number.isInteger(questionIndex) || questionIndex < 0 || questionIndex >= questions.questions.length) {
@@ -99,13 +101,14 @@ function prepare(
     questionId: question.id,
     systemPrompt,
     greeting,
-    meta: { candidateId, questionId: question.id, questionIndex },
+    meta: { candidateId, questionId: question.id, questionIndex, timezone: timezone ?? undefined },
+    timezone,
   };
 }
 
 export const POST: APIRoute = async ({ request, url }) => {
   const body = (await request.json().catch(() => null)) as
-    | { candidateId?: unknown; questionIndex?: unknown; provider?: unknown }
+    | { candidateId?: unknown; questionIndex?: unknown; provider?: unknown; timezone?: unknown }
     | null;
 
   const provider = (body?.provider as string) ?? url.searchParams.get('provider');
@@ -124,6 +127,22 @@ export const POST: APIRoute = async ({ request, url }) => {
     return json(502, { error: err instanceof Error ? err.message : String(err) });
   }
 };
+
+// Build a short timezone context preamble to inject into the persona system prompt so
+// the avatar knows the candidate's local date and time without guessing.
+function timezoneContext(tz: string | null): string {
+  if (!tz) return '';
+  try {
+    const localTime = new Date().toLocaleString('it-IT', {
+      timeZone: tz,
+      dateStyle: 'full',
+      timeStyle: 'short',
+    });
+    return `[Contesto temporale]\nFuso orario del candidato: ${tz}. Ora locale: ${localTime}.\n\n`;
+  } catch {
+    return '';
+  }
+}
 
 // Extra fields every successful start returns, so the client can drive the timer and
 // progress UI without reading server secrets.
@@ -146,7 +165,7 @@ async function startHeygen(req: StartRequest): Promise<Response> {
   // A fresh Context per start: the prompt is candidate- and question-specific now, so
   // there is nothing stable to cache (caching by version would inject the wrong question).
   const contextId = await createHeygenContext(
-    req.systemPrompt + HEYGEN_END_PHRASE_INSTRUCTION,
+    timezoneContext(req.timezone) + req.systemPrompt + HEYGEN_END_PHRASE_INSTRUCTION,
     req.greeting,
     req.questionId,
     req.candidateId,
@@ -256,7 +275,7 @@ async function createTavusConversation(req: StartRequest): Promise<Response> {
       replica_id: TAVUS_REPLICA_ID,
       persona_id: TAVUS_PERSONA_ID,
       // Tavus uses its OWN default LLM ("its brain"); the script is injected as context.
-      conversational_context: req.systemPrompt + TAVUS_END_TOOL_INSTRUCTION,
+      conversational_context: timezoneContext(req.timezone) + req.systemPrompt + TAVUS_END_TOOL_INSTRUCTION,
       custom_greeting: req.greeting,
       properties: {
         language: 'italian',

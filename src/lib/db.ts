@@ -28,6 +28,7 @@ export interface SessionRow {
   ended_reason: string | null;
   started_at: string;
   ended_at: string | null;
+  timezone: string | null; // IANA timezone from the user's browser (e.g. "Europe/Rome")
   provider_meta: string | null; // JSON blob of post-session data fetched from provider API
 }
 
@@ -69,6 +70,7 @@ export interface SessionMeta {
   candidateId?: number;
   questionId?: string;
   questionIndex?: number;
+  timezone?: string;
 }
 
 export interface IntegrityEventRow {
@@ -116,6 +118,7 @@ function getDb(): Database.Database {
       ended_reason TEXT,
       started_at TEXT NOT NULL,
       ended_at TEXT,
+      timezone TEXT,
       provider_meta TEXT
     );
     CREATE TABLE IF NOT EXISTS utterances (
@@ -174,6 +177,7 @@ function getDb(): Database.Database {
   ensureColumn(conn, 'sessions', 'question_id', 'question_id TEXT');
   ensureColumn(conn, 'sessions', 'question_index', 'question_index INTEGER');
   ensureColumn(conn, 'sessions', 'ended_reason', 'ended_reason TEXT');
+  ensureColumn(conn, 'sessions', 'timezone', 'timezone TEXT');
   ensureColumn(conn, 'sessions', 'provider_meta', 'provider_meta TEXT');
   ensureColumn(conn, 'webcam_snapshots', 'trigger', 'trigger TEXT');
 
@@ -192,8 +196,8 @@ export function createSession(
   const info = getDb()
     .prepare(
       `INSERT INTO sessions
-         (provider, provider_session_id, questions_version, candidate_id, question_id, question_index, started_at, ended_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
+         (provider, provider_session_id, questions_version, candidate_id, question_id, question_index, timezone, started_at, ended_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
     )
     .run(
       provider,
@@ -202,6 +206,7 @@ export function createSession(
       meta.candidateId ?? null,
       meta.questionId ?? null,
       meta.questionIndex ?? null,
+      meta.timezone ?? null,
       now,
     );
   return Number(info.lastInsertRowid);
@@ -423,6 +428,9 @@ export interface CandidateListRow extends CandidateRow {
   completed_questions: number;
   total_questions: number;
   last_activity: string | null;
+  providers_used: string | null; // GROUP_CONCAT of distinct providers
+  total_heygen_min: number; // sum of completed HeyGen session durations
+  total_tavus_min: number; // sum of completed Tavus session durations
 }
 
 export function getAllCandidates(): CandidateListRow[] {
@@ -433,7 +441,14 @@ export function getAllCandidates(): CandidateListRow[] {
          COUNT(DISTINCT s.id) AS session_count,
          SUM(CASE WHEN qp.status = 'completed' THEN 1 ELSE 0 END) AS completed_questions,
          COUNT(DISTINCT qp.id) AS total_questions,
-         MAX(COALESCE(s.ended_at, s.started_at)) AS last_activity
+         MAX(COALESCE(s.ended_at, s.started_at)) AS last_activity,
+         GROUP_CONCAT(DISTINCT s.provider) AS providers_used,
+         SUM(CASE WHEN s.provider = 'heygen' AND s.ended_at IS NOT NULL
+               THEN (julianday(s.ended_at) - julianday(s.started_at)) * 1440.0
+               ELSE 0 END) AS total_heygen_min,
+         SUM(CASE WHEN s.provider = 'tavus' AND s.ended_at IS NOT NULL
+               THEN (julianday(s.ended_at) - julianday(s.started_at)) * 1440.0
+               ELSE 0 END) AS total_tavus_min
        FROM candidates c
        LEFT JOIN sessions s ON s.candidate_id = c.id
        LEFT JOIN question_progress qp ON qp.candidate_id = c.id

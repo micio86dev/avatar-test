@@ -1,16 +1,23 @@
 ---
 import { getAllCandidates } from '../../lib/db';
+import { rates } from '../../lib/pricing';
+import { t, formatDateTime } from '../../lib/i18n';
 
 export const prerender = false;
 
 const candidates = getAllCandidates();
 
-function fmt(iso: string | null): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime())
-    ? iso
-    : d.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+function calcCost(heygenMin: number, tavusMin: number): number {
+  const heygenUsd = heygenMin * rates.heygenCreditsPerMin * rates.heygenUsdPerCredit;
+  const tavusUsd = tavusMin > 0
+    ? Math.max(0.5, Math.ceil(tavusMin * 600) / 600) * rates.tavusUsdPerMin
+    : 0;
+  return heygenUsd + tavusUsd;
+}
+
+function formatProviders(raw: string | null): string[] {
+  if (!raw) return [];
+  return [...new Set(raw.split(','))];
 }
 ---
 
@@ -19,26 +26,27 @@ function fmt(iso: string | null): string {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Archivio Interviste</title>
+    <title>{t('admin.list.title')}</title>
   </head>
   <body>
     <main>
       <header>
-        <h1>Archivio Interviste</h1>
-        <a href="/" class="back">← Home</a>
+        <h1>{t('admin.list.title')}</h1>
+        <a href="/" class="back">{t('nav.back_home')}</a>
       </header>
 
-      {candidates.length === 0 && <p class="empty">Nessuna intervista registrata.</p>}
+      {candidates.length === 0 && <p class="empty">{t('admin.list.empty')}</p>}
 
       {candidates.length > 0 && (
         <table>
           <thead>
             <tr>
-              <th>Candidato</th>
-              <th>Codice</th>
-              <th>Progresso</th>
-              <th>Sessioni</th>
-              <th>Ultima attività</th>
+              <th>{t('admin.list.col.candidate')}</th>
+              <th>{t('admin.list.col.code')}</th>
+              <th>{t('admin.list.col.progress')}</th>
+              <th>{t('admin.list.col.provider')}</th>
+              <th>{t('admin.list.col.cost')}</th>
+              <th>{t('admin.list.col.last_activity')}</th>
               <th></th>
             </tr>
           </thead>
@@ -48,6 +56,9 @@ function fmt(iso: string | null): string {
               const total = Number(c.total_questions);
               const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
               const done = completed === total && total > 0;
+              const providers = formatProviders(c.providers_used);
+              const costUsd = calcCost(Number(c.total_heygen_min), Number(c.total_tavus_min));
+              const heygenCredits = Number(c.total_heygen_min) * rates.heygenCreditsPerMin;
               return (
                 <tr>
                   <td class="name">{c.display_name ?? '—'}</td>
@@ -58,10 +69,30 @@ function fmt(iso: string | null): string {
                     </div>
                     <span class={`prog-label ${done ? 'done' : ''}`}>{completed}/{total}</span>
                   </td>
-                  <td class="num">{c.session_count}</td>
-                  <td class="date">{fmt(c.last_activity)}</td>
+                  <td class="providers">
+                    {providers.map((p) => (
+                      <span class={`badge-prov badge-${p}`}>{p}</span>
+                    ))}
+                    {providers.length === 0 && <span class="no-prov">—</span>}
+                  </td>
+                  <td class="cost-col">
+                    {costUsd > 0 ? (
+                      <span class="cost-val">
+                        ${costUsd.toFixed(2)}
+                        {heygenCredits > 0 && (
+                          <span class="cost-detail"> · {Math.round(heygenCredits)} cr HeyGen</span>
+                        )}
+                        {Number(c.total_tavus_min) > 0 && (
+                          <span class="cost-detail"> · {Number(c.total_tavus_min).toFixed(1)}m Tavus</span>
+                        )}
+                      </span>
+                    ) : (
+                      <span class="no-prov">—</span>
+                    )}
+                  </td>
+                  <td class="date">{formatDateTime(c.last_activity)}</td>
                   <td class="action">
-                    <a href={`/admin/${c.resume_code}`} class="btn-detail">Dettaglio →</a>
+                    <a href={`/admin/${c.resume_code}`} class="btn-detail">{t('admin.list.action.detail')}</a>
                   </td>
                 </tr>
               );
@@ -79,7 +110,7 @@ function fmt(iso: string | null): string {
         font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
       }
       main {
-        max-width: 900px;
+        max-width: 1000px;
         margin: 0 auto;
         padding: 32px 20px 64px;
       }
@@ -148,7 +179,6 @@ function fmt(iso: string | null): string {
         height: 100%;
         background: #10b981;
         border-radius: 3px;
-        transition: width 0.3s;
       }
       .prog-label {
         color: #9aa0aa;
@@ -157,7 +187,33 @@ function fmt(iso: string | null): string {
         font-variant-numeric: tabular-nums;
       }
       .prog-label.done { color: #10b981; }
-      .num { color: #9aa0aa; text-align: center; }
+      .providers {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .badge-prov {
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 0.68rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .badge-heygen { background: #10b981; color: #04150f; }
+      .badge-tavus  { background: #818cf8; color: #0d0e24; }
+      .no-prov { color: #4b5563; }
+      .cost-col { white-space: nowrap; }
+      .cost-val {
+        color: #a7f3d0;
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+      }
+      .cost-detail {
+        color: #6b7280;
+        font-weight: 400;
+        font-size: 0.8em;
+      }
       .date { color: #6b7280; font-size: 0.82rem; white-space: nowrap; }
       .action { text-align: right; }
       .btn-detail {

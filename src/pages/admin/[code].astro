@@ -12,6 +12,7 @@ import {
 import { questions } from '../../lib/prompt';
 import { rates } from '../../lib/pricing';
 import { INTEGRITY_LABELS, type IntegrityType } from '../../lib/proctor-config';
+import { t, formatDateTime, formatTime, type I18nKey } from '../../lib/i18n';
 
 export const prerender = false;
 
@@ -91,26 +92,6 @@ const totalIntegrityEvents = questionDetails.reduce(
   0,
 );
 
-const BAND_LABEL: Record<string, string> = { low: 'basso', medium: 'medio', high: 'alto' };
-const STATUS_LABEL: Record<string, string> = {
-  pending: 'In attesa',
-  completed: 'Completata',
-  timeout: 'Timeout',
-  skipped: 'Saltata',
-};
-
-function fmtTime(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? (iso ?? '—') : d.toLocaleTimeString('it-IT');
-}
-function fmtDate(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime())
-    ? (iso ?? '—')
-    : d.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
 function fmtMeta(type: string, metaJson: string | null): string {
   if (!metaJson) return '';
   let meta: Record<string, unknown> = {};
@@ -136,38 +117,39 @@ function fmtMeta(type: string, metaJson: string | null): string {
       <!-- ── CANDIDATE HEADER ─────────────────────────────────────────────────── -->
       <header class="cand-header">
         <div class="cand-nav">
-          <a href="/admin" class="back">← Archivio</a>
+          <a href="/admin" class="back">{t('nav.back_archive')}</a>
         </div>
         <div class="cand-info">
-          <h1>{candidate.display_name ?? 'Candidato senza nome'}</h1>
+          <h1>{candidate.display_name ?? t('admin.detail.unnamed')}</h1>
           <span class="resume-code">{candidate.resume_code}</span>
         </div>
         <div class="cand-stats">
           <div class="stat">
-            <span class="stat-label">Domande</span>
+            <span class="stat-label">{t('admin.detail.stat.questions')}</span>
             <span class="stat-val">{progress.filter((p) => p.status === 'completed').length}/{progress.length}</span>
           </div>
           <div class="stat">
-            <span class="stat-label">Durata totale</span>
-            <span class="stat-val">{totalDurationMin.toFixed(1)} min</span>
+            <span class="stat-label">{t('admin.detail.stat.total_duration')}</span>
+            <span class="stat-val">{totalDurationMin.toFixed(1)} {t('session.min')}</span>
           </div>
           <div class="stat">
-            <span class="stat-label">Costo totale</span>
+            <span class="stat-label">{t('admin.detail.stat.total_cost')}</span>
             <span class="stat-val cost">${totalCostUsd.toFixed(2)}</span>
           </div>
           <div class="stat">
-            <span class="stat-label">Segnali integrità</span>
+            <span class="stat-label">{t('admin.detail.stat.integrity')}</span>
             <span class="stat-val">{totalIntegrityEvents}</span>
           </div>
           <div class="stat">
-            <span class="stat-label">Registrato</span>
-            <span class="stat-val">{fmtDate(candidate.created_at)}</span>
+            <span class="stat-label">{t('admin.detail.stat.registered')}</span>
+            <span class="stat-val">{formatDateTime(candidate.created_at)}</span>
           </div>
         </div>
       </header>
 
       <!-- ── PER-QUESTION SECTIONS ───────────────────────────────────────────── -->
       {questionDetails.map(({ p, session, utterances, integrityEvents, integrity, snapshots, question, durationMin, cost, providerMeta }) => {
+        const tz = session?.timezone ?? null;
         const tavusMeta = providerMeta?.provider === 'tavus' ? providerMeta : null;
         const heygenMeta = providerMeta?.provider === 'heygen' ? providerMeta : null;
         const heygenActualCredits = heygenMeta?.credits_consumed ?? null;
@@ -181,7 +163,9 @@ function fmtMeta(type: string, metaJson: string | null): string {
               <span class="q-num">D{p.question_index + 1}</span>
               <span class="q-text">{question?.text ?? `Domanda ${p.question_index + 1}`}</span>
             </div>
-            <span class={`status-badge status-${p.status}`}>{STATUS_LABEL[p.status] ?? p.status}</span>
+            <span class={`status-badge status-${p.status}`}>
+              {t(`status.${p.status}` as I18nKey)}
+            </span>
           </div>
 
           {/* Session meta */}
@@ -189,20 +173,18 @@ function fmtMeta(type: string, metaJson: string | null): string {
             <div class="session-meta">
               <span class="badge-provider">{session.provider}</span>
               {session.question_id && <span class="meta-chip">ID: {session.question_id}</span>}
-              <span class="meta-chip">Sessione #{session.id}</span>
-              <span class="meta-chip">Iniziata {fmtDate(session.started_at)}</span>
-              {session.ended_at && <span class="meta-chip">Terminata {fmtTime(session.ended_at)}</span>}
+              <span class="meta-chip">{t('session.id_prefix')}{session.id}</span>
+              <span class="meta-chip">{t('session.started')} {formatDateTime(session.started_at, tz)}</span>
+              {session.ended_at && <span class="meta-chip">{t('session.ended')} {formatTime(session.ended_at, tz)}</span>}
               {session.ended_at && (
                 <span class="meta-chip cost">
                   {heygenActualDurationMin != null
-                    ? `${heygenActualDurationMin.toFixed(1)} min (effettivo)`
-                    : tavusMeta?.shutdown_reason
-                      ? durationMin.toFixed(1) + ' min'
-                      : durationMin.toFixed(1) + ' min'}
+                    ? `${heygenActualDurationMin.toFixed(1)} ${t('session.min')} (${t('session.actual_duration')})`
+                    : `${durationMin.toFixed(1)} ${t('session.min')}`}
                   {' · '}
                   {heygenActualCostUsd != null
-                    ? `$${heygenActualCostUsd.toFixed(2)} (${heygenActualCredits} crediti effettivi)`
-                    : `$${cost.usd.toFixed(2)} (stimato)`}
+                    ? `$${heygenActualCostUsd.toFixed(2)} (${heygenActualCredits} ${t('session.credits')})`
+                    : `$${cost.usd.toFixed(2)} (${t('session.estimated')})`}
                 </span>
               )}
               {(tavusMeta?.shutdown_reason ?? session.ended_reason) && (
@@ -212,30 +194,31 @@ function fmtMeta(type: string, metaJson: string | null): string {
                 <button
                   class="btn-refresh"
                   data-session-id={String(session.id)}
+                  data-loading-text={t('provider.loading')}
                 >
-                  {providerMeta ? '↻ Aggiorna dati' : '↻ Carica dati provider'}
+                  {providerMeta ? t('provider.refresh') : t('provider.load')}
                 </button>
               )}
             </div>
           )}
           {!session && p.status === 'pending' && (
-            <p class="no-session">Nessuna sessione avviata per questa domanda.</p>
+            <p class="no-session">{t('session.no_session')}</p>
           )}
 
           {/* ── Provider AI data (Tavus / HeyGen actual) ── */}
           {tavusMeta && (
             <div class="provider-block">
               <div class="provider-head">
-                <span class="provider-title">Dati Tavus</span>
+                <span class="provider-title">{t('provider.tavus.title')}</span>
                 {tavusMeta.fetched_at && (
-                  <span class="provider-fetched">aggiornato {fmtTime(tavusMeta.fetched_at)}</span>
+                  <span class="provider-fetched">{t('provider.updated')} {formatTime(tavusMeta.fetched_at, tz)}</span>
                 )}
               </div>
 
               {/* Perception analysis — AI visual report */}
               {tavusMeta.perception_analysis && (
                 <div class="perception">
-                  <span class="perception-label">Analisi visuale AI (Tavus Raven)</span>
+                  <span class="perception-label">{t('provider.tavus.perception_label')}</span>
                   <div class="perception-text">
                     {tavusMeta.perception_analysis.split('\n\n').map((para) => (
                       <p>{para}</p>
@@ -247,11 +230,11 @@ function fmtMeta(type: string, metaJson: string | null): string {
               {/* Recording link */}
               {tavusMeta.recording?.storage_uri && (
                 <div class="recording-row">
-                  <span class="recording-label">Registrazione</span>
+                  <span class="recording-label">{t('provider.tavus.recording')}</span>
                   <code class="recording-uri">{tavusMeta.recording.storage_uri}</code>
                   {tavusMeta.recording.duration && (
                     <span class="recording-dur">
-                      {(tavusMeta.recording.duration / 60_000).toFixed(1)} min
+                      {(tavusMeta.recording.duration / 60_000).toFixed(1)} {t('session.min')}
                     </span>
                   )}
                 </div>
@@ -260,18 +243,18 @@ function fmtMeta(type: string, metaJson: string | null): string {
               {/* Tavus detailed transcript (with timing) */}
               {tavusMeta.tavus_transcript && tavusMeta.tavus_transcript.length > 0 && (
                 <details class="tavus-transcript">
-                  <summary>Trascrizione Tavus con timing ({tavusMeta.tavus_transcript.length} turni)</summary>
+                  <summary>{t('provider.tavus.transcript')} ({tavusMeta.tavus_transcript.length} {t('transcript.turns')})</summary>
                   <ol class="t-transcript">
-                    {tavusMeta.tavus_transcript.map((t) => (
-                      <li class={`t-turn t-${t.role}`}>
+                    {tavusMeta.tavus_transcript.map((turn) => (
+                      <li class={`t-turn t-${turn.role}`}>
                         <span class="t-who">
-                          {t.role === 'assistant' ? 'Alessandra' : t.role === 'user' ? 'Candidato' : t.role}
+                          {turn.role === 'assistant' ? t('speaker.avatar') : turn.role === 'user' ? t('speaker.candidate') : turn.role}
                           <span class="t-timing">
-                            +{t.seconds_from_start.toFixed(1)}s
-                            {t.duration > 0 && ` · ${t.duration.toFixed(1)}s`}
+                            +{turn.seconds_from_start.toFixed(1)}s
+                            {turn.duration > 0 && ` · ${turn.duration.toFixed(1)}s`}
                           </span>
                         </span>
-                        <span class="t-text">{t.content}</span>
+                        <span class="t-text">{turn.content}</span>
                       </li>
                     ))}
                   </ol>
@@ -283,39 +266,39 @@ function fmtMeta(type: string, metaJson: string | null): string {
           {heygenMeta && (heygenMeta.credits_consumed != null || heygenMeta.end_reason) && (
             <div class="provider-block">
               <div class="provider-head">
-                <span class="provider-title">Dati HeyGen (effettivi)</span>
+                <span class="provider-title">{t('provider.heygen.title')}</span>
                 {heygenMeta.fetched_at && (
-                  <span class="provider-fetched">aggiornato {fmtTime(heygenMeta.fetched_at)}</span>
+                  <span class="provider-fetched">{t('provider.updated')} {formatTime(heygenMeta.fetched_at, tz)}</span>
                 )}
               </div>
               <div class="heygen-stats">
                 {heygenMeta.credits_consumed != null && (
                   <div class="hg-stat">
-                    <span class="hg-label">Crediti consumati</span>
+                    <span class="hg-label">{t('provider.heygen.credits')}</span>
                     <span class="hg-val">{heygenMeta.credits_consumed}</span>
                   </div>
                 )}
                 {heygenMeta.duration_sec != null && (
                   <div class="hg-stat">
-                    <span class="hg-label">Durata effettiva</span>
-                    <span class="hg-val">{(heygenMeta.duration_sec / 60).toFixed(1)} min</span>
+                    <span class="hg-label">{t('provider.heygen.duration')}</span>
+                    <span class="hg-val">{(heygenMeta.duration_sec / 60).toFixed(1)} {t('session.min')}</span>
                   </div>
                 )}
                 {heygenActualCostUsd != null && (
                   <div class="hg-stat">
-                    <span class="hg-label">Costo effettivo</span>
+                    <span class="hg-label">{t('provider.heygen.cost')}</span>
                     <span class="hg-val cost">${heygenActualCostUsd.toFixed(2)}</span>
                   </div>
                 )}
                 {heygenMeta.end_reason && (
                   <div class="hg-stat">
-                    <span class="hg-label">Fine sessione</span>
+                    <span class="hg-label">{t('provider.heygen.end_reason')}</span>
                     <span class="hg-val">{heygenMeta.end_reason}</span>
                   </div>
                 )}
                 {heygenMeta.mode && (
                   <div class="hg-stat">
-                    <span class="hg-label">Modalità</span>
+                    <span class="hg-label">{t('provider.heygen.mode')}</span>
                     <span class="hg-val">{heygenMeta.mode}</span>
                   </div>
                 )}
@@ -325,8 +308,9 @@ function fmtMeta(type: string, metaJson: string | null): string {
 
           {session && !providerMeta && session.provider_session_id && (
             <p class="no-provider-data">
-              Dati provider non ancora disponibili.
-              Usa "Carica dati provider" per recuperarli.
+              {t('provider.no_data')}
+              {' '}
+              {t('provider.no_data_hint')}
             </p>
           )}
 
@@ -334,9 +318,9 @@ function fmtMeta(type: string, metaJson: string | null): string {
           {integrity && integrity.total > 0 && (
             <div class="integrity-block">
               <div class="integrity-head">
-                <span class="int-title">Integrità</span>
+                <span class="int-title">{t('integrity.title')}</span>
                 <span class={`band band-${integrity.band}`}>
-                  rischio {BAND_LABEL[integrity.band]} · {integrity.score}
+                  {t('integrity.risk')} {t(`integrity.band.${integrity.band}` as I18nKey)} · {integrity.score}
                 </span>
               </div>
               <ol class="events">
@@ -344,20 +328,20 @@ function fmtMeta(type: string, metaJson: string | null): string {
                   <li class="event">
                     <span class="ev-label">{INTEGRITY_LABELS[e.type as IntegrityType] ?? e.type}</span>
                     <span class="ev-detail">{fmtMeta(e.type, e.meta)}</span>
-                    <span class="ev-time">{fmtTime(e.ts)}</span>
+                    <span class="ev-time">{formatTime(e.ts, tz)}</span>
                   </li>
                 ))}
               </ol>
             </div>
           )}
           {integrity && integrity.total === 0 && session && (
-            <p class="int-clean">✓ Nessun segnale di integrità registrato</p>
+            <p class="int-clean">{t('integrity.clean')}</p>
           )}
 
           {/* Answer summary */}
           {p.answer_summary && (
             <div class="answer-summary">
-              <span class="as-label">Sintesi risposta</span>
+              <span class="as-label">{t('answer.summary.title')}</span>
               <p class="as-text">{p.answer_summary}</p>
             </div>
           )}
@@ -366,10 +350,10 @@ function fmtMeta(type: string, metaJson: string | null): string {
           {snapshots.length > 0 && (
             <div class="snapshots">
               <p class="snap-label">
-                Snapshot webcam ({snapshots.length})
+                {t('snapshots.title')} ({snapshots.length})
                 <span class="snap-legend">
-                  <span class="snap-dot snap-dot-event"></span>su evento
-                  <span class="snap-dot snap-dot-periodic"></span>periodico
+                  <span class="snap-dot snap-dot-event"></span>{t('snapshots.legend.event')}
+                  <span class="snap-dot snap-dot-periodic"></span>{t('snapshots.legend.periodic')}
                 </span>
               </p>
               <div class="snap-grid">
@@ -378,7 +362,7 @@ function fmtMeta(type: string, metaJson: string | null): string {
                     <div class="snap-img-wrap">
                       <img
                         src={`/api/snapshot/${s.path.replace(/^snapshots\//, '')}`}
-                        alt={`Snapshot ${fmtTime(s.ts)}${s.trigger ? ` [${s.trigger}]` : ''}`}
+                        alt={`Snapshot ${formatTime(s.ts, tz)}${s.trigger ? ` [${s.trigger}]` : ''}`}
                         class="snap-img"
                         loading="lazy"
                       />
@@ -388,7 +372,7 @@ function fmtMeta(type: string, metaJson: string | null): string {
                         </span>
                       )}
                     </div>
-                    <span class="snap-time">{fmtTime(s.ts)}</span>
+                    <span class="snap-time">{formatTime(s.ts, tz)}</span>
                   </div>
                 ))}
               </div>
@@ -398,13 +382,13 @@ function fmtMeta(type: string, metaJson: string | null): string {
           {/* Transcript */}
           {utterances.length > 0 && (
             <div class="transcript-block">
-              <p class="transcript-label">Trascrizione ({utterances.length} turni)</p>
+              <p class="transcript-label">{t('transcript.title')} ({utterances.length} {t('transcript.turns')})</p>
               <ol class="transcript">
                 {utterances.map((u) => (
                   <li class={`turn ${u.role}`}>
                     <span class="who">
-                      {u.role === 'avatar' ? 'Alessandra' : 'Candidato'}
-                      <span class="turn-time">{fmtTime(u.created_at)}</span>
+                      {u.role === 'avatar' ? t('speaker.avatar') : t('speaker.candidate')}
+                      <span class="turn-time">{formatTime(u.created_at, tz)}</span>
                     </span>
                     <span class="text">{u.text}</span>
                   </li>
@@ -413,7 +397,7 @@ function fmtMeta(type: string, metaJson: string | null): string {
             </div>
           )}
           {session && utterances.length === 0 && (
-            <p class="no-session">Nessuna trascrizione disponibile.</p>
+            <p class="no-session">{t('transcript.empty')}</p>
           )}
         </section>
         );
@@ -961,7 +945,7 @@ function fmtMeta(type: string, metaJson: string | null): string {
         if (!sessionId) return;
         btn.disabled = true;
         const original = btn.textContent ?? '';
-        btn.textContent = 'Caricamento…';
+        btn.textContent = btn.dataset.loadingText ?? '…';
         fetch('/api/interview/provider-refresh', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
