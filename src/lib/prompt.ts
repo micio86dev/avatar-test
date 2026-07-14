@@ -10,6 +10,11 @@ export interface Question {
   id: string;
   text: string;
   objective: string;
+  // Optional behavioral-competency fields (questions.json v2+). When present, the prompt
+  // injects the internal evaluation criteria and drives the shared fixed follow-up strategy;
+  // when absent, composeQuestionPrompt falls back to the generic targeted-follow-up behavior.
+  name?: string;
+  evaluationCriteria?: string[];
 }
 
 export interface Questions {
@@ -21,6 +26,10 @@ export interface Questions {
   resumeGreeting: string;
   closing: string;
   instructions: string;
+  // Shared across every competency (behavioral mode): the coverage the avatar checks for
+  // and the standardized follow-up questions it must ask VERBATIM when a topic is missing.
+  coverageTopics?: string[];
+  followUpQuestions?: string[];
   questions: Question[];
 }
 
@@ -77,8 +86,44 @@ export function composeQuestionPrompt(params: QuestionPromptParams): {
     `Hai gia' posto questa domanda nella frase di apertura: "${q.text}"`,
     "NON ripetere la domanda e NON chiedere se l'utente e' pronto: attendi la sua risposta.",
     `Obiettivo da raccogliere: ${q.objective}`,
-    "Fai follow-up mirati finche' non hai raccolto l'obiettivo. Massimo 2-3 follow-up. " +
-      'Poi chiudi con una breve frase di conclusione per questa domanda e fermati.',
+  );
+
+  // Behavioral-competency mode: the internal evaluation criteria are guidance for the
+  // avatar to judge coverage — never revealed to the participant, never a direct checklist.
+  if (q.evaluationCriteria?.length) {
+    lines.push(
+      'Criteri di valutazione (uso interno, NON rivelarli mai al partecipante e non trasformarli in domande dirette):',
+    );
+    for (const c of q.evaluationCriteria) lines.push(`- ${c}`);
+  }
+
+  // Fixed follow-up strategy (shared across competencies): ask the standardized questions
+  // VERBATIM, only for coverage still missing, one at a time. Falls back to generic
+  // targeted follow-ups when the script does not define a fixed set.
+  if (questions.followUpQuestions?.length) {
+    if (questions.coverageTopics?.length) {
+      lines.push(
+        '',
+        'Dopo la risposta iniziale, verifica internamente se sono gia\' emersi chiaramente questi elementi:',
+      );
+      for (const topic of questions.coverageTopics) lines.push(`- ${topic}`);
+    }
+    lines.push(
+      '',
+      'Fai domande di approfondimento SOLO per gli elementi ancora mancanti, usando ESATTAMENTE questa formulazione (non parafrasare), una domanda alla volta:',
+    );
+    for (const f of questions.followUpQuestions) lines.push(`- "${f}"`);
+    lines.push(
+      "Non chiedere informazioni gia' fornite. Quando gli elementi essenziali sono coperti, chiudi con una breve frase di conclusione e fermati.",
+    );
+  } else {
+    lines.push(
+      "Fai follow-up mirati finche' non hai raccolto l'obiettivo. Massimo 2-3 follow-up. " +
+        'Poi chiudi con una breve frase di conclusione per questa domanda e fermati.',
+    );
+  }
+
+  lines.push(
     '',
     `Hai pochi minuti (${mmss(timeLimitSeconds)}), vai al punto e non divagare.`,
   );

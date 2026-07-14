@@ -1,4 +1,37 @@
-# Interview Demo — HeyGen + Tavus (local only)
+# BEAI — Business Evaluation AI
+
+**BEAI** is a multi-tenant platform for **soft-skill assessment via automated AI voice
+interview**. A candidate enters through SSO/magic-link, takes an adaptive spoken interview
+with a synthetic voice, and an asynchronous job produces a **BARS** competency evaluation
+that is pushed to the calling HR system via webhook.
+
+- **Domain source of truth (binding):** [`docs/app_description/`](docs/app_description/)
+  and [`docs/BEAI_BRIEF.md`](docs/BEAI_BRIEF.md).
+- **Project rules & constraints:** [`CLAUDE.md`](CLAUDE.md).
+- **How we work:** Spec-Driven Development (SDD) **+** Test-Driven Development (TDD),
+  coverage target 85%, Git Flow (`main`/`develop` + `feature`/`release`/`hotfix`).
+
+### Target stack
+This repo is a **wrapper superproject** with three git submodules:
+- **`api`** — Laravel 12 + Eloquent + MySQL 8 + Redis (Horizon), **API-only**; **Scramble**
+  publishes the OpenAPI spec. Stateless, scalable to thousands of concurrent candidates.
+- **`frontend`** — Nuxt 4 (Vue 3) **SSR** + `@nuxtjs/i18n`: the candidate interview app
+  (ports the avatar/proctoring logic below).
+- **`backoffice`** — Nuxt 4 (Vue 3) **SPA** + `@nuxtjs/i18n`: the admin panel (separate app).
+
+Both Nuxt apps **codegen a typed client from the API's OpenAPI**. Auth: Sanctum (SPA cookies
+for the backoffice + token abilities for external API + signed candidate magic-link). Tests:
+Pest (`api`) + Vitest/Vue Test Utils + Playwright. Deploy: Railway, three services, on request.
+
+The build is greenfield (no legacy backward compatibility). The SDD roadmap slices it into
+13 vertical changes (C1→C13). See [`openspec/ROADMAP.md`](openspec/ROADMAP.md).
+
+---
+
+## Reference: current avatar demo (Astro, local only)
+
+> The section below documents the **existing demo** — the product kernel and the reference
+> for the Nuxt port (C7). It is not the final architecture.
 
 A single-page Astro app that runs the SAME Italian HR-style interview through **two
 interchangeable providers**. You pick HeyGen **or** Tavus before starting; the avatar
@@ -16,7 +49,7 @@ Both providers use **their own default LLM** ("their brain"); the interview scri
 (`questions.json`) is injected as per-question context. All code, identifiers, comments
 and UI labels are English — only the avatar's spoken content and the questions are Italian.
 
-## Architecture
+## Architecture (demo)
 
 - **Provider abstraction** (`src/providers/types.ts`): one `InterviewProvider`
   interface both implementations satisfy, so the UI and persistence are
