@@ -1,4 +1,33 @@
-# Interview Demo — HeyGen + Tavus (local only)
+# BEAI — Business Evaluation AI
+
+**BEAI** is a multi-tenant platform for **soft-skill assessment via automated AI voice
+interview**. A candidate enters through SSO/magic-link, takes an adaptive spoken interview
+with a synthetic voice, and an asynchronous job produces a **BARS** competency evaluation
+that is pushed to the calling HR system via webhook.
+
+- **Domain source of truth (binding):** [`docs/app_description/`](docs/app_description/)
+  and [`docs/BEAI_BRIEF.md`](docs/BEAI_BRIEF.md).
+- **Project rules & constraints:** [`CLAUDE.md`](CLAUDE.md).
+- **How we work:** Spec-Driven Development (SDD) **+** Test-Driven Development (TDD),
+  coverage target 85%, Git Flow (`main`/`develop` + `feature`/`release`/`hotfix`).
+
+### Target stack
+- **Backend:** Laravel 12 + Eloquent + MySQL 8 + Redis (Horizon) — API-first, stateless,
+  scalable to thousands of concurrent candidates.
+- **Frontend:** Nuxt 4 (Vue 3) + `@nuxtjs/i18n` — ports the avatar/proctoring logic below.
+- **Auth:** Sanctum (SPA cookies + token abilities + signed candidate magic-link).
+- **Tests:** Pest (backend) + Vitest/Vue Test Utils + Playwright (E2E).
+- **Deploy:** Railway (only on explicit request).
+
+The build is greenfield (no legacy backward compatibility). The SDD roadmap slices it into
+13 vertical changes (C1→C13). See the SDD store for the backlog.
+
+---
+
+## Reference: current avatar demo (Astro, local only)
+
+> The section below documents the **existing demo** — the product kernel and the reference
+> for the Nuxt port (C7). It is not the final architecture.
 
 A single-page Astro app that runs the SAME Italian HR-style interview through **two
 interchangeable providers**. You pick HeyGen **or** Tavus before starting; the avatar
@@ -16,7 +45,7 @@ Both providers use **their own default LLM** ("their brain"); the interview scri
 (`questions.json`) is injected as per-question context. All code, identifiers, comments
 and UI labels are English — only the avatar's spoken content and the questions are Italian.
 
-## Architecture
+## Architecture (demo)
 
 - **Provider abstraction** (`src/providers/types.ts`): one `InterviewProvider`
   interface both implementations satisfy, so the UI and persistence are
