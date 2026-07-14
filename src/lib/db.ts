@@ -162,6 +162,7 @@ function getDb(): Database.Database {
       session_id INTEGER NOT NULL,
       path TEXT NOT NULL,
       ts TEXT NOT NULL,
+      trigger TEXT,
       created_at TEXT NOT NULL,
       FOREIGN KEY (session_id) REFERENCES sessions(id)
     );
@@ -174,6 +175,7 @@ function getDb(): Database.Database {
   ensureColumn(conn, 'sessions', 'question_index', 'question_index INTEGER');
   ensureColumn(conn, 'sessions', 'ended_reason', 'ended_reason TEXT');
   ensureColumn(conn, 'sessions', 'provider_meta', 'provider_meta TEXT');
+  ensureColumn(conn, 'webcam_snapshots', 'trigger', 'trigger TEXT');
 
   db = conn;
   return conn;
@@ -390,14 +392,22 @@ export interface SnapshotRow {
   session_id: number;
   path: string;
   ts: string;
+  trigger: string | null; // null = periodic; otherwise the IntegrityType that triggered it
   created_at: string;
 }
 
-export function insertSnapshot(sessionId: number, path: string, ts: string): void {
+export function insertSnapshot(
+  sessionId: number,
+  path: string,
+  ts: string,
+  trigger: string | null = null,
+): void {
   const now = new Date().toISOString();
   getDb()
-    .prepare(`INSERT INTO webcam_snapshots (session_id, path, ts, created_at) VALUES (?, ?, ?, ?)`)
-    .run(sessionId, path, ts, now);
+    .prepare(
+      `INSERT INTO webcam_snapshots (session_id, path, ts, trigger, created_at) VALUES (?, ?, ?, ?, ?)`,
+    )
+    .run(sessionId, path, ts, trigger, now);
 }
 
 export function getSnapshots(sessionId: number): SnapshotRow[] {

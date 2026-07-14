@@ -126,6 +126,9 @@ function push(type: IntegrityType, meta?: Record<string, unknown>): void {
   if (violationCb && VIOLATION_CB_TYPES.has(type)) {
     violationCb(type, INTEGRITY_LABELS[type]);
   }
+  if (SNAPSHOT_ON_EVENT_TYPES.has(type)) {
+    void takeSnapshot(type); // capture visual evidence at the moment of the event
+  }
 }
 
 // Close an open episode and, if it lasted at least `minMs`, emit an event with its duration.
@@ -148,8 +151,19 @@ function onFullscreenChange(): void {
 function onCopy(): void { if (active) push('clipboard_copy'); }
 function onPaste(): void { if (active) push('clipboard_paste'); }
 
-// ── Periodic webcam snapshot ─────────────────────────────────────────────────────
-async function takeSnapshot(): Promise<void> {
+// ── Webcam snapshot (periodic + event-triggered) ─────────────────────────────────
+// Types that cause an immediate snapshot on top of the periodic stream.
+const SNAPSHOT_ON_EVENT_TYPES = new Set<IntegrityType>([
+  'face_absent',
+  'multiple_faces',
+  'looking_away',
+  'looking_down',
+  'too_far',
+  'phone_detected',
+  'second_voice',
+]);
+
+async function takeSnapshot(trigger?: string): Promise<void> {
   if (!selfView || selfView.readyState < 2 || sessionId == null) return;
   const canvas = document.createElement('canvas');
   canvas.width = selfView.videoWidth || 320;
@@ -162,7 +176,7 @@ async function takeSnapshot(): Promise<void> {
     await fetch('/api/interview/snapshot', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId, image: jpeg, ts: new Date().toISOString() }),
+      body: JSON.stringify({ sessionId, image: jpeg, ts: new Date().toISOString(), trigger: trigger ?? null }),
       keepalive: true,
     });
   } catch { /* best-effort */ }

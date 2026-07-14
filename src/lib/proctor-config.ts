@@ -74,7 +74,7 @@ export const PHONE_SAMPLE_MS = 2_000;     // run object detection every 2s (CPU-
 export const PHONE_DETECTED_MS = 3_000;  // phone visible this long → phone_detected event
 export const PHONE_SCORE_THRESHOLD = 0.5; // min confidence to count as "cell phone"
 
-export const SNAPSHOT_INTERVAL_MS = 60_000;
+export const SNAPSHOT_INTERVAL_MS = 10_000; // periodic webcam capture — one frame every 10s
 export const VOICE_RMS_THRESHOLD = 0.04; // mic RMS above this = voice activity
 export const SECOND_VOICE_MS = 2_000; // sustained audio this long while avatar speaks → flag
 

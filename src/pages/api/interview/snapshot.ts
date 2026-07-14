@@ -11,7 +11,7 @@ const SNAPSHOTS_DIR = process.env.SNAPSHOTS_PATH
 
 export const POST: APIRoute = async ({ request }) => {
   const body = (await request.json().catch(() => null)) as
-    | { sessionId?: unknown; image?: unknown; ts?: unknown }
+    | { sessionId?: unknown; image?: unknown; ts?: unknown; trigger?: unknown }
     | null;
 
   const sessionId = Number(body?.sessionId);
@@ -21,8 +21,10 @@ export const POST: APIRoute = async ({ request }) => {
   if (!image || !image.startsWith('data:image/jpeg;base64,')) return json(400, { error: 'Invalid image.' });
 
   const ts = typeof body?.ts === 'string' ? body.ts : new Date().toISOString();
-  // Sanitize ts for use as filename: replace colons and dots.
-  const safeName = ts.replace(/[:.]/g, '-') + '.jpg';
+  const trigger = typeof body?.trigger === 'string' ? body.trigger : null;
+
+  // Include trigger slug in filename so event-triggered snapshots are identifiable on disk.
+  const safeName = ts.replace(/[:.]/g, '-') + (trigger ? `_${trigger}` : '') + '.jpg';
   const dir = resolve(SNAPSHOTS_DIR, String(sessionId));
   const filePath = resolve(dir, safeName);
   const relativePath = `snapshots/${sessionId}/${safeName}`;
@@ -31,8 +33,8 @@ export const POST: APIRoute = async ({ request }) => {
     mkdirSync(dir, { recursive: true });
     const base64Data = image.slice('data:image/jpeg;base64,'.length);
     writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
-    insertSnapshot(sessionId, relativePath, ts);
-  } catch (err) {
+    insertSnapshot(sessionId, relativePath, ts, trigger);
+  } catch {
     return json(500, { error: 'Failed to save snapshot.' });
   }
 

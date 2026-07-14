@@ -365,16 +365,29 @@ function fmtMeta(type: string, metaJson: string | null): string {
           {/* Snapshots */}
           {snapshots.length > 0 && (
             <div class="snapshots">
-              <p class="snap-label">Snapshot webcam ({snapshots.length})</p>
+              <p class="snap-label">
+                Snapshot webcam ({snapshots.length})
+                <span class="snap-legend">
+                  <span class="snap-dot snap-dot-event"></span>su evento
+                  <span class="snap-dot snap-dot-periodic"></span>periodico
+                </span>
+              </p>
               <div class="snap-grid">
                 {snapshots.map((s) => (
-                  <div class="snap-item">
-                    <img
-                      src={`/api/snapshot/${s.path.replace(/^snapshots\//, '')}`}
-                      alt={`Snapshot ${fmtTime(s.ts)}`}
-                      class="snap-img"
-                      loading="lazy"
-                    />
+                  <div class={`snap-item ${s.trigger ? 'snap-triggered' : 'snap-periodic'}`}>
+                    <div class="snap-img-wrap">
+                      <img
+                        src={`/api/snapshot/${s.path.replace(/^snapshots\//, '')}`}
+                        alt={`Snapshot ${fmtTime(s.ts)}${s.trigger ? ` [${s.trigger}]` : ''}`}
+                        class="snap-img"
+                        loading="lazy"
+                      />
+                      {s.trigger && (
+                        <span class={`snap-event-badge snap-event-${s.trigger.replace(/_/g, '-')}`}>
+                          {INTEGRITY_LABELS[s.trigger as IntegrityType] ?? s.trigger}
+                        </span>
+                      )}
+                    </div>
                     <span class="snap-time">{fmtTime(s.ts)}</span>
                   </div>
                 ))}
@@ -637,6 +650,9 @@ function fmtMeta(type: string, metaJson: string | null): string {
         border-bottom: 1px solid #1c1e27;
       }
       .snap-label {
+        display: flex;
+        align-items: center;
+        gap: 12px;
         margin: 0 0 10px;
         font-size: 0.72rem;
         text-transform: uppercase;
@@ -644,6 +660,24 @@ function fmtMeta(type: string, metaJson: string | null): string {
         color: #6b7280;
         font-weight: 600;
       }
+      .snap-legend {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.7rem;
+        letter-spacing: 0;
+        text-transform: none;
+        color: #4b5563;
+        font-weight: 400;
+      }
+      .snap-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+      }
+      .snap-dot-event    { background: #ef4444; }
+      .snap-dot-periodic { background: #374151; }
       .snap-grid {
         display: flex;
         flex-wrap: wrap;
@@ -655,6 +689,10 @@ function fmtMeta(type: string, metaJson: string | null): string {
         align-items: center;
         gap: 4px;
       }
+      .snap-img-wrap {
+        position: relative;
+        display: inline-block;
+      }
       .snap-img {
         width: 160px;
         height: 90px;
@@ -662,12 +700,35 @@ function fmtMeta(type: string, metaJson: string | null): string {
         border-radius: 8px;
         background: #1c1e27;
         border: 1px solid #2a2c36;
+        display: block;
+      }
+      .snap-triggered .snap-img {
+        border-color: #7f1d1d;
+        box-shadow: 0 0 0 2px #ef444440;
+      }
+      .snap-event-badge {
+        position: absolute;
+        bottom: 4px;
+        left: 4px;
+        right: 4px;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 0.62rem;
+        font-weight: 700;
+        text-align: center;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        background: rgba(239, 68, 68, 0.85);
+        color: #fff;
+        backdrop-filter: blur(2px);
       }
       .snap-time {
         font-size: 0.72rem;
         color: #6b7280;
         font-variant-numeric: tabular-nums;
       }
+      .snap-triggered .snap-time { color: #f87171; }
 
       /* Transcript */
       .transcript-block {
