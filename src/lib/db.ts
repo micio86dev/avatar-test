@@ -28,6 +28,7 @@ export interface SessionRow {
   ended_reason: string | null;
   started_at: string;
   ended_at: string | null;
+  provider_meta: string | null; // JSON blob of post-session data fetched from provider API
 }
 
 export interface UtteranceRow {
@@ -114,7 +115,8 @@ function getDb(): Database.Database {
       question_index INTEGER,
       ended_reason TEXT,
       started_at TEXT NOT NULL,
-      ended_at TEXT
+      ended_at TEXT,
+      provider_meta TEXT
     );
     CREATE TABLE IF NOT EXISTS utterances (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -171,6 +173,7 @@ function getDb(): Database.Database {
   ensureColumn(conn, 'sessions', 'question_id', 'question_id TEXT');
   ensureColumn(conn, 'sessions', 'question_index', 'question_index INTEGER');
   ensureColumn(conn, 'sessions', 'ended_reason', 'ended_reason TEXT');
+  ensureColumn(conn, 'sessions', 'provider_meta', 'provider_meta TEXT');
 
   db = conn;
   return conn;
@@ -217,6 +220,12 @@ export function endSession(
        WHERE id = ?`,
     )
     .run(now, providerSessionId ?? null, endedReason ?? null, sessionId);
+}
+
+export function setProviderMeta(sessionId: number, meta: Record<string, unknown>): void {
+  getDb()
+    .prepare(`UPDATE sessions SET provider_meta = ? WHERE id = ?`)
+    .run(JSON.stringify(meta), sessionId);
 }
 
 export function getSession(sessionId: number): SessionRow | undefined {

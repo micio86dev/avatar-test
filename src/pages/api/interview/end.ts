@@ -7,6 +7,7 @@ import {
   getUtterances,
   setAnswerSummary,
   setProgressStatus,
+  setProviderMeta,
   type UtteranceInput,
   type UtteranceRow,
   type EndedReason,
@@ -100,6 +101,14 @@ export const POST: APIRoute = async ({ request }) => {
     }
   }
 
+  // Fire background provider-data fetches — non-blocking, response already prepared.
+  if (provider === 'tavus' && providerSessionId && TAVUS_API_KEY) {
+    void fetchTavusMeta(sessionId, providerSessionId, TAVUS_API_KEY);
+  }
+  if (provider === 'heygen' && providerSessionId && LIVEAVATAR_API_KEY) {
+    void fetchHeyGenMeta(sessionId, providerSessionId, LIVEAVATAR_API_KEY);
+  }
+
   return json(200, { ok: true, reconciled });
 };
 
@@ -108,4 +117,79 @@ function json(status: number, obj: unknown): Response {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+// ── Background provider-data fetchers (fire-and-forget, non-blocking) ──────────
+
+type PlainObj = Record<string, unknown>;
+
+export async function fetchTavusMeta(
+  dbSessionId: number,
+  conversationId: string,
+  apiKey: string,
+): Promise<void> {
+  // Small delay: Tavus processes perception analysis asynchronously after call ends.
+  await new Promise<void>((r) => setTimeout(r, 3_000));
+  try {
+    const res = await fetch(
+      `https://tavusapi.com/v2/conversations/${conversationId}?verbose=true`,
+      { headers: { 'x-api-key': apiKey } },
+    );
+    if (!res.ok) return;
+    const data = (await res.json().catch(() => null)) as PlainObj | null;
+    if (!data) return;
+
+    const events = Array.isArray(data.events) ? (data.events as PlainObj[]) : [];
+    const findEvent = (type: string) => events.find((e) => e.event_type === type);
+    const prop = (e: PlainObj | undefined, key: string) =>
+      e ? ((e.properties as PlainObj)?.[key] ?? null) : null;
+
+    const perceptionEvent = findEvent('application.perception_analysis');
+    const transcriptEvent = findEvent('application.transcription_ready');
+    const recordingEvent = findEvent('application.recording_ready');
+    const shutdownEvent = findEvent('system.shutdown');
+
+    setProviderMeta(dbSessionId, {
+      provider: 'tavus',
+      fetched_at: new Date().toISOString(),
+      conversation_id: conversationId,
+      status: data.status ?? null,
+      shutdown_reason:
+        data.shutdown_reason ?? prop(shutdownEvent, 'shutdown_reason') ?? null,
+      perception_analysis: prop(perceptionEvent, 'analysis'),
+      tavus_transcript: prop(transcriptEvent, 'transcript'),
+      recording: recordingEvent?.properties ?? null,
+    });
+  } catch {
+    /* best-effort */
+  }
+}
+
+export async function fetchHeyGenMeta(
+  dbSessionId: number,
+  sessionId: string,
+  apiKey: string,
+): Promise<void> {
+  try {
+    const res = await fetch(`https://api.liveavatar.com/v1/sessions/${sessionId}`, {
+      headers: { 'X-API-KEY': apiKey },
+    });
+    if (!res.ok) return;
+    const payload = (await res.json().catch(() => null)) as PlainObj | null;
+    const data = (payload?.data as PlainObj) ?? null;
+    if (!data) return;
+
+    setProviderMeta(dbSessionId, {
+      provider: 'heygen',
+      fetched_at: new Date().toISOString(),
+      session_id: sessionId,
+      duration_sec: data.duration ?? null,
+      credits_consumed: data.credits_consumed ?? null,
+      end_reason: data.end_reason ?? null,
+      mode: data.mode ?? null,
+      source: data.source ?? null,
+    });
+  } catch {
+    /* best-effort */
+  }
 }

@@ -33,6 +33,42 @@ function calcCost(session: SessionRow | null, durationMin: number) {
   return { usd: Math.max(0.5, Math.ceil(durationMin * 600) / 600) * rates.tavusUsdPerMin, credits: null };
 }
 
+type TavusMeta = {
+  provider: 'tavus';
+  fetched_at: string;
+  conversation_id: string;
+  status?: string;
+  shutdown_reason?: string;
+  perception_analysis?: string | null;
+  tavus_transcript?: Array<{
+    role: string;
+    content: string;
+    seconds_from_start: number;
+    duration: number;
+  }> | null;
+  recording?: { storage_uri?: string; duration?: number } | null;
+};
+type HeyGenMeta = {
+  provider: 'heygen';
+  fetched_at: string;
+  session_id: string;
+  duration_sec?: number | null;
+  credits_consumed?: number | null;
+  end_reason?: string | null;
+  mode?: string | null;
+  source?: string | null;
+};
+type ProviderMeta = TavusMeta | HeyGenMeta | null;
+
+function parseProviderMeta(raw: string | null): ProviderMeta {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as ProviderMeta;
+  } catch {
+    return null;
+  }
+}
+
 const questionDetails = progress.map((p) => {
   const session = p.session_id ? (getSession(p.session_id) ?? null) : null;
   const utterances = session ? getUtterances(session.id) : [];
@@ -44,7 +80,8 @@ const questionDetails = progress.map((p) => {
     ? (new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / 60_000
     : 0;
   const cost = calcCost(session, durationMin);
-  return { p, session, utterances, integrityEvents, integrity, snapshots, question, durationMin, cost };
+  const providerMeta = parseProviderMeta(session?.provider_meta ?? null);
+  return { p, session, utterances, integrityEvents, integrity, snapshots, question, durationMin, cost, providerMeta };
 });
 
 const totalCostUsd = questionDetails.reduce((s, d) => s + d.cost.usd, 0);
@@ -130,7 +167,13 @@ function fmtMeta(type: string, metaJson: string | null): string {
       </header>
 
       <!-- ── PER-QUESTION SECTIONS ───────────────────────────────────────────── -->
-      {questionDetails.map(({ p, session, utterances, integrityEvents, integrity, snapshots, question, durationMin, cost }) => (
+      {questionDetails.map(({ p, session, utterances, integrityEvents, integrity, snapshots, question, durationMin, cost, providerMeta }) => {
+        const tavusMeta = providerMeta?.provider === 'tavus' ? providerMeta : null;
+        const heygenMeta = providerMeta?.provider === 'heygen' ? providerMeta : null;
+        const heygenActualCredits = heygenMeta?.credits_consumed ?? null;
+        const heygenActualDurationMin = heygenMeta?.duration_sec != null ? heygenMeta.duration_sec / 60 : null;
+        const heygenActualCostUsd = heygenActualCredits != null ? heygenActualCredits * rates.heygenUsdPerCredit : null;
+        return (
         <section class="q-section">
           <!-- Question header -->
           <div class="q-head">
@@ -151,15 +194,140 @@ function fmtMeta(type: string, metaJson: string | null): string {
               {session.ended_at && <span class="meta-chip">Terminata {fmtTime(session.ended_at)}</span>}
               {session.ended_at && (
                 <span class="meta-chip cost">
-                  {durationMin.toFixed(1)} min · ${cost.usd.toFixed(2)}
-                  {cost.credits !== null && ` · ${cost.credits} crediti`}
+                  {heygenActualDurationMin != null
+                    ? `${heygenActualDurationMin.toFixed(1)} min (effettivo)`
+                    : tavusMeta?.shutdown_reason
+                      ? durationMin.toFixed(1) + ' min'
+                      : durationMin.toFixed(1) + ' min'}
+                  {' · '}
+                  {heygenActualCostUsd != null
+                    ? `$${heygenActualCostUsd.toFixed(2)} (${heygenActualCredits} crediti effettivi)`
+                    : `$${cost.usd.toFixed(2)} (stimato)`}
                 </span>
               )}
-              {session.ended_reason && <span class="meta-chip reason">{session.ended_reason}</span>}
+              {(tavusMeta?.shutdown_reason ?? session.ended_reason) && (
+                <span class="meta-chip reason">{tavusMeta?.shutdown_reason ?? session.ended_reason}</span>
+              )}
+              {session.provider_session_id && (
+                <button
+                  class="btn-refresh"
+                  data-session-id={String(session.id)}
+                >
+                  {providerMeta ? '↻ Aggiorna dati' : '↻ Carica dati provider'}
+                </button>
+              )}
             </div>
           )}
           {!session && p.status === 'pending' && (
             <p class="no-session">Nessuna sessione avviata per questa domanda.</p>
+          )}
+
+          {/* ── Provider AI data (Tavus / HeyGen actual) ── */}
+          {tavusMeta && (
+            <div class="provider-block">
+              <div class="provider-head">
+                <span class="provider-title">Dati Tavus</span>
+                {tavusMeta.fetched_at && (
+                  <span class="provider-fetched">aggiornato {fmtTime(tavusMeta.fetched_at)}</span>
+                )}
+              </div>
+
+              {/* Perception analysis — AI visual report */}
+              {tavusMeta.perception_analysis && (
+                <div class="perception">
+                  <span class="perception-label">Analisi visuale AI (Tavus Raven)</span>
+                  <div class="perception-text">
+                    {tavusMeta.perception_analysis.split('\n\n').map((para) => (
+                      <p>{para}</p>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Recording link */}
+              {tavusMeta.recording?.storage_uri && (
+                <div class="recording-row">
+                  <span class="recording-label">Registrazione</span>
+                  <code class="recording-uri">{tavusMeta.recording.storage_uri}</code>
+                  {tavusMeta.recording.duration && (
+                    <span class="recording-dur">
+                      {(tavusMeta.recording.duration / 60_000).toFixed(1)} min
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* Tavus detailed transcript (with timing) */}
+              {tavusMeta.tavus_transcript && tavusMeta.tavus_transcript.length > 0 && (
+                <details class="tavus-transcript">
+                  <summary>Trascrizione Tavus con timing ({tavusMeta.tavus_transcript.length} turni)</summary>
+                  <ol class="t-transcript">
+                    {tavusMeta.tavus_transcript.map((t) => (
+                      <li class={`t-turn t-${t.role}`}>
+                        <span class="t-who">
+                          {t.role === 'assistant' ? 'Alessandra' : t.role === 'user' ? 'Candidato' : t.role}
+                          <span class="t-timing">
+                            +{t.seconds_from_start.toFixed(1)}s
+                            {t.duration > 0 && ` · ${t.duration.toFixed(1)}s`}
+                          </span>
+                        </span>
+                        <span class="t-text">{t.content}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </details>
+              )}
+            </div>
+          )}
+
+          {heygenMeta && (heygenMeta.credits_consumed != null || heygenMeta.end_reason) && (
+            <div class="provider-block">
+              <div class="provider-head">
+                <span class="provider-title">Dati HeyGen (effettivi)</span>
+                {heygenMeta.fetched_at && (
+                  <span class="provider-fetched">aggiornato {fmtTime(heygenMeta.fetched_at)}</span>
+                )}
+              </div>
+              <div class="heygen-stats">
+                {heygenMeta.credits_consumed != null && (
+                  <div class="hg-stat">
+                    <span class="hg-label">Crediti consumati</span>
+                    <span class="hg-val">{heygenMeta.credits_consumed}</span>
+                  </div>
+                )}
+                {heygenMeta.duration_sec != null && (
+                  <div class="hg-stat">
+                    <span class="hg-label">Durata effettiva</span>
+                    <span class="hg-val">{(heygenMeta.duration_sec / 60).toFixed(1)} min</span>
+                  </div>
+                )}
+                {heygenActualCostUsd != null && (
+                  <div class="hg-stat">
+                    <span class="hg-label">Costo effettivo</span>
+                    <span class="hg-val cost">${heygenActualCostUsd.toFixed(2)}</span>
+                  </div>
+                )}
+                {heygenMeta.end_reason && (
+                  <div class="hg-stat">
+                    <span class="hg-label">Fine sessione</span>
+                    <span class="hg-val">{heygenMeta.end_reason}</span>
+                  </div>
+                )}
+                {heygenMeta.mode && (
+                  <div class="hg-stat">
+                    <span class="hg-label">Modalità</span>
+                    <span class="hg-val">{heygenMeta.mode}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {session && !providerMeta && session.provider_session_id && (
+            <p class="no-provider-data">
+              Dati provider non ancora disponibili.
+              Usa "Carica dati provider" per recuperarli.
+            </p>
           )}
 
           {/* Integrity */}
@@ -235,6 +403,8 @@ function fmtMeta(type: string, metaJson: string | null): string {
             <p class="no-session">Nessuna trascrizione disponibile.</p>
           )}
         </section>
+        );
+      }}
       ))}
     </main>
 
@@ -545,6 +715,212 @@ function fmtMeta(type: string, metaJson: string | null): string {
         font-variant-numeric: tabular-nums;
       }
       .text { font-size: 0.9rem; line-height: 1.45; }
+
+      /* ── Refresh button ── */
+      .btn-refresh {
+        padding: 2px 10px;
+        font-size: 0.76rem;
+        font-weight: 600;
+        background: transparent;
+        border: 1px solid #374151;
+        border-radius: 6px;
+        color: #9aa0aa;
+        cursor: pointer;
+        transition: border-color 0.15s, color 0.15s;
+      }
+      .btn-refresh:hover { border-color: #10b981; color: #10b981; }
+      .btn-refresh:disabled { opacity: 0.5; cursor: default; }
+
+      /* ── Provider data block ── */
+      .provider-block {
+        padding: 14px 20px;
+        border-bottom: 1px solid #1c1e27;
+        background: #060b18;
+      }
+      .provider-head {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+      .provider-title {
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #818cf8;
+        font-weight: 700;
+      }
+      .provider-fetched {
+        font-size: 0.72rem;
+        color: #4b5563;
+      }
+      .no-provider-data {
+        padding: 10px 20px;
+        margin: 0;
+        font-size: 0.82rem;
+        color: #4b5563;
+        border-bottom: 1px solid #1c1e27;
+      }
+
+      /* Perception analysis */
+      .perception {
+        margin-bottom: 14px;
+      }
+      .perception-label {
+        display: block;
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #818cf8;
+        font-weight: 600;
+        margin-bottom: 8px;
+      }
+      .perception-text {
+        background: #0d1124;
+        border: 1px solid #1e2248;
+        border-radius: 10px;
+        padding: 14px 16px;
+      }
+      .perception-text p {
+        margin: 0 0 10px;
+        font-size: 0.88rem;
+        line-height: 1.6;
+        color: #c7d2fe;
+      }
+      .perception-text p:last-child { margin-bottom: 0; }
+
+      /* Recording row */
+      .recording-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 12px;
+        background: #17181f;
+        border-radius: 8px;
+        margin-bottom: 12px;
+      }
+      .recording-label {
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #6b7280;
+        font-weight: 600;
+        flex-shrink: 0;
+      }
+      .recording-uri {
+        font-size: 0.8rem;
+        color: #a7f3d0;
+        word-break: break-all;
+        flex: 1;
+      }
+      .recording-dur { color: #6b7280; font-size: 0.8rem; flex-shrink: 0; }
+
+      /* Tavus detailed transcript */
+      .tavus-transcript {
+        margin-top: 10px;
+      }
+      .tavus-transcript summary {
+        cursor: pointer;
+        font-size: 0.78rem;
+        color: #6b7280;
+        padding: 6px 0;
+        user-select: none;
+      }
+      .tavus-transcript summary:hover { color: #9aa0aa; }
+      .t-transcript {
+        list-style: none;
+        margin: 8px 0 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .t-turn {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 8px 12px;
+        border-radius: 8px;
+        background: #17181f;
+        border: 1px solid #2a2c36;
+      }
+      .t-turn.t-assistant { border-left: 3px solid #818cf8; }
+      .t-turn.t-user      { border-left: 3px solid #4ea1ff; }
+      .t-turn.t-system    { border-left: 3px solid #374151; opacity: 0.6; }
+      .t-who {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        font-size: 0.68rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #9aa0aa;
+      }
+      .t-timing {
+        font-size: 0.66rem;
+        color: #4b5563;
+        font-variant-numeric: tabular-nums;
+      }
+      .t-text { font-size: 0.85rem; line-height: 1.4; }
+
+      /* HeyGen actual stats */
+      .heygen-stats {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+      .hg-stat {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 8px 14px;
+        background: #0d0e17;
+        border: 1px solid #1e2248;
+        border-radius: 8px;
+        min-width: 90px;
+      }
+      .hg-label {
+        font-size: 0.68rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #6b7280;
+      }
+      .hg-val {
+        font-size: 0.9rem;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+      .hg-val.cost { color: #a7f3d0; }
     </style>
+
+    <script>
+      document.addEventListener('click', (e) => {
+        const btn = (e.target as Element).closest<HTMLButtonElement>('.btn-refresh');
+        if (!btn) return;
+        const sessionId = btn.dataset.sessionId;
+        if (!sessionId) return;
+        btn.disabled = true;
+        const original = btn.textContent ?? '';
+        btn.textContent = 'Caricamento…';
+        fetch('/api/interview/provider-refresh', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: Number(sessionId) }),
+        })
+          .then((r) => r.json())
+          .then((d) => {
+            if ((d as { ok?: boolean }).ok) {
+              location.reload();
+            } else {
+              btn.disabled = false;
+              btn.textContent = original;
+            }
+          })
+          .catch(() => {
+            btn.disabled = false;
+            btn.textContent = original;
+          });
+      });
+    </script>
   </body>
 </html>
