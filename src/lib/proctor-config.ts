@@ -9,6 +9,8 @@ export type IntegrityType =
   | 'second_monitor' // an extended display was present at session start
   | 'face_absent' // no face in frame beyond the threshold
   | 'looking_away' // head turned off-axis beyond the threshold
+  | 'looking_down' // head sharply tilted downward (reading phone/notes)
+  | 'too_far' // face too small in frame — candidate too far from webcam
   | 'multiple_faces' // two or more faces in frame
   | 'fullscreen_exit' // user exited fullscreen during interview
   | 'clipboard_copy' // user copied text
@@ -21,6 +23,8 @@ export const INTEGRITY_TYPES: IntegrityType[] = [
   'second_monitor',
   'face_absent',
   'looking_away',
+  'looking_down',
+  'too_far',
   'multiple_faces',
   'fullscreen_exit',
   'clipboard_copy',
@@ -35,6 +39,8 @@ export const INTEGRITY_LABELS: Record<IntegrityType, string> = {
   second_monitor: 'Secondo monitor',
   face_absent: 'Volto assente',
   looking_away: 'Sguardo altrove',
+  looking_down: 'Sguardo verso il basso',
+  too_far: 'Troppo lontano dalla webcam',
   multiple_faces: 'Più persone',
   fullscreen_exit: 'Uscita dal fullscreen',
   clipboard_copy: 'Copia testo',
@@ -57,6 +63,9 @@ export const MULTI_FACE_MS = 1_500; // ≥2 faces this long → multiple_faces
 export const LOOK_AWAY_MS = 2_500; // head off-axis this long → looking_away
 export const LOOK_AWAY_YAW_DEG = 25; // |yaw| beyond this = looking away
 export const LOOK_AWAY_PITCH_DEG = 22; // |pitch| beyond this = looking away
+export const LOOK_DOWN_PITCH_DEG = 20; // negative pitch below this (downward tilt) = looking_down
+export const FACE_MIN_WIDTH_RATIO = 0.20; // face bbox width (0–1 normalized) below this = too_far
+export const TOO_FAR_MS = 3_000; // face too small this long → too_far event
 
 export const SNAPSHOT_INTERVAL_MS = 60_000;
 export const VOICE_RMS_THRESHOLD = 0.04; // mic RMS above this = voice activity

@@ -10,16 +10,19 @@
 // why the candidate also sees a self-view and consents up front.
 import {
   FACE_ABSENT_MS,
+  FACE_MIN_WIDTH_RATIO,
   FLUSH_INTERVAL_MS,
   INTEGRITY_LABELS,
   LOOK_AWAY_MS,
   LOOK_AWAY_PITCH_DEG,
   LOOK_AWAY_YAW_DEG,
+  LOOK_DOWN_PITCH_DEG,
   MIN_BROWSER_EPISODE_MS,
   MULTI_FACE_MS,
   SAMPLE_FPS,
   SECOND_VOICE_MS,
   SNAPSHOT_INTERVAL_MS,
+  TOO_FAR_MS,
   VOICE_RMS_THRESHOLD,
   type IntegrityEventInput,
   type IntegrityType,
@@ -27,8 +30,9 @@ import {
 
 // Minimal structural types for @mediapipe/tasks-vision (dynamically imported), so this
 // module type-checks without the package resolving eagerly.
+interface FaceLandmark { x: number; y: number; z: number }
 interface FaceResult {
-  faceLandmarks: unknown[];
+  faceLandmarks: FaceLandmark[][];
   facialTransformationMatrixes?: { data: number[] | Float32Array }[];
 }
 interface FaceLandmarkerLike {
@@ -42,7 +46,9 @@ let sessionId: number | null = null;
 const buffer: IntegrityEventInput[] = [];
 
 let stream: MediaStream | null = null;
+// Landmarker is cached across sessions — the model loads once (~3–5s) and is reused.
 let landmarker: FaceLandmarkerLike | null = null;
+let landmarkerPromise: Promise<FaceLandmarkerLike | null> | null = null;
 let selfView: HTMLVideoElement | null = null;
 
 let sampleTimer: number | null = null;
@@ -78,6 +84,8 @@ let focusEp: Ep = null; // focus_lost
 let faceAbsentEp: Ep = null; // face_absent
 let multiFaceEp: Ep = null; // multiple_faces
 let lookAwayEp: Ep = null; // looking_away
+let lookDownEp: Ep = null; // looking_down
+let tooFarEp: Ep = null; // too_far
 let lastPose: { yaw: number; pitch: number } | null = null;
 
 function now(): number {
@@ -91,6 +99,8 @@ const VIOLATION_CB_TYPES = new Set<IntegrityType>([
   'clipboard_copy',
   'clipboard_paste',
   'face_absent',
+  'looking_down',
+  'too_far',
   'multiple_faces',
   'second_voice',
 ]);
@@ -214,7 +224,7 @@ function poseFromMatrix(data: number[] | Float32Array): { yaw: number; pitch: nu
   return { yaw, pitch };
 }
 
-function evaluateFrame(faceCount: number, pose: { yaw: number; pitch: number } | null): void {
+function evaluateFrame(faceCount: number, pose: { yaw: number; pitch: number } | null, faceWidth = 0): void {
   const t = now();
 
   // face_absent — no face at all.
@@ -248,6 +258,24 @@ function evaluateFrame(faceCount: number, pose: { yaw: number; pitch: number } |
       pitch: lastPose ? Math.round(lastPose.pitch) : undefined,
     });
   }
+
+  // looking_down — head sharply tilted downward (negative pitch), one face only.
+  const down = faceCount === 1 && pose != null && pose.pitch < -LOOK_DOWN_PITCH_DEG;
+  if (down) {
+    if (!lookDownEp) lookDownEp = { start: t };
+  } else {
+    lookDownEp = closeEpisode(lookDownEp, 'looking_down', LOOK_AWAY_MS, {
+      pitch: pose ? Math.round(pose.pitch) : undefined,
+    });
+  }
+
+  // too_far — face bounding-box width below threshold; only when exactly one face detected.
+  const farAway = faceCount === 1 && faceWidth > 0 && faceWidth < FACE_MIN_WIDTH_RATIO;
+  if (farAway) {
+    if (!tooFarEp) tooFarEp = { start: t };
+  } else {
+    tooFarEp = closeEpisode(tooFarEp, 'too_far', TOO_FAR_MS);
+  }
 }
 
 function sampleOnce(): void {
@@ -258,55 +286,80 @@ function sampleOnce(): void {
   } catch {
     return; // transient decode hiccup — skip this frame
   }
-  const faceCount = result.faceLandmarks?.length ?? 0;
+  const faces = result.faceLandmarks ?? [];
+  const faceCount = faces.length;
   const matrix = result.facialTransformationMatrixes?.[0]?.data;
   const pose = faceCount === 1 && matrix ? poseFromMatrix(matrix) : null;
-  evaluateFrame(faceCount, pose);
+  // Face bounding-box width (normalized 0–1) as a proxy for camera distance.
+  let faceWidth = 0;
+  if (faceCount === 1 && faces[0]) {
+    let minX = 1, maxX = 0;
+    for (const l of faces[0]) {
+      if (l.x < minX) minX = l.x;
+      if (l.x > maxX) maxX = l.x;
+    }
+    faceWidth = maxX - minX;
+  }
+  evaluateFrame(faceCount, pose, faceWidth);
+}
+
+// Loads the MediaPipe FaceLandmarker once and caches it for the page lifetime so that
+// subsequent sessions and warmupCamera() reuse the same model instance.
+function ensureLandmarker(): Promise<FaceLandmarkerLike | null> {
+  if (landmarker) return Promise.resolve(landmarker);
+  if (!landmarkerPromise) {
+    landmarkerPromise = (async () => {
+      try {
+        const vision = await import('@mediapipe/tasks-vision');
+        const fileset = await vision.FilesetResolver.forVisionTasks('/proctor/wasm');
+        landmarker = (await vision.FaceLandmarker.createFromOptions(fileset, {
+          baseOptions: { modelAssetPath: '/proctor/face_landmarker.task' },
+          runningMode: 'VIDEO',
+          numFaces: 2,
+          outputFacialTransformationMatrixes: true,
+          outputFaceBlendshapes: false,
+        })) as unknown as FaceLandmarkerLike;
+        return landmarker;
+      } catch (err) {
+        console.warn('[proctor] face detection unavailable:', err);
+        landmarkerPromise = null; // allow retry on next call
+        return null;
+      }
+    })();
+  }
+  return landmarkerPromise;
 }
 
 async function initCamera(): Promise<void> {
   selfView = document.getElementById('self-view') as HTMLVideoElement | null;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { width: 320, height: 240, frameRate: 15 },
-      audio: false,
-    });
-  } catch {
-    // Camera denied/unavailable → Layer 1 (browser signals) still runs. Not fatal.
-    return;
-  }
-  if (!active) {
-    // Session ended while we were awaiting permission — release immediately.
-    stream.getTracks().forEach((t) => t.stop());
-    stream = null;
-    return;
-  }
-  if (selfView) {
-    selfView.srcObject = stream;
-    selfView.muted = true;
-    selfView.hidden = false;
-    void selfView.play().catch(() => {});
+  // Reuse the stream opened by warmupCamera() if it already has the camera.
+  if (!stream) {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: 320, height: 240, frameRate: 15 },
+        audio: false,
+      });
+    } catch {
+      // Camera denied/unavailable → Layer 1 (browser signals) still runs. Not fatal.
+      return;
+    }
+    if (!active) {
+      // Session ended while we were awaiting permission — release immediately.
+      stream.getTracks().forEach((t) => t.stop());
+      stream = null;
+      return;
+    }
+    if (selfView) {
+      selfView.srcObject = stream;
+      selfView.muted = true;
+      selfView.hidden = false;
+      void selfView.play().catch(() => {});
+    }
   }
   // Start periodic snapshot timer as soon as the stream is live (even if the landmarker fails).
   snapshotTimer = window.setInterval(() => void takeSnapshot(), SNAPSHOT_INTERVAL_MS);
-
-  try {
-    const vision = await import('@mediapipe/tasks-vision');
-    if (!active) return;
-    const fileset = await vision.FilesetResolver.forVisionTasks('/proctor/wasm');
-    landmarker = (await vision.FaceLandmarker.createFromOptions(fileset, {
-      baseOptions: { modelAssetPath: '/proctor/face_landmarker.task' },
-      runningMode: 'VIDEO',
-      numFaces: 2,
-      outputFacialTransformationMatrixes: true,
-      outputFaceBlendshapes: false,
-    })) as unknown as FaceLandmarkerLike;
-  } catch (err) {
-    // Model/WASM failed to load → self-view still shows, but no detection. Log for debug.
-    console.warn('[proctor] face detection unavailable:', err);
-    return;
-  }
-  if (!active) return;
+  const lm = await ensureLandmarker();
+  if (!active || !lm) return;
   sampleTimer = window.setInterval(sampleOnce, Math.round(1000 / SAMPLE_FPS));
 }
 
@@ -340,6 +393,8 @@ function closeAllEpisodes(): void {
     yaw: lastPose ? Math.round(lastPose.yaw) : undefined,
     pitch: lastPose ? Math.round(lastPose.pitch) : undefined,
   });
+  lookDownEp = closeEpisode(lookDownEp, 'looking_down', LOOK_AWAY_MS);
+  tooFarEp = closeEpisode(tooFarEp, 'too_far', TOO_FAR_MS);
   secondVoiceEp = closeEpisode(secondVoiceEp, 'second_voice', SECOND_VOICE_MS);
 }
 
@@ -397,8 +452,7 @@ export function stopProctor(): void {
   closeAllEpisodes();
   void flush();
 
-  landmarker?.close();
-  landmarker = null;
+  // Keep landmarker loaded — model caches for the page lifetime (first load ~3–5s).
   stream?.getTracks().forEach((t) => t.stop());
   stream = null;
   if (selfView) {
@@ -417,6 +471,80 @@ export function beaconProctor(): void {
   const events = buffer.splice(0, buffer.length);
   const payload = JSON.stringify({ sessionId, events });
   navigator.sendBeacon('/api/interview/integrity', new Blob([payload], { type: 'application/json' }));
+}
+
+// Pre-session camera check: opens the webcam + face landmarker in the background so
+// the candidate can adjust their position BEFORE the interview starts. Calls onResult
+// continuously with true (face close enough) or false (absent/too far). Returns a
+// cleanup function the caller must invoke before startProctor() takes over — the open
+// camera stream is left at module scope so initCamera() reuses it without a second
+// getUserMedia() call.
+export function warmupCamera(onResult: (faceOk: boolean) => void): () => void {
+  let localStream: MediaStream | null = null;
+  let localSelfView: HTMLVideoElement | null = null;
+  let stopped = false;
+  let warmupTimer: number | null = null;
+
+  const init = async (): Promise<void> => {
+    localSelfView = document.getElementById('self-view') as HTMLVideoElement | null;
+
+    if (!stream) {
+      let opened: MediaStream;
+      try {
+        opened = await navigator.mediaDevices.getUserMedia({
+          video: { width: 320, height: 240, frameRate: 15 },
+          audio: false,
+        });
+      } catch {
+        onResult(true); // camera unavailable — don't block the interview
+        return;
+      }
+      if (stopped) { opened.getTracks().forEach((t) => t.stop()); return; }
+      localStream = opened;
+      stream = localStream; // make available to initCamera()
+      if (localSelfView) {
+        localSelfView.srcObject = stream;
+        localSelfView.muted = true;
+        localSelfView.hidden = false;
+        void localSelfView.play().catch(() => {});
+      }
+    }
+
+    const lm = await ensureLandmarker();
+    if (stopped) return;
+    if (!lm) { onResult(true); return; } // no model — don't block
+
+    const target = localSelfView;
+    warmupTimer = window.setInterval(() => {
+      if (!target || target.readyState < 2) return;
+      try {
+        const result = lm.detectForVideo(target, performance.now());
+        const faces = result.faceLandmarks ?? [];
+        if (faces.length === 0) { onResult(false); return; }
+        let minX = 1, maxX = 0;
+        for (const l of faces[0]) {
+          if (l.x < minX) minX = l.x;
+          if (l.x > maxX) maxX = l.x;
+        }
+        onResult(maxX - minX >= FACE_MIN_WIDTH_RATIO);
+      } catch { /* transient */ }
+    }, 500);
+  };
+
+  void init();
+
+  return () => {
+    stopped = true;
+    if (warmupTimer != null) window.clearInterval(warmupTimer);
+    warmupTimer = null;
+    // Only release the camera if the proctor hasn't taken it over yet.
+    if (!active && localStream) {
+      localStream.getTracks().forEach((t) => t.stop());
+      if (stream === localStream) stream = null;
+      localStream = null;
+      if (localSelfView) { localSelfView.srcObject = null; localSelfView.hidden = true; }
+    }
+  };
 }
 
 export async function enterFullscreen(): Promise<void> {

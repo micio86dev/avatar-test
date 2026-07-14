@@ -6,7 +6,7 @@
 import type { InterviewProvider, ProviderName, TranscriptEntry } from '../providers/types';
 import { HeyGenProvider } from '../providers/heygen';
 import { TavusProvider } from '../providers/tavus';
-import { beaconProctor, enterFullscreen, setAvatarSpeaking, setViolationCallback, startProctor, stopProctor, INTEGRITY_LABELS } from './proctor';
+import { beaconProctor, enterFullscreen, setAvatarSpeaking, setViolationCallback, startProctor, stopProctor, warmupCamera, INTEGRITY_LABELS } from './proctor';
 
 type Phase = 'idle' | 'connecting' | 'live';
 type Screen = 'start' | 'code' | 'rules' | 'interview' | 'endq' | 'paused' | 'done';
@@ -91,6 +91,9 @@ let sessionId: number | null = null;
 let providerSessionId: string | undefined;
 let lastEndedReason: EndedReason | null = null;
 let rulesShown = false;
+// Pre-session camera proximity check. null = unknown/pending, true = OK, false = too far.
+let cameraOk: boolean | null = null;
+let cameraCheckCleanup: (() => void) | null = null;
 let pendingQuestionIndex = 0;
 let toastTimer: number | null = null;
 let rates: Rates = { heygenCreditsPerMin: 2, heygenUsdPerCredit: 0.1, tavusUsdPerMin: 0.37 };
@@ -107,6 +110,12 @@ let nudged = false;
 // takes over with Pausa / Prossima.
 const AUTO_ADVANCE_SECONDS = 3;
 let autoAdvanceInterval: number | null = null;
+
+// Client-side auto-retry for Tavus concurrency lag. The free-tier slot is released a few
+// seconds after /end; the first start of the next question briefly races that window.
+// We retry silently before falling back to a manual-retry prompt.
+const CLIENT_BUSY_RETRIES = 3;
+const CLIENT_BUSY_DELAY_MS = 3000;
 
 // Cost meter
 const CREDITS_REPOLL_MS = 60_000;
@@ -151,7 +160,7 @@ function setButton(): void {
   const live = phase === 'live';
   button.textContent = phase === 'connecting' ? '… connessione' : live ? '⏹ Stop' : '🎤 Parla';
   button.dataset.on = String(live);
-  button.disabled = phase === 'connecting';
+  button.disabled = phase === 'connecting' || (phase === 'idle' && cameraOk === false);
 }
 function updateTopBar(): void {
   progressEl.textContent = `Domanda ${currentIndex + 1} di ${total}`;
@@ -189,7 +198,7 @@ function resetTimerDisplay(): void {
 
 // ── Toast notifications ────────────────────────────────────────────────────────
 // Types that warrant a visible in-interview warning (not looking_away — too frequent).
-const TOAST_TYPES = new Set(['tab_hidden','focus_lost','fullscreen_exit','clipboard_copy','clipboard_paste','face_absent','multiple_faces']);
+const TOAST_TYPES = new Set(['tab_hidden','focus_lost','fullscreen_exit','clipboard_copy','clipboard_paste','face_absent','multiple_faces','looking_down','too_far']);
 
 function showToast(type: string, label: string): void {
   if (!TOAST_TYPES.has(type)) return;
@@ -312,6 +321,17 @@ async function ensureMicPermission(): Promise<void> {
 
 async function startSession(index: number): Promise<void> {
   if (phase !== 'idle') return;
+  // Block only when the proximity check has explicitly found the face too far.
+  // null means the check is still loading — we allow the session to proceed.
+  if (cameraOk === false) {
+    setStatus('waiting', 'Avvicinati alla webcam per iniziare');
+    return;
+  }
+  // Hand the open camera stream off to the proctor; stop the pre-session warmup.
+  cameraCheckCleanup?.();
+  cameraCheckCleanup = null;
+  cameraOk = null;
+
   currentIndex = index;
   phase = 'connecting';
   setButton();
@@ -328,21 +348,32 @@ async function startSession(index: number): Promise<void> {
   }
 
   try {
-    const res = await fetch('/api/interview/start', {
-      method: 'POST',
-      headers: JSON_HEADERS,
-      body: JSON.stringify({ candidateId, questionIndex: index, provider: providerName }),
-    });
-    const data = await res.json().catch(() => null);
-    // Provider slot momentarily busy (Tavus free-tier concurrency lag): not a hard error —
-    // show a friendly wait message and leave the button ready for a retry.
+    // Retry loop for Tavus concurrency lag — the free-tier slot is released a few seconds
+    // after /end and the server already retries internally, but sometimes that budget runs
+    // out first. We retry silently on the client so the user never has to click again.
+    let res!: Response;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let data: any = null;
+    for (let busyAttempt = 0; ; busyAttempt++) {
+      res = await fetch('/api/interview/start', {
+        method: 'POST',
+        headers: JSON_HEADERS,
+        body: JSON.stringify({ candidateId, questionIndex: index, provider: providerName }),
+      });
+      data = await res.json().catch(() => null);
+      const busy = res.status === 429 || data?.code === 'provider_busy';
+      if (!busy || busyAttempt >= CLIENT_BUSY_RETRIES) break;
+      setStatus('waiting');
+      await new Promise<void>((r) => setTimeout(r, CLIENT_BUSY_DELAY_MS));
+      setStatus('connecting');
+    }
     if (res.status === 429 || data?.code === 'provider_busy') {
-      setStatus('waiting', data?.error || 'Attendi qualche secondo e riprova.');
+      setStatus('waiting', data?.error ?? 'Attendi qualche secondo e premi di nuovo "Parla".');
       phase = 'idle';
       setButton();
       return;
     }
-    if (!res.ok || !data?.dbSessionId) throw new Error(data?.error || `start HTTP ${res.status}`);
+    if (!res.ok || !data?.dbSessionId) throw new Error(data?.error ?? `start HTTP ${res.status}`);
 
     sessionId = data.dbSessionId;
     providerSessionId = data.providerSessionId ?? undefined;
@@ -409,6 +440,9 @@ async function teardown(reason: EndedReason): Promise<void> {
   lastEndedReason = reason;
   clearTimer();
   stopMeter();
+  cameraCheckCleanup?.(); // safety net: stop warmup if not already cleaned up
+  cameraCheckCleanup = null;
+  cameraOk = null;
   stopProctor(); // flush + release camera; captured its own sessionId at start
 
   const p = provider;
@@ -474,6 +508,11 @@ function showRules(index: number): void {
 // grants the mic and satisfies the browser's autoplay policy for the whole session.
 function beginQuestion(index: number, autoStart = false): void {
   clearAutoAdvance();
+  // Stop any previous proximity check before starting a fresh one.
+  cameraCheckCleanup?.();
+  cameraCheckCleanup = null;
+  cameraOk = null;
+
   currentIndex = index;
   phase = 'idle';
   ending = true; // no live session yet
@@ -485,6 +524,21 @@ function beginQuestion(index: number, autoStart = false): void {
   setStatus('idle');
   setButton();
   setScreen('interview');
+
+  // Start a background camera check: opens the webcam preview and continuously reports
+  // whether the face is close enough. Blocks "Parla" with a status message if too far.
+  // null = model still loading (allow); false = too far (block); true = OK (allow).
+  cameraCheckCleanup = warmupCamera((ok) => {
+    cameraOk = ok;
+    if (phase !== 'idle') return; // session already started — ignore
+    setButton();
+    if (!ok) {
+      setStatus('waiting', 'Avvicinati alla webcam per iniziare');
+    } else {
+      setStatus('idle');
+    }
+  });
+
   if (autoStart) void startSession(index);
 }
 
@@ -557,6 +611,9 @@ async function onNext(): Promise<void> {
 
 function onPause(): void {
   clearAutoAdvance();
+  cameraCheckCleanup?.();
+  cameraCheckCleanup = null;
+  cameraOk = null;
   pausedCode.textContent = resumeCode;
   setScreen('paused');
 }
@@ -627,6 +684,9 @@ async function onResume(): Promise<void> {
 }
 
 function goHome(): void {
+  cameraCheckCleanup?.();
+  cameraCheckCleanup = null;
+  cameraOk = null;
   displayNameInput.value = '';
   resumeCodeInput.value = '';
   startError.textContent = '';
