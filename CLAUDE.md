@@ -20,9 +20,18 @@ It is the product **kernel** and a reference for the port — not the final arch
   red-green-refactor. Use the `sdd-*` and `tdd` skills.
 - **Test coverage target: 85%** overall; correctness-critical zones (scoring, tenant
   scoping, candidate state machine) held to ~95%.
+- **E2E:** Playwright with best practices on **both** Nuxt apps. Projects: **Chromium**
+  (desktop) and **WebKit/Safari** (desktop) tested fully; a **mobile viewport** project
+  asserts the *unsupported-experience* gate (SA-11), since the product is desktop-only
+  (Firefox excluded). **Every suite** (Pest + Vitest + Playwright) runs in CI/CD for
+  **both** frontend/backoffice **and** backend — no test tier is skipped in CI.
 - **gentle-ai** is the active orchestration/review layer — keep it on.
 - **Git Flow**: `main` (production) + `develop` (integration). Work on
   `feature/*`, `release/*`, `hotfix/*`. **No deploy unless explicitly requested.**
+- **Versioning: SemVer `M.m.p`** (major.minor.patch), driven by Git Flow: `release/*`
+  branches bump the version, `main` is tagged `vM.m.p` on release, then merged back to
+  `develop`. Applies to the wrapper and each submodule (each versioned independently);
+  the wrapper pins submodule release tags.
 - **Conventional commits only.** Never add Co-Authored-By / AI attribution.
 - **Deploy target: Railway** (never Vercel), and only on explicit request.
 
@@ -32,13 +41,40 @@ It is the product **kernel** and a reference for the port — not the final arch
 
 | Layer | Choice |
 |---|---|
-| Backend | **Laravel 12 + Eloquent + MySQL 8** (API-first, stateless, horizontally scalable) |
+| **API backend** | **Laravel 12 + Eloquent + MySQL 8**, **API-only** (no Blade UI). **Scramble** (`dedoc/scramble`) generates the OpenAPI spec. Stateless, horizontally scalable. |
 | Cache / Queue / Session | **Redis** (+ Laravel Horizon) for async scoring / notifications / webhooks |
-| Frontend | **Nuxt 4 (Vue 3)** + `@nuxtjs/i18n`; ports the avatar/proctoring TS logic from the demo |
+| **Frontend** (candidate) | **Nuxt 4 (Vue 3) — SSR**, `@nuxtjs/i18n`. Public interview app; ports the avatar/proctoring TS logic from the demo |
+| **Backoffice** (admin) | **Nuxt 4 (Vue 3) — SPA** (`ssr: false`), `@nuxtjs/i18n`. Separate app, always multilingual |
 | Object storage | S3-compatible (audio, snapshots, transcripts) |
-| Auth | **Sanctum** — SPA cookies (admin) + token-abilities (external API) + custom signed-token guard (candidate magic-link) |
-| Tests | **Pest** (backend) + **Vitest / Vue Test Utils** + **Playwright** (E2E) |
-| Repo | Monorepo (`api/` Laravel, `web/` Nuxt; Astro demo kept as reference) |
+| Auth | **JWT (`tymon/jwt-auth`)** — NOT Sanctum. Bearer JWT for the backoffice user auth; short-lived JWT for the candidate magic-link; JWT/API-key for external M2M. **RBAC via `spatie/laravel-permission`** (org-scoped, teams mode) |
+| Tests | **Pest** (api) + **Vitest / Vue Test Utils** (frontend & backoffice) + **Playwright E2E** (both Nuxt apps) |
+| Repos | **Wrapper superproject with 3 git submodules**: `api`, `frontend`, `backoffice`. This repo IS the wrapper (holds `docs/`, `openspec/` SDD, `CLAUDE.md`, docker-compose, submodule pointers). Astro demo lives in `legacy-demo/` (reference, removed once ported). |
+
+**API contract:** Scramble publishes `openapi.json`; `frontend` and `backoffice` each
+**generate a typed TS client from it** (e.g. openapi-typescript). Keeps the 3 repos in
+sync by design — never hand-maintain request/response types across repos.
+
+**Auth (JWT + Spatie):** use **`tymon/jwt-auth`** — NOT Sanctum. Bearer JWT auth means
+the backoffice SPA and the API can live on **different origins with no shared-cookie
+constraint**. Because JWT is stateless, handle logout/revocation with **short access-token
+expiry + refresh tokens + a denylist** (Redis). The **candidate magic-link is a short-lived
+JWT** (carries candidateRef/project/role/lang/exp). External M2M: JWT client token or API-key.
+RBAC via **`spatie/laravel-permission`** in **teams mode**, scoped per organization
+(`team_id = organization_id`). ⚠️ **Do not confuse** Spatie *authorization* roles
+(admin/operator/viewer) with BEAI *organizational* roles (ICO/FLL/MLL/BUL/SRX), which are a
+domain concept, not an auth concept. Auth is built in C2.
+
+**Git Flow × 4:** the wrapper and each submodule (`api`, `frontend`, `backoffice`) all
+run `main`/`develop` + `feature`/`release`/`hotfix`. The wrapper pins submodule commits;
+clone/CI with `--recursive`. Keep a wrapper script/Taskfile to sync submodule pointers.
+
+**Containers & runtime:** **Docker everywhere** — local and Railway. Multi-stage
+Dockerfiles per app (`api`, `frontend`, `backoffice`); `docker-compose` for local dev
+(MySQL 8, Redis, Mailpit + the 3 apps); Railway builds **via Docker** so the local image
+equals prod. **Bun (hybrid):** Bun for install/dev/**build** of both Nuxt apps (and the
+backoffice SPA static runtime); **Node** for the frontend **SSR production runtime**
+(Nitro `node-server`) and for the **Playwright/Vitest** runners (officially Node-targeted).
+Multi-stage Dockerfile: build with Bun → run SSR with Node.
 
 **Multi-tenancy:** single shared DB with row-level scoping by `organization_id`
 (global Eloquent scope + `TenantContext` middleware). Composite indexes lead with
