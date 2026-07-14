@@ -1,0 +1,74 @@
+schema: spec-driven
+project: avatar-test
+initialized: 2026-07-14
+persistence: hybrid
+strict_tdd: true
+
+context: |
+  Project: BEAI — Business Evaluation AI (multi-tenant AI voice-interview assessment)
+  Backend: Laravel 12 + Eloquent + MySQL 8 + Redis (Horizon) — target dir: api/
+  Frontend: Nuxt 4 (Vue 3) + @nuxtjs/i18n — target dir: web/
+  Auth: Laravel Sanctum (SPA cookies / token abilities / signed magic-link guard)
+  Queue: Redis + Laravel Horizon (async scoring, webhooks)
+  Deploy: Railway — Git Flow (main/develop + feature/release/hotfix branches)
+  Domain: BARS soft-skill assessment; 5 roles; 18 standard competencies + MTG/LAT
+  Multi-tenancy: shared DB, row-level scoping by organization_id
+  Current repo: Astro 7 + TypeScript demo (kernel/reference — NOT the target architecture)
+
+testing:
+  strict_tdd: true
+  coverage_target: 85
+  coverage_high_integrity: 95  # scoring, tenant-scoping, candidate state machine
+  runners:
+    backend:
+      framework: Pest
+      command: "php artisan test --parallel"  # to-be-wired-in-C1
+      status: not-yet-scaffolded
+    frontend_unit:
+      framework: Vitest + Vue Test Utils
+      command: "pnpm test:unit"  # to-be-wired-in-C1
+      status: not-yet-scaffolded
+    frontend_e2e:
+      framework: Playwright
+      command: "pnpm test:e2e"  # to-be-wired-in-C1
+      status: not-yet-scaffolded
+  coverage:
+    backend:
+      command: "php artisan test --coverage --min=85"  # to-be-wired-in-C1
+      status: not-yet-scaffolded
+    frontend:
+      command: "pnpm test:unit --coverage"  # to-be-wired-in-C1
+      status: not-yet-scaffolded
+  note: >
+    All test commands are INTENDED targets. Code is greenfield;
+    scaffolding happens in change C1. Do not run these commands until C1 is applied.
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes
+    - Reference domain constraints from CLAUDE.md and docs/app_description/
+    - Note open product decisions that block the change (see CLAUDE.md)
+  specs:
+    - Use Given/When/Then for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+    - Cross-tenant isolation MUST be covered by dedicated test scenarios
+  design:
+    - Include sequence diagrams for complex flows (auth, scoring, webhooks)
+    - Document architecture decisions with rationale
+    - Multi-tenancy: every query scope must be explicit in the design
+  tasks:
+    - Group by phase, use hierarchical numbering
+    - Keep tasks completable in one session
+    - TDD tasks: RED task always precedes GREEN+REFACTOR tasks
+  apply:
+    - Follow existing code patterns
+    tdd: true
+    test_command: "php artisan test --parallel"  # to-be-wired-in-C1 (backend)
+    frontend_test_command: "pnpm test:unit"       # to-be-wired-in-C1 (frontend)
+  verify:
+    test_command: "php artisan test --parallel"   # to-be-wired-in-C1
+    build_command: ""
+    coverage_threshold: 85
+  archive:
+    - Warn before merging destructive deltas
+    - Update openspec/specs/{domain}/spec.md after archive
