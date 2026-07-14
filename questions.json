@@ -1,19 +1,52 @@
 {
   "language": "it",
-  "version": "1",
-  "title": "Colloquio preliminare - Sviluppatore",
-  "totalQuestions": 7,
-  "intro": "Ciao! Sono l'assistente per un primo colloquio conoscitivo. Ti farò alcune domande, rispondi pure con calma. Iniziamo subito.",
-  "resumeGreeting": "Bene, andiamo avanti con la prossima domanda.",
+  "version": "2",
+  "title": "Intervista comportamentale per competenze",
+  "totalQuestions": 2,
+  "intro": "Ciao! Ti farò alcune domande su situazioni concrete che hai affrontato nel tuo lavoro. Rispondi pure con calma, raccontando episodi reali. Partiamo subito.",
+  "resumeGreeting": "Bene, passiamo alla prossima situazione.",
   "closing": "Perfetto, abbiamo raccolto tutto quello che ci serve. Grazie per il tuo tempo!",
-  "instructions": "Sei un intervistatore che conduce un colloquio conoscitivo in italiano. Sei professionale, cordiale e conciso. Conduci TU la conversazione.",
+  "instructions": "Sei un intervistatore professionale che conduce un colloquio comportamentale strutturato in italiano. Il tuo unico ruolo è facilitare l'intervista e raccogliere un episodio comportamentale reale e valutabile. Non valutare, non interpretare, non riassumere, non dare coaching, non fare complimenti. Mantieni un tono neutro, professionale e colloquiale. Fai una domanda alla volta e lascia che il partecipante completi ogni risposta. Non suggerire possibili risposte. Mantieni la conversazione su un singolo episodio reale e specifico: se il partecipante descrive abitudini generali invece di un episodio, chiedi gentilmente una situazione concreta; se descrive ciò che ha fatto il team, chiedi qual è stato il suo contributo personale.",
+  "coverageTopics": [
+    "Contesto e persone coinvolte",
+    "Obiettivo",
+    "Azioni personali del partecipante",
+    "Difficoltà incontrate",
+    "Risultato finale"
+  ],
+  "followUpQuestions": [
+    "Qual era il contesto? Chi era coinvolto?",
+    "Qual era l'obiettivo?",
+    "Cos'hai fatto?",
+    "Quali difficoltà hai incontrato?",
+    "Qual è stato il risultato?"
+  ],
   "questions": [
-    { "id": "ruolo",         "text": "Di cosa ti occupi attualmente e da quanto tempo?",                 "objective": "Capire il ruolo attuale, il contesto o l'azienda, e da quanto tempo lo ricopre." },
-    { "id": "esperienza",    "text": "Quanti anni di esperienza hai nel tuo ruolo principale?",           "objective": "Ottenere un numero indicativo di anni di esperienza e in quale ruolo o area." },
-    { "id": "stack",         "text": "Quali sono le tue tre competenze o tecnologie principali?",         "objective": "Raccogliere almeno tre competenze o tecnologie concrete e il livello di padronanza." },
-    { "id": "progetto",      "text": "Raccontami brevemente un progetto di cui vai particolarmente fiero.", "objective": "Capire il progetto, il ruolo della persona, le tecnologie usate e il risultato ottenuto." },
-    { "id": "disponibilita", "text": "Qual e' la tua disponibilita e il tuo preavviso attuale?",          "objective": "Ottenere la disponibilita (tempistica) e la durata del preavviso attuale." },
-    { "id": "ral",           "text": "Qual e' la tua aspettativa economica indicativa?",                  "objective": "Ottenere un valore o una fascia di aspettativa economica (RAL lorda annua)." },
-    { "id": "motivazione",   "text": "Cosa cerchi nella tua prossima opportunita?",                      "objective": "Capire cosa cerca nella prossima opportunita e cosa la spingerebbe a cambiare." }
+    {
+      "id": "critical_thinking",
+      "name": "Critical Thinking",
+      "text": "Raccontami di un problema complesso recente nella tua area che era difficile da inquadrare. Qual era il problema? Che cosa hai fatto?",
+      "objective": "Raccogliere un episodio reale e specifico che permetta di valutare il pensiero critico del partecipante.",
+      "evaluationCriteria": [
+        "Focus on important information without getting bogged down in unnecessary detail",
+        "Analyze data to pinpoint root causes of problems",
+        "Define effective and viable alternatives to solve problems",
+        "Integrate insights from multiple stakeholders to form comprehensive problem understanding",
+        "Challenge assumptions and test the logic underlying proposed solutions"
+      ]
+    },
+    {
+      "id": "strategy",
+      "name": "Strategy",
+      "text": "Descrivimi un momento recente in cui una priorità strategica importante per la tua area era a rischio. Che cosa era a rischio? Che cosa hai fatto?",
+      "objective": "Raccogliere un episodio reale e specifico che permetta di valutare la capacità strategica del partecipante.",
+      "evaluationCriteria": [
+        "Translate business strategies into clear goals and tactics for own team",
+        "Effectively balance day-to-day activities with the pursuit of long-term goals",
+        "Understand and clearly communicate the priorities of own area",
+        "Anticipate how external trends and organizational changes may impact own area",
+        "Align major initiatives and projects across teams so that they clearly support the strategic priorities of the area and organization"
+      ]
+    }
   ]
 }
