@@ -19,6 +19,9 @@ import {
   LOOK_DOWN_PITCH_DEG,
   MIN_BROWSER_EPISODE_MS,
   MULTI_FACE_MS,
+  PHONE_DETECTED_MS,
+  PHONE_SAMPLE_MS,
+  PHONE_SCORE_THRESHOLD,
   SAMPLE_FPS,
   SECOND_VOICE_MS,
   SNAPSHOT_INTERVAL_MS,
@@ -39,6 +42,13 @@ interface FaceLandmarkerLike {
   detectForVideo(video: HTMLVideoElement, ts: number): FaceResult;
   close(): void;
 }
+interface PhoneDetectionResult {
+  detections: Array<{ categories: Array<{ categoryName: string; score: number }> }>;
+}
+interface ObjectDetectorLike {
+  detectForVideo(video: HTMLVideoElement, ts: number): PhoneDetectionResult;
+  close(): void;
+}
 
 // ── Module state (one collector at a time; the app runs a single session) ──────────
 let active = false;
@@ -49,9 +59,13 @@ let stream: MediaStream | null = null;
 // Landmarker is cached across sessions — the model loads once (~3–5s) and is reused.
 let landmarker: FaceLandmarkerLike | null = null;
 let landmarkerPromise: Promise<FaceLandmarkerLike | null> | null = null;
+// ObjectDetector for phone detection — also cached, loads in background after face detection.
+let objectDetector: ObjectDetectorLike | null = null;
+let objectDetectorPromise: Promise<ObjectDetectorLike | null> | null = null;
 let selfView: HTMLVideoElement | null = null;
 
 let sampleTimer: number | null = null;
+let phoneSampleTimer: number | null = null;
 let flushTimer: number | null = null;
 let snapshotTimer: number | null = null;
 
@@ -86,6 +100,7 @@ let multiFaceEp: Ep = null; // multiple_faces
 let lookAwayEp: Ep = null; // looking_away
 let lookDownEp: Ep = null; // looking_down
 let tooFarEp: Ep = null; // too_far
+let phoneEp: Ep = null; // phone_detected
 let lastPose: { yaw: number; pitch: number } | null = null;
 
 function now(): number {
@@ -103,6 +118,7 @@ const VIOLATION_CB_TYPES = new Set<IntegrityType>([
   'too_far',
   'multiple_faces',
   'second_voice',
+  'phone_detected',
 ]);
 
 function push(type: IntegrityType, meta?: Record<string, unknown>): void {
@@ -303,6 +319,45 @@ function sampleOnce(): void {
   evaluateFrame(faceCount, pose, faceWidth);
 }
 
+// Loads the MediaPipe ObjectDetector (EfficientDet-Lite0) once and caches it. Phone
+// detection runs at a slower cadence than face detection to keep CPU load light.
+function ensureObjectDetector(): Promise<ObjectDetectorLike | null> {
+  if (objectDetector) return Promise.resolve(objectDetector);
+  if (!objectDetectorPromise) {
+    objectDetectorPromise = (async () => {
+      try {
+        const vision = await import('@mediapipe/tasks-vision');
+        const fileset = await vision.FilesetResolver.forVisionTasks('/proctor/wasm');
+        objectDetector = (await vision.ObjectDetector.createFromOptions(fileset, {
+          baseOptions: { modelAssetPath: '/proctor/efficientdet_lite0.tflite' },
+          runningMode: 'VIDEO',
+          scoreThreshold: PHONE_SCORE_THRESHOLD,
+          categoryAllowlist: ['cell phone'],
+        })) as unknown as ObjectDetectorLike;
+        return objectDetector;
+      } catch (err) {
+        console.warn('[proctor] phone detection unavailable:', err);
+        objectDetectorPromise = null;
+        return null;
+      }
+    })();
+  }
+  return objectDetectorPromise;
+}
+
+function samplePhone(): void {
+  if (!objectDetector || !selfView || selfView.readyState < 2) return;
+  try {
+    const result = objectDetector.detectForVideo(selfView, performance.now());
+    // categoryAllowlist ensures every returned detection IS a cell phone — just check count.
+    if (result.detections.length > 0) {
+      if (!phoneEp) phoneEp = { start: now() };
+    } else {
+      phoneEp = closeEpisode(phoneEp, 'phone_detected', PHONE_DETECTED_MS);
+    }
+  } catch { /* transient */ }
+}
+
 // Loads the MediaPipe FaceLandmarker once and caches it for the page lifetime so that
 // subsequent sessions and warmupCamera() reuse the same model instance.
 function ensureLandmarker(): Promise<FaceLandmarkerLike | null> {
@@ -361,6 +416,12 @@ async function initCamera(): Promise<void> {
   const lm = await ensureLandmarker();
   if (!active || !lm) return;
   sampleTimer = window.setInterval(sampleOnce, Math.round(1000 / SAMPLE_FPS));
+
+  // Phone detection — loads in parallel, doesn't block face detection if it fails.
+  void ensureObjectDetector().then((od) => {
+    if (!active || !od) return;
+    phoneSampleTimer = window.setInterval(samplePhone, PHONE_SAMPLE_MS);
+  });
 }
 
 // ── Transport ────────────────────────────────────────────────────────────────────
@@ -395,6 +456,7 @@ function closeAllEpisodes(): void {
   });
   lookDownEp = closeEpisode(lookDownEp, 'looking_down', LOOK_AWAY_MS);
   tooFarEp = closeEpisode(tooFarEp, 'too_far', TOO_FAR_MS);
+  phoneEp = closeEpisode(phoneEp, 'phone_detected', PHONE_DETECTED_MS);
   secondVoiceEp = closeEpisode(secondVoiceEp, 'second_voice', SECOND_VOICE_MS);
 }
 
@@ -434,10 +496,12 @@ export function stopProctor(): void {
   document.removeEventListener('paste', onPaste);
 
   if (sampleTimer != null) window.clearInterval(sampleTimer);
+  if (phoneSampleTimer != null) window.clearInterval(phoneSampleTimer);
   if (flushTimer != null) window.clearInterval(flushTimer);
   if (snapshotTimer != null) window.clearInterval(snapshotTimer);
   if (audioSampleTimer != null) window.clearInterval(audioSampleTimer);
   sampleTimer = null;
+  phoneSampleTimer = null;
   flushTimer = null;
   snapshotTimer = null;
   audioSampleTimer = null;

@@ -198,7 +198,7 @@ function resetTimerDisplay(): void {
 
 // ── Toast notifications ────────────────────────────────────────────────────────
 // Types that warrant a visible in-interview warning (not looking_away — too frequent).
-const TOAST_TYPES = new Set(['tab_hidden','focus_lost','fullscreen_exit','clipboard_copy','clipboard_paste','face_absent','multiple_faces','looking_down','too_far']);
+const TOAST_TYPES = new Set(['tab_hidden','focus_lost','fullscreen_exit','clipboard_copy','clipboard_paste','face_absent','multiple_faces','looking_down','too_far','phone_detected']);
 
 function showToast(type: string, label: string): void {
   if (!TOAST_TYPES.has(type)) return;

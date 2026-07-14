@@ -15,7 +15,8 @@ export type IntegrityType =
   | 'fullscreen_exit' // user exited fullscreen during interview
   | 'clipboard_copy' // user copied text
   | 'clipboard_paste' // user pasted text
-  | 'second_voice'; // another voice detected via mic while avatar is speaking
+  | 'second_voice' // another voice detected via mic while avatar is speaking
+  | 'phone_detected'; // a mobile phone visible in frame
 
 export const INTEGRITY_TYPES: IntegrityType[] = [
   'tab_hidden',
@@ -30,6 +31,7 @@ export const INTEGRITY_TYPES: IntegrityType[] = [
   'clipboard_copy',
   'clipboard_paste',
   'second_voice',
+  'phone_detected',
 ];
 
 // Human-readable labels for the review panel (Italian, user-facing copy).
@@ -46,6 +48,7 @@ export const INTEGRITY_LABELS: Record<IntegrityType, string> = {
   clipboard_copy: 'Copia testo',
   clipboard_paste: 'Incolla testo',
   second_voice: 'Seconda voce rilevata',
+  phone_detected: 'Telefono rilevato',
 };
 
 export interface IntegrityEventInput {
@@ -66,6 +69,10 @@ export const LOOK_AWAY_PITCH_DEG = 22; // |pitch| beyond this = looking away
 export const LOOK_DOWN_PITCH_DEG = 20; // negative pitch below this (downward tilt) = looking_down
 export const FACE_MIN_WIDTH_RATIO = 0.20; // face bbox width (0–1 normalized) below this = too_far
 export const TOO_FAR_MS = 3_000; // face too small this long → too_far event
+
+export const PHONE_SAMPLE_MS = 2_000;     // run object detection every 2s (CPU-light cadence)
+export const PHONE_DETECTED_MS = 3_000;  // phone visible this long → phone_detected event
+export const PHONE_SCORE_THRESHOLD = 0.5; // min confidence to count as "cell phone"
 
 export const SNAPSHOT_INTERVAL_MS = 60_000;
 export const VOICE_RMS_THRESHOLD = 0.04; // mic RMS above this = voice activity
