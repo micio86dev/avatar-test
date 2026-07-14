@@ -6,10 +6,10 @@
 import type { InterviewProvider, ProviderName, TranscriptEntry } from '../providers/types';
 import { HeyGenProvider } from '../providers/heygen';
 import { TavusProvider } from '../providers/tavus';
-import { beaconProctor, startProctor, stopProctor } from './proctor';
+import { beaconProctor, enterFullscreen, setAvatarSpeaking, setViolationCallback, startProctor, stopProctor, INTEGRITY_LABELS } from './proctor';
 
 type Phase = 'idle' | 'connecting' | 'live';
-type Screen = 'start' | 'code' | 'interview' | 'endq' | 'paused' | 'done';
+type Screen = 'start' | 'code' | 'rules' | 'interview' | 'endq' | 'paused' | 'done';
 type EndedReason = 'completed' | 'timeout' | 'user_stop' | 'error';
 
 interface Rates {
@@ -69,6 +69,11 @@ const btnHome2 = document.getElementById('btn-home-2') as HTMLButtonElement;
 const meterEl = document.getElementById('meter') as HTMLElement;
 const meterCostEl = document.getElementById('meter-cost') as HTMLElement;
 const meterCreditsEl = document.getElementById('meter-credits') as HTMLElement;
+// Rules screen
+const btnRulesOk = document.getElementById('btn-rules-ok') as HTMLButtonElement;
+// Toast
+const toastEl = document.getElementById('toast') as HTMLElement;
+const toastMsgEl = document.getElementById('toast-msg') as HTMLElement;
 
 // ── State ─────────────────────────────────────────────────────────────────────────
 let provider: InterviewProvider | null = null;
@@ -85,6 +90,9 @@ const completedSet = new Set<number>();
 let sessionId: number | null = null;
 let providerSessionId: string | undefined;
 let lastEndedReason: EndedReason | null = null;
+let rulesShown = false;
+let pendingQuestionIndex = 0;
+let toastTimer: number | null = null;
 let rates: Rates = { heygenCreditsPerMin: 2, heygenUsdPerCredit: 0.1, tavusUsdPerMin: 0.37 };
 
 // Timer
@@ -177,6 +185,18 @@ function resetTimerDisplay(): void {
   clearTimer();
   timerEl.textContent = '—:——';
   timerEl.dataset.warn = 'normal';
+}
+
+// ── Toast notifications ────────────────────────────────────────────────────────
+// Types that warrant a visible in-interview warning (not looking_away — too frequent).
+const TOAST_TYPES = new Set(['tab_hidden','focus_lost','fullscreen_exit','clipboard_copy','clipboard_paste','face_absent','multiple_faces']);
+
+function showToast(type: string, label: string): void {
+  if (!TOAST_TYPES.has(type)) return;
+  toastMsgEl.textContent = `⚠ ${label}`;
+  toastEl.hidden = false;
+  if (toastTimer != null) window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => { toastEl.hidden = true; }, 4000);
 }
 
 // ── Cost meter ─────────────────────────────────────────────────────────────────
@@ -342,6 +362,7 @@ async function startSession(index: number): Promise<void> {
     });
     provider.on('state', (s) => {
       const kind = String(s);
+      setAvatarSpeaking(kind === 'speaking');
       if (kind === 'stopped') {
         if (!ending) void onProviderStopped();
         return;
@@ -442,6 +463,11 @@ async function onProviderError(): Promise<void> {
 }
 
 // ── Screen flow ────────────────────────────────────────────────────────────────
+function showRules(index: number): void {
+  pendingQuestionIndex = index;
+  setScreen('rules');
+}
+
 // autoStart=true makes the next question begin its session on its own, so a candidate
 // mid-interview never has to press "Parla" again — the transition feels seamless. The very
 // first question is left manual (autoStart=false): that first click is the user gesture that
@@ -592,7 +618,7 @@ async function onResume(): Promise<void> {
       setScreen('done');
       return;
     }
-    beginQuestion(info.nextQuestionIndex);
+    showRules(info.nextQuestionIndex);
   } catch (err) {
     startError.textContent = `Errore: ${err instanceof Error ? err.message : String(err)}`;
   } finally {
@@ -615,11 +641,18 @@ button.addEventListener('click', () => {
 });
 btnNew.addEventListener('click', () => void onNew());
 btnResume.addEventListener('click', () => void onResume());
-btnBegin.addEventListener('click', () => beginQuestion(0));
+btnBegin.addEventListener('click', () => showRules(0));
+btnRulesOk.addEventListener('click', () => {
+  rulesShown = true;
+  void enterFullscreen();
+  beginQuestion(pendingQuestionIndex);
+});
 btnNext.addEventListener('click', () => void onNext());
 btnPause.addEventListener('click', onPause);
 btnHome.addEventListener('click', goHome);
 btnHome2.addEventListener('click', goHome);
+
+setViolationCallback(showToast);
 
 // On tab/window close, end a live Tavus conversation server-side. A local provider.stop()
 // only leaves the Daily room and may not transmit during unload, so the single Tavus slot

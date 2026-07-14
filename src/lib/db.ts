@@ -155,6 +155,15 @@ function getDb(): Database.Database {
       FOREIGN KEY (session_id) REFERENCES sessions(id)
     );
     CREATE INDEX IF NOT EXISTS idx_integrity_session ON integrity_events(session_id);
+    CREATE TABLE IF NOT EXISTS webcam_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id INTEGER NOT NULL,
+      path TEXT NOT NULL,
+      ts TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (session_id) REFERENCES sessions(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_snapshots_session ON webcam_snapshots(session_id);
   `);
 
   // Migrate an existing sessions table (from the pre-per-question schema) in place.
@@ -365,6 +374,27 @@ export function computeIntegritySummary(sessionId: number): IntegritySummary {
     meta: r.meta ? (JSON.parse(r.meta) as Record<string, unknown>) : null,
   }));
   return summarizeIntegrity(parsed);
+}
+
+export interface SnapshotRow {
+  id: number;
+  session_id: number;
+  path: string;
+  ts: string;
+  created_at: string;
+}
+
+export function insertSnapshot(sessionId: number, path: string, ts: string): void {
+  const now = new Date().toISOString();
+  getDb()
+    .prepare(`INSERT INTO webcam_snapshots (session_id, path, ts, created_at) VALUES (?, ?, ?, ?)`)
+    .run(sessionId, path, ts, now);
+}
+
+export function getSnapshots(sessionId: number): SnapshotRow[] {
+  return getDb()
+    .prepare(`SELECT * FROM webcam_snapshots WHERE session_id = ? ORDER BY ts`)
+    .all(sessionId) as SnapshotRow[];
 }
 
 // First question by index that is NOT completed (pending or timed-out both re-run) —

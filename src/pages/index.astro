@@ -65,6 +65,21 @@
         <button type="button" id="btn-begin" class="btn primary">Inizia il colloquio</button>
       </section>
 
+      <!-- ── RULES (pre-interview briefing — shown once before the first question) ── -->
+      <section class="screen panel" id="screen-rules">
+        <h2>Prima di iniziare</h2>
+        <p class="hint">Questo colloquio è monitorato per garantire l'equità. Assicurati di:</p>
+        <ul class="rules-list">
+          <li>Essere solo/a nell'inquadratura della webcam</li>
+          <li>Rimanere con il viso visibile e rivolto verso lo schermo</li>
+          <li>Non cambiare scheda o finestra durante il colloquio</li>
+          <li>Non copiare o incollare testo</li>
+          <li>Rimanere in modalità schermo intero</li>
+        </ul>
+        <p class="rules-note">La webcam rimane attiva e vengono acquisiti snapshot periodici. Nessun video lascia il tuo dispositivo.</p>
+        <button type="button" id="btn-rules-ok" class="btn primary">Ho capito, inizia il colloquio</button>
+      </section>
+
       <!-- ── INTERVIEW ─────────────────────────────────────────────────────────── -->
       <div class="screen interview" id="screen-interview">
         <header class="topbar">
@@ -97,6 +112,9 @@
             🎤 Parla
           </button>
         </footer>
+        <div id="toast" class="toast" hidden>
+          <span id="toast-msg"></span>
+        </div>
       </div>
 
       <!-- ── END OF QUESTION ───────────────────────────────────────────────────── -->
@@ -155,6 +173,7 @@
       }
       .app[data-screen='start'] #screen-start,
       .app[data-screen='code'] #screen-code,
+      .app[data-screen='rules'] #screen-rules,
       .app[data-screen='interview'] #screen-interview,
       .app[data-screen='endq'] #screen-endq,
       .app[data-screen='paused'] #screen-paused,
@@ -509,6 +528,45 @@
         margin-top: 2px;
         accent-color: #10b981;
         flex-shrink: 0;
+      }
+
+      .rules-list {
+        text-align: left;
+        margin: 0;
+        padding: 0 0 0 1.2em;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        font-size: 0.9rem;
+        color: #cbd5e1;
+        max-width: 420px;
+      }
+      .rules-note {
+        margin: 0;
+        font-size: 0.76rem;
+        color: #6b7280;
+        max-width: 420px;
+      }
+
+      .toast {
+        position: fixed;
+        top: 16px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 10px 18px;
+        font-size: 0.88rem;
+        font-weight: 600;
+        color: #fff;
+        background: rgba(239, 68, 68, 0.92);
+        border-radius: 999px;
+        backdrop-filter: blur(8px);
+        box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+        z-index: 200;
+        pointer-events: none;
+        white-space: nowrap;
+      }
+      .toast[hidden] {
+        display: none;
       }
     </style>
   </body>

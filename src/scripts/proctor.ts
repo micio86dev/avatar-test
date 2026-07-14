@@ -18,6 +18,9 @@ import {
   MIN_BROWSER_EPISODE_MS,
   MULTI_FACE_MS,
   SAMPLE_FPS,
+  SECOND_VOICE_MS,
+  SNAPSHOT_INTERVAL_MS,
+  VOICE_RMS_THRESHOLD,
   type IntegrityEventInput,
   type IntegrityType,
 } from '../lib/proctor-config';
@@ -44,6 +47,28 @@ let selfView: HTMLVideoElement | null = null;
 
 let sampleTimer: number | null = null;
 let flushTimer: number | null = null;
+let snapshotTimer: number | null = null;
+
+// ── Layer 3: audio anomaly (separate mic stream + WebAudio) ──────────────────────
+// With echoCancellation: true, the avatar's voice (from speakers) is suppressed.
+// Any sustained RMS above threshold while the avatar is talking = second person nearby.
+let audioCtx: AudioContext | null = null;
+let micStream: MediaStream | null = null;
+let analyserNode: AnalyserNode | null = null;
+let audioDataArray: Uint8Array<ArrayBuffer> | null = null;
+let audioSampleTimer: number | null = null;
+let avatarSpeaking = false;
+let secondVoiceEp: Ep = null;
+
+export function setAvatarSpeaking(speaking: boolean): void {
+  avatarSpeaking = speaking;
+}
+
+// ── Violation callback ────────────────────────────────────────────────────────────
+let violationCb: ((type: IntegrityType, label: string) => void) | null = null;
+export function setViolationCallback(cb: (type: IntegrityType, label: string) => void): void {
+  violationCb = cb;
+}
 
 // Open episodes: a signal that is currently ongoing. We emit ONE event on transition
 // (when it ends) carrying the duration, instead of one event per sampled frame.
@@ -59,8 +84,22 @@ function now(): number {
   return Date.now();
 }
 
+const VIOLATION_CB_TYPES = new Set<IntegrityType>([
+  'tab_hidden',
+  'focus_lost',
+  'fullscreen_exit',
+  'clipboard_copy',
+  'clipboard_paste',
+  'face_absent',
+  'multiple_faces',
+  'second_voice',
+]);
+
 function push(type: IntegrityType, meta?: Record<string, unknown>): void {
   buffer.push({ type, ts: new Date().toISOString(), meta: meta ?? null });
+  if (violationCb && VIOLATION_CB_TYPES.has(type)) {
+    violationCb(type, INTEGRITY_LABELS[type]);
+  }
 }
 
 // Close an open episode and, if it lasted at least `minMs`, emit an event with its duration.
@@ -70,6 +109,37 @@ function closeEpisode(ep: Ep, type: IntegrityType, minMs: number, extra?: Record
     if (durationMs >= minMs) push(type, { durationMs, ...extra });
   }
   return null;
+}
+
+// ── Fullscreen detection ─────────────────────────────────────────────────────────
+function onFullscreenChange(): void {
+  if (!document.fullscreenElement && active) {
+    push('fullscreen_exit');
+  }
+}
+
+// ── Copy/paste detection ─────────────────────────────────────────────────────────
+function onCopy(): void { if (active) push('clipboard_copy'); }
+function onPaste(): void { if (active) push('clipboard_paste'); }
+
+// ── Periodic webcam snapshot ─────────────────────────────────────────────────────
+async function takeSnapshot(): Promise<void> {
+  if (!selfView || selfView.readyState < 2 || sessionId == null) return;
+  const canvas = document.createElement('canvas');
+  canvas.width = selfView.videoWidth || 320;
+  canvas.height = selfView.videoHeight || 240;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  ctx.drawImage(selfView, 0, 0);
+  const jpeg = canvas.toDataURL('image/jpeg', 0.7);
+  try {
+    await fetch('/api/interview/snapshot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, image: jpeg, ts: new Date().toISOString() }),
+      keepalive: true,
+    });
+  } catch { /* best-effort */ }
 }
 
 // ── Layer 1: browser focus/visibility (no camera) ──────────────────────────────────
@@ -87,6 +157,46 @@ function onBlur(): void {
 }
 function onFocus(): void {
   focusEp = closeEpisode(focusEp, 'focus_lost', MIN_BROWSER_EPISODE_MS);
+}
+
+// ── Layer 3: audio sampling ───────────────────────────────────────────────────────
+function sampleAudio(): void {
+  if (!analyserNode || !audioDataArray) return;
+  analyserNode.getByteTimeDomainData(audioDataArray);
+  let sum = 0;
+  for (let i = 0; i < audioDataArray.length; i++) {
+    const v = (audioDataArray[i] - 128) / 128;
+    sum += v * v;
+  }
+  const rms = Math.sqrt(sum / audioDataArray.length);
+
+  if (avatarSpeaking && rms > VOICE_RMS_THRESHOLD) {
+    if (!secondVoiceEp) secondVoiceEp = { start: now() };
+  } else {
+    secondVoiceEp = closeEpisode(secondVoiceEp, 'second_voice', SECOND_VOICE_MS);
+  }
+}
+
+async function initAudio(): Promise<void> {
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true },
+      video: false,
+    });
+  } catch {
+    return; // mic denied — Layer 1+2 still run
+  }
+  if (!active) {
+    micStream.getTracks().forEach((t) => t.stop());
+    micStream = null;
+    return;
+  }
+  audioCtx = new AudioContext();
+  analyserNode = audioCtx.createAnalyser();
+  analyserNode.fftSize = 256;
+  audioDataArray = new Uint8Array(analyserNode.frequencyBinCount);
+  audioCtx.createMediaStreamSource(micStream).connect(analyserNode);
+  audioSampleTimer = window.setInterval(sampleAudio, 500);
 }
 
 // ── Layer 2: webcam face detection ──────────────────────────────────────────────────
@@ -177,6 +287,8 @@ async function initCamera(): Promise<void> {
     selfView.hidden = false;
     void selfView.play().catch(() => {});
   }
+  // Start periodic snapshot timer as soon as the stream is live (even if the landmarker fails).
+  snapshotTimer = window.setInterval(() => void takeSnapshot(), SNAPSHOT_INTERVAL_MS);
 
   try {
     const vision = await import('@mediapipe/tasks-vision');
@@ -228,6 +340,7 @@ function closeAllEpisodes(): void {
     yaw: lastPose ? Math.round(lastPose.yaw) : undefined,
     pitch: lastPose ? Math.round(lastPose.pitch) : undefined,
   });
+  secondVoiceEp = closeEpisode(secondVoiceEp, 'second_voice', SECOND_VOICE_MS);
 }
 
 // ── Public API (called from interview-client.ts) ───────────────────────────────────
@@ -245,8 +358,12 @@ export function startProctor(id: number): void {
   document.addEventListener('visibilitychange', onVisibility);
   window.addEventListener('blur', onBlur);
   window.addEventListener('focus', onFocus);
+  document.addEventListener('fullscreenchange', onFullscreenChange);
+  document.addEventListener('copy', onCopy);
+  document.addEventListener('paste', onPaste);
 
   void initCamera();
+  void initAudio();
   flushTimer = window.setInterval(() => void flush(), FLUSH_INTERVAL_MS);
 }
 
@@ -257,11 +374,25 @@ export function stopProctor(): void {
   document.removeEventListener('visibilitychange', onVisibility);
   window.removeEventListener('blur', onBlur);
   window.removeEventListener('focus', onFocus);
+  document.removeEventListener('fullscreenchange', onFullscreenChange);
+  document.removeEventListener('copy', onCopy);
+  document.removeEventListener('paste', onPaste);
 
   if (sampleTimer != null) window.clearInterval(sampleTimer);
   if (flushTimer != null) window.clearInterval(flushTimer);
+  if (snapshotTimer != null) window.clearInterval(snapshotTimer);
+  if (audioSampleTimer != null) window.clearInterval(audioSampleTimer);
   sampleTimer = null;
   flushTimer = null;
+  snapshotTimer = null;
+  audioSampleTimer = null;
+  micStream?.getTracks().forEach((t) => t.stop());
+  micStream = null;
+  analyserNode = null;
+  audioDataArray = null;
+  void audioCtx?.close();
+  audioCtx = null;
+  avatarSpeaking = false;
 
   closeAllEpisodes();
   void flush();
@@ -286,6 +417,12 @@ export function beaconProctor(): void {
   const events = buffer.splice(0, buffer.length);
   const payload = JSON.stringify({ sessionId, events });
   navigator.sendBeacon('/api/interview/integrity', new Blob([payload], { type: 'application/json' }));
+}
+
+export async function enterFullscreen(): Promise<void> {
+  try {
+    await document.documentElement.requestFullscreen();
+  } catch { /* ignored — unsupported or denied */ }
 }
 
 // Re-exported so callers (and future UI) can label event types without re-importing config.

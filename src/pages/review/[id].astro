@@ -1,7 +1,8 @@
 ---
 // Simple review view for a stored interview: the transcript plus an estimated cost
 // recomputed from the session duration × the provider rate (the comparison metric).
-import { computeIntegritySummary, getIntegrityEvents, getSession, getUtterances } from '../../lib/db';
+import { computeIntegritySummary, getIntegrityEvents, getSession, getSnapshots, getUtterances } from '../../lib/db';
+import type { SnapshotRow } from '../../lib/db';
 import { rates } from '../../lib/pricing';
 import { INTEGRITY_LABELS, type IntegrityType } from '../../lib/proctor-config';
 
@@ -24,6 +25,7 @@ if (session?.ended_at) {
 // stored column — same approach as the cost estimate above).
 const integrityEvents = session ? getIntegrityEvents(id) : [];
 const integrity = session ? computeIntegritySummary(id) : null;
+const snapshots: SnapshotRow[] = session ? getSnapshots(id) : [];
 const BAND_LABEL: Record<string, string> = { low: 'basso', medium: 'medio', high: 'alto' };
 
 function eventTime(ts: string): string {
@@ -100,6 +102,20 @@ function eventDetail(type: string, metaJson: string | null): string {
                     ))}
                   </ol>
                 )}
+              </section>
+            )}
+
+            {snapshots.length > 0 && (
+              <section class="snapshots">
+                <h2>Snapshot webcam ({snapshots.length})</h2>
+                <div class="snap-grid">
+                  {snapshots.map((s) => (
+                    <div class="snap-item">
+                      <span class="snap-time">{eventTime(s.ts)}</span>
+                      <span class="snap-path">{s.path}</span>
+                    </div>
+                  ))}
+                </div>
               </section>
             )}
 
@@ -258,6 +274,39 @@ function eventDetail(type: string, metaJson: string | null): string {
       }
       .empty {
         color: #9aa0aa;
+      }
+
+      .snapshots {
+        margin: 0 0 28px;
+        padding: 16px;
+        border: 1px solid #2a2c36;
+        border-radius: 12px;
+        background: #101119;
+      }
+      .snapshots h2 {
+        margin: 0 0 12px;
+        font-size: 1rem;
+      }
+      .snap-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .snap-item {
+        display: flex;
+        gap: 12px;
+        padding: 4px 8px;
+        font-size: 0.8rem;
+        background: #17181f;
+        border-radius: 6px;
+      }
+      .snap-time {
+        color: #9aa0aa;
+        flex-shrink: 0;
+      }
+      .snap-path {
+        color: #6b7280;
+        font-family: monospace;
       }
     </style>
   </body>

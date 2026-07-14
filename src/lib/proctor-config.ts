@@ -9,7 +9,11 @@ export type IntegrityType =
   | 'second_monitor' // an extended display was present at session start
   | 'face_absent' // no face in frame beyond the threshold
   | 'looking_away' // head turned off-axis beyond the threshold
-  | 'multiple_faces'; // two or more faces in frame
+  | 'multiple_faces' // two or more faces in frame
+  | 'fullscreen_exit' // user exited fullscreen during interview
+  | 'clipboard_copy' // user copied text
+  | 'clipboard_paste' // user pasted text
+  | 'second_voice'; // another voice detected via mic while avatar is speaking
 
 export const INTEGRITY_TYPES: IntegrityType[] = [
   'tab_hidden',
@@ -18,6 +22,10 @@ export const INTEGRITY_TYPES: IntegrityType[] = [
   'face_absent',
   'looking_away',
   'multiple_faces',
+  'fullscreen_exit',
+  'clipboard_copy',
+  'clipboard_paste',
+  'second_voice',
 ];
 
 // Human-readable labels for the review panel (Italian, user-facing copy).
@@ -28,6 +36,10 @@ export const INTEGRITY_LABELS: Record<IntegrityType, string> = {
   face_absent: 'Volto assente',
   looking_away: 'Sguardo altrove',
   multiple_faces: 'Più persone',
+  fullscreen_exit: 'Uscita dal fullscreen',
+  clipboard_copy: 'Copia testo',
+  clipboard_paste: 'Incolla testo',
+  second_voice: 'Seconda voce rilevata',
 };
 
 export interface IntegrityEventInput {
@@ -46,6 +58,10 @@ export const LOOK_AWAY_MS = 2_500; // head off-axis this long → looking_away
 export const LOOK_AWAY_YAW_DEG = 25; // |yaw| beyond this = looking away
 export const LOOK_AWAY_PITCH_DEG = 22; // |pitch| beyond this = looking away
 
+export const SNAPSHOT_INTERVAL_MS = 60_000;
+export const VOICE_RMS_THRESHOLD = 0.04; // mic RMS above this = voice activity
+export const SECOND_VOICE_MS = 2_000; // sustained audio this long while avatar speaks → flag
+
 // ── Risk scoring (server, derived at query time) ────────────────────────────────
 // Heuristic weights. This is a TRIAGE signal for a human reviewer, NOT proof of cheating.
 export interface RiskWeights {
@@ -55,6 +71,10 @@ export interface RiskWeights {
   lookingAwayPerSec: number;
   multipleFacesPerSec: number;
   secondMonitor: number;
+  fullscreenExitPerEvent: number;
+  clipboardCopyPerEvent: number;
+  clipboardPastePerEvent: number;
+  secondVoicePerSec: number;
 }
 export const RISK_WEIGHTS: RiskWeights = {
   tabHiddenPerSec: 1.0,
@@ -63,6 +83,10 @@ export const RISK_WEIGHTS: RiskWeights = {
   lookingAwayPerSec: 0.4,
   multipleFacesPerSec: 4,
   secondMonitor: 8,
+  fullscreenExitPerEvent: 5,
+  clipboardCopyPerEvent: 4,
+  clipboardPastePerEvent: 6,
+  secondVoicePerSec: 3.0,
 };
 // score < medium → low; medium ≤ score < high → medium; score ≥ high → high.
 export const RISK_BANDS = { medium: 15, high: 40 } as const;
@@ -78,6 +102,10 @@ export interface IntegritySummary {
   multipleFacesSec: number;
   secondMonitor: boolean;
   total: number;
+  fullscreenExits: number;
+  clipboardCopies: number;
+  clipboardPastes: number;
+  secondVoiceSec: number;
 }
 
 interface ScoreableEvent {
@@ -98,6 +126,7 @@ export function summarizeIntegrity(events: ScoreableEvent[]): IntegritySummary {
   let faceAbsentSec = 0;
   let lookingAwaySec = 0;
   let multipleFacesSec = 0;
+  let secondVoiceSec = 0;
   let secondMonitor = false;
 
   for (const e of events) {
@@ -115,6 +144,9 @@ export function summarizeIntegrity(events: ScoreableEvent[]): IntegritySummary {
       case 'multiple_faces':
         multipleFacesSec += durSec(e.meta);
         break;
+      case 'second_voice':
+        secondVoiceSec += durSec(e.meta);
+        break;
       case 'second_monitor':
         if (e.meta?.isExtended === true) secondMonitor = true;
         break;
@@ -128,7 +160,11 @@ export function summarizeIntegrity(events: ScoreableEvent[]): IntegritySummary {
     faceAbsentSec * w.faceAbsentPerSec +
     lookingAwaySec * w.lookingAwayPerSec +
     multipleFacesSec * w.multipleFacesPerSec +
-    (secondMonitor ? w.secondMonitor : 0);
+    secondVoiceSec * w.secondVoicePerSec +
+    (secondMonitor ? w.secondMonitor : 0) +
+    (counts.fullscreen_exit ?? 0) * w.fullscreenExitPerEvent +
+    (counts.clipboard_copy ?? 0) * w.clipboardCopyPerEvent +
+    (counts.clipboard_paste ?? 0) * w.clipboardPastePerEvent;
 
   const band: RiskBand =
     score >= RISK_BANDS.high ? 'high' : score >= RISK_BANDS.medium ? 'medium' : 'low';
@@ -143,5 +179,9 @@ export function summarizeIntegrity(events: ScoreableEvent[]): IntegritySummary {
     multipleFacesSec: Math.round(multipleFacesSec),
     secondMonitor,
     total: events.length,
+    fullscreenExits: counts.fullscreen_exit ?? 0,
+    clipboardCopies: counts.clipboard_copy ?? 0,
+    clipboardPastes: counts.clipboard_paste ?? 0,
+    secondVoiceSec: Math.round(secondVoiceSec),
   };
 }
