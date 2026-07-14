@@ -1,0 +1,430 @@
+{
+  "COL": {
+    "behaviors": [
+      {
+        "excerpts": [
+          "Recentemente mi è capitato di dover lavorare a stretto contatto con un collega che si occupa dello sviluppo del front-end per un prodotto sul quale il mio team sta sviluppando invece il back-end.",
+          "Quindi quello che abbiamo fatto il mio collega e in particolare quello che ho fatto io in questa occasione è stato di cambiare un po' le nostre abitudini e quindi di interfacciarci direttamente l'uno con l'altro.",
+          "è stato un esempio di collaborazione un po' fuori dagli schemi che ha funzionato molto bene e ha arricchito sia l'uno che l'altro."
+        ],
+        "explanation": "The candidate demonstrated effective collaboration by working closely with a front-end developer to integrate back-end and front-end components. This direct interaction, outside usual practices, enhanced mutual understanding and project success. The candidate's willingness to adapt and engage directly with colleagues highlights their ability to foster a positive and productive work environment.",
+        "indicator": "Work effectively with others",
+        "score": 4
+      },
+      {
+        "excerpts": [
+          "Mi è capitato di lavorare con un collega con un approccio decisamente diverso dal mio, in quanto più propenso a una strategia del trial and error.",
+          "ho gestito questa situazione all'inizio con un po' di difficoltà, ma poi in realtà con un po' di flessibilità.",
+          "siamo riusciti a risolvere il problema contingente che avevamo in quel momento in modo decisamente più veloce."
+        ],
+        "explanation": "The candidate showed a solid willingness to help colleagues by adapting to different working styles. They recognized the value in a colleague's trial-and-error approach, which led to faster problem resolution. While they adapted and supported the team, there is room for more proactive assistance in future scenarios.",
+        "indicator": "Willingly help colleagues in trouble",
+        "score": 3
+      },
+      {
+        "excerpts": [
+          "Quindi quello che abbiamo fatto il mio collega e in particolare quello che ho fatto io in questa occasione è stato di cambiare un po' le nostre abitudini e quindi di interfacciarci direttamente l'uno con l'altro.",
+          "è stato un esempio di collaborazione un po' fuori dagli schemi che ha funzionato molto bene e ha arricchito sia l'uno che l'altro.",
+          "è stato sicuramente anche un metodo molto efficace per raggiungere gli obiettivi che avevamo in quel momento."
+        ],
+        "explanation": "The candidate demonstrated strong commitment to team goals by actively engaging in collaborative problem-solving and adapting to new working methods. Their willingness to explore different approaches and integrate diverse perspectives contributed to achieving shared objectives, showcasing their dedication to team success.",
+        "indicator": "Demonstrate commitment and dedication to team goals",
+        "score": 4
+      }
+    ],
+    "reliability": "100%",
+    "score": 3.67
+  },
+  "COM": {
+    "behaviors": [
+      {
+        "excerpts": [
+          "Ho partecipato recentemente a un retrit aziendale per sviluppatori della nostra azienda e ho dovuto presentare il lavoro del mio team su un nuovo prodotto.",
+          "Quello che ho fatto è stato preparare delle slide e quindi anche una presentazione, un concetto di presentazione, chiaramente provandolo diverse volte, e ho cercato di guidare le persone che mi stavano ascoltando attraverso una schematizzazione.",
+          "Il risultato è stato che la mia presentazione è stata molto apprezzata, sia da chi non conosceva il nostro prodotto, non sapeva che stavamo sviluppando quel prodotto, ma conosceva la tecnologia ed è stato comunque interessato da come questa veniva applicata."
+        ],
+        "explanation": "The candidate effectively communicated complex ideas in a simple manner during a company retreat, ensuring understanding among a diverse audience. They prepared and rehearsed their presentation, using slides and simplified explanations to convey technical concepts. This approach was well-received, indicating clarity and conciseness in their communication style.",
+        "indicator": "Get the point across clearly and concisely",
+        "score": 4
+      },
+      {
+        "excerpts": [
+          "Ho cercato di semplificare il più possibile il concetto di quello che era il prodotto che stavamo sviluppando e del perché avevamo cercato una certa tecnologia.",
+          "In seguito ho spiegato in parole semplici di cosa si trattava questa tecnologia, chiaramente anche aiutandomi attraverso delle ricerche sul web e altro.",
+          "Il risultato è stato che la mia presentazione è stata molto apprezzata, sia da chi non conosceva il nostro prodotto, non sapeva che stavamo sviluppando quel prodotto, ma conosceva la tecnologia ed è stato comunque interessato da come questa veniva applicata."
+        ],
+        "explanation": "The candidate maintained audience interest by using structured presentations and relevant examples. They adapted their communication to the audience's knowledge level, ensuring engagement. However, there is room for improvement in using more dynamic delivery techniques to enhance engagement further.",
+        "indicator": "Keep people interested when speaking",
+        "score": 3
+      },
+      {
+        "excerpts": [
+          "Quello che ho fatto è di organizzare un meeting e esporre il design che avevo in mente, cercando in qualche modo anche di spiegarmi con delle parole che potessero risuonare per i miei colleghi.",
+          "E questo diciamo che finalmente ha funzionato, ci ha voluto tempo, ho avuto pazienza e diciamo non soltanto in una volta, ma ho dovuto ripetere più volte qual era la mia idea.",
+          "Il risultato è stato che la mia idea è passata e quindi abbiamo potuto continuare con l'implementazione di quello che era questo progetto per questa architettura."
+        ],
+        "explanation": "The candidate demonstrated effective group communication by organizing meetings to present ideas clearly and persisting until their design was understood and accepted. They adapted their language to resonate with colleagues, facilitating successful implementation of their proposed architecture.",
+        "indicator": "Speak effectively in a group",
+        "score": 4
+      }
+    ],
+    "reliability": "100%",
+    "score": 3.67
+  },
+  "CSF": {
+    "behaviors": [
+      {
+        "excerpts": [
+          "Quello che ho percepito come una potenziale necessità del cliente è stata quella di modificare tale area anche dopo aver attivato il prodotto senza dover per forza acquistare un nuovo prodotto e quindi poter cambiare questa configurazione.",
+          "Mi sono attivato diciamo a quel punto una volta realizzata la cosa mi sono attivato e ho discusso con il mio team in particolare con il PO del prodotto e diciamo ho fatto presente la cosa e ho proposto di inserire nel planning lo sviluppo di questa funzionalità.",
+          "Cosa che effettivamente dopo aver discusso sulla cosa è stata accettata visto di buon occhio e quindi ha permesso sicuramente di migliorare il disegno del prodotto in una fase preliminare il che ha sicuramente aiutato nello sviluppo."
+        ],
+        "explanation": "The candidate demonstrated a proactive approach to understanding customer needs by identifying a requirement for flexible map configurations in a cloud app. They addressed this need by proposing a feature to modify map areas post-activation, enhancing the product's value and aligning with customer interests.",
+        "indicator": "Understand customer needs and interests",
+        "score": 4
+      },
+      {
+        "excerpts": [
+          "Di nuovo ho esperienza su questo soggetto un po' più come parte di un team, quindi non veramente personalmente in quanto sono sviluppatore 100% e non ho un accesso diretto al cliente.",
+          "Nella fattispecie quello che è successo è che stavamo appunto disegnando, progettando e sviluppando questo prodotto in congiunzione con quelli che sarebbero stati i clienti.",
+          "L'impatto è stato sicuramente positivo perché il risultato è stato un commitment ancora più forte dei potenziali clienti verso lo sviluppo congiunto di questo prodotto."
+        ],
+        "explanation": "The candidate generally keeps commitments to customers, as evidenced by their involvement in a project with direct customer interaction. They contributed to meeting customer expectations by developing features collaboratively, though their role was more supportive than direct, indicating room for improvement in proactive communication.",
+        "indicator": "Keep commitments to customers",
+        "score": 3
+      },
+      {
+        "excerpts": [
+          "Nella fattispecie quello che è successo è che stavamo appunto disegnando, progettando e sviluppando questo prodotto in congiunzione con quelli che sarebbero stati i clienti, che poi nella fattispecie sono delle autorità, delle public transport authority.",
+          "Abbiamo superato l'aspettativa del cliente nel senso che ci siamo ritrovati in realtà durante la fase di disegno a renderci conto che con uno sforzo minimo in più avremmo anche potuto già sviluppare tutta la parte che rende possibile almeno il caricamento e in qualche modo un processing iniziale anche di quello che invece viene chiamato real time feed.",
+          "L'impatto è stato sicuramente positivo perché il risultato è stato un commitment ancora più forte dei potenziali clienti verso lo sviluppo congiunto di questo prodotto."
+        ],
+        "explanation": "The candidate built strong relationships with internal and external customers by collaborating on product development with public transport authorities. Their involvement in joint design and development efforts fostered trust and collaboration, demonstrating effective relationship-building skills.",
+        "indicator": "Establish effective working relationships with internal and external customers",
+        "score": 4
+      }
+    ],
+    "reliability": "100%",
+    "score": 3.67
+  },
+  "DRV": {
+    "behaviors": [
+      {
+        "excerpts": [
+          "Una volta durante l'estate, recentemente, l'anno scorso o forse due anni fa, il PO del mio gruppo, il cavo del mio gruppo, si è assentato per diverse settimane continuamente e quindi ci siamo ritrovati a dover gestire lo sviluppo del prodotto sul quale stavamo lavorando in autonomia.",
+          "ci siamo ritrovati, io e un altro mio collega, a dover utilizzare diversi strumenti che fino a quel momento avevamo soltanto visto utilizzare da altri e invece a quel punto abbiamo dovuto capire come fare a utilizzarli in autonomia.",
+          "in questo modo siamo riusciti a mantenere un alto livello di produttività anche in questa situazione diciamo un po' critica e in realtà quello che poi alla fine è stato il risultato è stato che non solo siamo riusciti in qualche modo a mantenere questo livello di produttività."
+        ],
+        "explanation": "The candidate maintained high productivity during a critical period when the team leader was absent. They took initiative to learn and use new tools independently, ensuring the continuation of product development. This proactive approach allowed them to manage tasks effectively, demonstrating their ability to maintain productivity under pressure.",
+        "indicator": "Maintain a consistent, high level of productivity",
+        "score": 4
+      },
+      {
+        "excerpts": [
+          "ci siamo ritrovati, io e un altro mio collega, a dover utilizzare diversi strumenti che fino a quel momento avevamo soltanto visto utilizzare da altri e invece a quel punto abbiamo dovuto capire come fare a utilizzarli in autonomia.",
+          "quello che abbiamo fatto è provare, chiaramente a costo di fare qualche errore, però diciamo abbiamo preso un approccio molto più attivo e abbiamo imparato.",
+          "in questo modo siamo riusciti a mantenere un alto livello di produttività anche in questa situazione diciamo un po' critica."
+        ],
+        "explanation": "The candidate demonstrated solid organizational skills by planning and executing tasks effectively during a team leader's absence. They managed to balance learning new tools and maintaining productivity, though occasional prioritization issues were implied. Overall, they met deadlines and managed their workload competently.",
+        "indicator": "Organize own work and manage time wisely",
+        "score": 3
+      },
+      {
+        "excerpts": [
+          "ci siamo ritrovati, io e un altro mio collega, a dover utilizzare diversi strumenti che fino a quel momento avevamo soltanto visto utilizzare da altri e invece a quel punto abbiamo dovuto capire come fare a utilizzarli in autonomia.",
+          "come fare per esempio un deploy dei servizi che stavamo sviluppando e come chiedere anche ad altri colleghi di altri gruppi, non so, al gruppo dei DevOps, comunicare direttamente con loro cosa stavamo facendo.",
+          "in questo modo siamo riusciti a mantenere un alto livello di produttività anche in questa situazione diciamo un po' critica."
+        ],
+        "explanation": "The candidate efficiently managed multiple requests and conflicting priorities during a period of team leader absence. They communicated directly with other teams, such as DevOps, to ensure smooth operations. This proactive communication and management of tasks under pressure highlight their ability to handle conflicting priorities effectively.",
+        "indicator": "Respond promptly to requests also managing conflicting priorities",
+        "score": 4
+      }
+    ],
+    "reliability": "100%",
+    "score": 3.67
+  },
+  "INF": {
+    "behaviors": [
+      {
+        "excerpts": [
+          "Quello che ho fatto è di organizzare un meeting e esporre il design che avevo in mente, cercando in qualche modo anche di spiegarmi con delle parole che potessero risuonare per i miei colleghi.",
+          "E questo diciamo che finalmente ha funzionato, ci ha voluto tempo, ho avuto pazienza e diciamo non soltanto in una volta, ma ho dovuto ripetere più volte qual era la mia idea.",
+          "finalmente diciamo che il risultato è stato che la mia idea è passata e quindi abbiamo potuto continuare con l'implementazione di quello che era questo progetto per questa architettura."
+        ],
+        "explanation": "The candidate effectively won support by organizing a meeting to present their architectural design, using clear communication and persistence. They addressed team concerns and repeated their ideas until they were accepted, demonstrating strong persuasive skills and gaining team endorsement for their proposal.",
+        "indicator": "Win support from others",
+        "score": 4
+      },
+      {
+        "excerpts": [
+          "Io avevo un'idea abbastanza precisa di cosa bisognava fare, anche perché avevo parlato con dei colleghi di altri team e avevo capito piuttosto bene qual era il design giusto, l'architettura giusta.",
+          "stavo sperimentando delle difficoltà a far passare la mia idea, forse perché gli altri componenti del team stavano anche lavorando su altre cose e quindi non avevano la testa per mettersi pienamente su quello che stavo dicendo io.",
+          "E questo diciamo che finalmente ha funzionato, ci ha voluto tempo, ho avuto pazienza e diciamo non soltanto in una volta, ma ho dovuto ripetere più volte qual era la mia idea."
+        ],
+        "explanation": "The candidate tailored their proposal to align with team needs by discussing and understanding the right architecture. They engaged with colleagues to ensure their design addressed team priorities, fostering cooperation and mutual understanding, which led to the successful adoption of their idea.",
+        "indicator": "Ensure that own positions address others' needs and priorities.",
+        "score": 4
+      },
+      {
+        "excerpts": [
+          "Io avevo un'idea abbastanza precisa di cosa bisognava fare, anche perché avevo parlato con dei colleghi di altri team e avevo capito piuttosto bene qual era il design giusto, l'architettura giusta.",
+          "Quello che ho fatto è di organizzare un meeting e esporre il design che avevo in mente, cercando in qualche modo anche di spiegarmi con delle parole che potessero risuonare per i miei colleghi.",
+          "finalmente diciamo che il risultato è stato che la mia idea è passata e quindi abbiamo potuto continuare con l'implementazione di quello che era questo progetto per questa architettura."
+        ],
+        "explanation": "The candidate provided a well-reasoned rationale for their architectural proposal, drawing on discussions with other teams and personal research. Their logical reasoning and evidence-based approach helped convince the team of the proposal's merits, leading to its successful implementation.",
+        "indicator": "Provide sound rationale to support opinions and proposals",
+        "score": 4
+      }
+    ],
+    "reliability": "100%",
+    "score": 4
+  },
+  "INN": {
+    "behaviors": [
+      {
+        "excerpts": [
+          "Quello che ho fatto è stato in qualche modo innovativo perché ho sviluppato in breve tempo degli script in basha che mi hanno permesso di estrapolare da questo dataset un sotto insieme completo quindi di alcune linee e di alcune corse.",
+          "E questo è stato di grande aiuto perché tramite questi script ho potuto non solo esplorare il dataset e capire meglio la sua organizzazione interna ma anche estrapolare un sotto insieme di questo dataset completo ma chiaramente molto più maneggevole in termini di peso su disco.",
+          "Quello che bisognava fare era di sviluppare non soltanto un'applicazione che avrebbe letto questi dati ma che poi li avrebbe manipolati in un certo modo."
+        ],
+        "explanation": "The candidate consistently demonstrated curiosity and open-mindedness by exploring new methods to handle large datasets. They developed scripts to extract manageable subsets for testing, showing a proactive approach to problem-solving and a willingness to explore innovative solutions.",
+        "indicator": "Approaches problems with curiosity and open-mindedness.",
+        "score": 4
+      },
+      {
+        "excerpts": [
+          "L'alternativa che invece ho proposto, della quale ero a conoscenza però aver parlato con altri colleghi e anche per uno studio mio personale, è stata invece quella di usare un'architettura basata su dei messaggi scambiati dai vari microservizi non direttamente ma tramite un message broker nella fattispecie Kafka.",
+          "Quindi questa differenza, questa alternativa in questo approccio è stata accolta all'inizio con non direi diffidenza ma con una certa resistenza.",
+          "Ma successivamente attraverso prima una serie di esperimenti che hanno mostrato la bontà di questo approccio è stata accolta in modo positivo."
+        ],
+        "explanation": "The candidate generated innovative solutions by proposing a message broker architecture for microservices communication, challenging the existing API call method. This approach was initially met with resistance but was eventually adopted, demonstrating their ability to propose and implement novel ideas.",
+        "indicator": "Generates innovative ideas and solutions to problems.",
+        "score": 4
+      },
+      {
+        "excerpts": [
+          "Quello che ho dovuto fare è stato acquisire rapidamente delle conoscenze riguardo a come fare l'upload di file in modo da spacchettare il file in vari chunk che poi possano essere caricati separatamente.",
+          "E quindi ho dovuto fare rapidamente una ricerca e acquisire le conoscenze per far questo.",
+          "ho dovuto studiare una parte di un programma che usiamo per testare queste API che poi è Postman in modo tale da poter testare, mentre stavo scrivendo il backend per questa funzionalità."
+        ],
+        "explanation": "The candidate quickly adapted to new methods by learning and applying chunked file uploads for large data handling. They embraced the change and effectively integrated new knowledge into their work, demonstrating a proactive approach to adapting to new technologies.",
+        "indicator": "Quickly adapt to new ways of doing things",
+        "score": 4
+      }
+    ],
+    "reliability": "100%",
+    "score": 4
+  },
+  "LRN": {
+    "behaviors": [
+      {
+        "excerpts": [
+          "ho cercato diciamo un feedback, un consiglio dalla parte di uno sviluppatore più senior con diversi anni di esperienza il quale mi aveva fatto già un'ottima impressione e in qualche modo gli ho mostrato il codice che avevo scritto finora fino a quel momento e gli ho chiesto una mano e gli ho chiesto soprattutto cosa ne pensasse e cosa avrei potuto migliorare.",
+          "Il risultato di questo è stato che ho imparato molte cose in particolare diciamo molte cose riguardo un approccio un po' più professionale verso lo scrivere codice e in qualche modo molto più orientato verso una vera e propria ingegneria del software.",
+          "In particolare una cosa che ricordo molto chiaramente è stato veramente tutto il concetto che c'è dietro lo scrivere delle astrazioni nel codice quindi non soltanto diciamo dei servizi e delle unità che fanno delle cose ma anche i contratti o le astrazioni di questi servizi."
+        ],
+        "explanation": "The candidate actively sought feedback from a senior developer to improve their coding skills. They demonstrated openness by asking for advice and applying the feedback to enhance their professional approach to software engineering, showing a willingness to learn and improve based on constructive criticism.",
+        "indicator": "Accept feedback openly, without getting defensive",
+        "score": 4
+      },
+      {
+        "excerpts": [
+          "E quindi quello che ho fatto è stato prima di utilizzarli direttamente nel lavoro, è stato di cercare veramente di apprendere le basi e quindi anche di crearmi dei piccoli toy project per apprendere le basi, quindi ad esempio su Docker e poi in un secondo momento su strumenti come Kubernetes.",
+          "E quindi proprio una cosa che poi faccio spesso è veramente di andare ogni volta che devo imparare delle cose e ancor di più se queste sono veramente nuove per me, è di andare proprio alla fonte di quelle che sono poi i principi e le basi di funzionamento di questi nuovi software che ho bisogno di utilizzare.",
+          "Quindi di andare proprio al famoso Hello World, al famoso esempio Hello World che per esempio si può girare in Docker una volta che uno l'ha scaricato può girare un container che semplicemente dice eccomi esisto."
+        ],
+        "explanation": "The candidate actively pursued learning opportunities by creating toy projects to understand Docker and Kubernetes. They demonstrated a proactive approach to acquiring new skills, staying ahead of trends, and continuously expanding their knowledge base, which is indicative of a strong commitment to personal growth.",
+        "indicator": "Seeks opportunities to acquire new knowledge and skills.",
+        "score": 4
+      },
+      {
+        "excerpts": [
+          "Quello che ho dovuto fare è stato acquisire rapidamente delle conoscenze riguardo a come fare l'upload di file in modo da spacchettare il file in vari chunk che poi possano essere caricati separatamente.",
+          "E quindi ho dovuto fare rapidamente una ricerca e acquisire le conoscenze per far questo.",
+          "ho dovuto studiare una parte di un programma che usiamo per testare queste API che poi è Postman in modo tale da poter testare, mentre stavo scrivendo il backend per questa funzionalità."
+        ],
+        "explanation": "The candidate demonstrated a strong curiosity and enthusiasm for learning by quickly acquiring knowledge about chunked file uploads and applying it to their work. Their proactive approach to learning new technologies and integrating them into their projects highlights their eagerness to explore new topics and apply knowledge effectively.",
+        "indicator": "Prove \"hungry\" to learn new things",
+        "score": 4
+      }
+    ],
+    "reliability": "100%",
+    "score": 4
+  },
+  "OPX": {
+    "behaviors": [
+      {
+        "excerpts": [
+          "È capitato di dover presentare degli sviluppi preliminari di un prodotto per una certa data precisa perché questo prodotto stava venendo sviluppato in congiunzione con dei potenziali clienti che quindi avevano diritto a vedere in qualche modo delle fasi preliminari dello sviluppo e il product management aveva fissato una certa data per questo e quindi per questa data che a un certo punto si è rivelata una scadenza piuttosto stretta avremmo dovuto avere certe funzionalità appunto nel prodotto.",
+          "Diciamo che questo si è rivelato un compito piuttosto difficile perché durante lo sviluppo avevamo comunque affrontato diverse sfide che avevano evidentemente rallentato, anche se non di molto, ma comunque avevano rallentato lo sviluppo e quindi ci siamo ritrovati con una scadenza abbastanza stretta.",
+          "Quello che abbiamo fatto a quel punto è stato diciamo di cercare di velocizzare il lavoro per il tempo che ci rimaneva, diciamo senza sacrificare sicuramente la qualità di quello che stavamo facendo, ma magari cercando di snellire certe procedure con l'idea eventualmente di rivedere certi passaggi una volta passata la scadenza."
+        ],
+        "explanation": "The candidate completed tasks correctly and on time by managing a tight deadline for presenting preliminary product developments. They faced challenges that slowed progress but managed to meet the deadline by streamlining procedures, indicating solid performance with room for improvement in efficiency under pressure.",
+        "indicator": "Perform tasks correctly and on time",
+        "score": 3
+      },
+      {
+        "excerpts": [
+          "Quello che abbiamo fatto a quel punto è stato diciamo di cercare di velocizzare il lavoro per il tempo che ci rimaneva, diciamo senza sacrificare sicuramente la qualità di quello che stavamo facendo, ma magari cercando di snellire certe procedure con l'idea eventualmente di rivedere certi passaggi una volta passata la scadenza.",
+          "E quindi in effetti questo ci ha permesso di completare le funzionalità del prodotto da mostrare al cliente in tempo per la scadenza di questo appuntamento.",
+          "Quindi in pratica mi riferisco magari a dei passaggi come la completa testabilità di un codice, non testabilità ma il completare i test su tutto il codice in modo tale che questo sia veramente a prova di bug, cosa che magari non abbiamo fatto subito ma che poi ci siamo riproposti attraverso un'attenta pianificazione di fare dopo."
+        ],
+        "explanation": "The candidate occasionally checks their work for accuracy and quality, as seen in their approach to managing a tight deadline. They streamlined procedures to meet deadlines, indicating some oversight in quality assurance, but planned to review and improve post-deadline, showing a solid but improvable attention to detail.",
+        "indicator": "Check own work to ensure accuracy and quality",
+        "score": 3
+      },
+      {
+        "excerpts": [
+          "È capitato di dover presentare degli sviluppi preliminari di un prodotto per una certa data precisa perché questo prodotto stava venendo sviluppato in congiunzione con dei potenziali clienti che quindi avevano diritto a vedere in qualche modo delle fasi preliminari dello sviluppo e il product management aveva fissato una certa data per questo.",
+          "Nella fattispecie quello che è successo è che stavamo appunto disegnando, progettando e sviluppando questo prodotto in congiunzione con quelli che sarebbero stati i clienti, che poi nella fattispecie sono delle autorità, delle public transport authority.",
+          "L'impatto è stato sicuramente positivo perché il risultato è stato un commitment ancora più forte dei potenziali clienti verso lo sviluppo congiunto di questo prodotto."
+        ],
+        "explanation": "The candidate actively contributed to team goals by collaborating on product development with potential clients. They engaged in joint design and development efforts, demonstrating initiative and collaboration, which supported the team's success and strengthened client relationships.",
+        "indicator": "Contribute to the achievement of own team goals",
+        "score": 4
+      }
+    ],
+    "reliability": "100%",
+    "score": 3.33
+  },
+  "PRS": {
+    "behaviors": [
+      {
+        "excerpts": [
+          "Qualche tempo fa ho notato che per sbaglio, nella lista dei commit che abbiamo fatto io e il mio team su un branch della repository Git sulla quale stavamo lavorando, ho notato che per sbaglio erano finiti vari file di dimensione molto grande.",
+          "Questo naturalmente è un problema perché aumenta considerevolmente la grandezza sul disco della repository e quindi ho trovato giusto porre questo problema all'attenzione dei miei colleghi.",
+          "la soluzione è stata di fare un merge squash per rientrare nel master, quindi non mantenendo tutta la storia del branch ma facendo in realtà prima uno squash di tutti i commit del branch e poi di rientrare nel master semplicemente con un unico commit, il che ha risolto il problema."
+        ],
+        "explanation": "The candidate demonstrated the ability to recognize symptoms indicating problems by identifying large files mistakenly added to a Git repository. They understood the implications of this issue and took steps to address it before it escalated, showing a proactive approach to problem recognition and resolution.",
+        "indicator": "Recognizes symptoms that indicate problems.",
+        "score": 4
+      },
+      {
+        "excerpts": [
+          "la soluzione è stata di fare un merge squash per rientrare nel master, quindi non mantenendo tutta la storia del branch ma facendo in realtà prima uno squash di tutti i commit del branch e poi di rientrare nel master semplicemente con un unico commit, il che ha risolto il problema.",
+          "ho trovato giusto porre questo problema all'attenzione dei miei colleghi e la soluzione è stata possibile per fortuna perché ancora il branch non era stato fatto rientrare sul master branch.",
+          "ho dovuto spiegare il mio punto di vista ai colleghi e non tutti erano ferrati sul problema, quindi ho dovuto un attimo rinfrescare anche il concetto di branch e di commit su Git a qualche collega che non era ferratissimo."
+        ],
+        "explanation": "The candidate effectively generated solution hypotheses by proposing a merge squash to resolve the issue of large files in the Git repository. This approach demonstrated their ability to devise practical solutions based on a clear understanding of the problem and the tools available.",
+        "indicator": "Come up with solution hypotheses for problems",
+        "score": 4
+      },
+      {
+        "excerpts": [
+          "Quello che ho dovuto fare è stato acquisire rapidamente delle conoscenze riguardo a come fare l'upload di file in modo da spacchettare il file in vari chunk che poi possano essere caricati separatamente.",
+          "E quindi ho dovuto fare rapidamente una ricerca e acquisire le conoscenze per far questo.",
+          "ho dovuto studiare una parte di un programma che usiamo per testare queste API che poi è Postman in modo tale da poter testare, mentre stavo scrivendo il backend per questa funzionalità."
+        ],
+        "explanation": "The candidate quickly learned and applied new concepts to solve a problem involving large file uploads. They researched chunked file uploads and used Postman to test their backend code, demonstrating their ability to incorporate new information effectively into their work.",
+        "indicator": "Analyzes, incorporates and applies new information and concepts.",
+        "score": 4
+      }
+    ],
+    "reliability": "100%",
+    "score": 4
+  },
+  "RES": {
+    "behaviors": [
+      {
+        "excerpts": [
+          "È successo qualche tempo fa che un membro del mio team ha dato le dimissioni in modo inatteso anche per i colleghi più stretti e questo è stato un cambiamento che ha messo me e il mio team inizialmente in crisi in quanto abbiamo dovuto nel mezzo di un lavoro già pianificato pianificare un trasferimento di competenze.",
+          "Il modo in cui abbiamo affrontato la situazione è stato appunto quello di rivedere la pianificazione, di procedere con il knowledge transfer, di registrarli in modo tale da avere poi tempo di tornare su questi e allo stesso tempo di svolgere queste attività, in particolare la pianificazione, in concertazione con il product management.",
+          "La situazione si è conclusa direi in modo positivo nel senso che c'è stato sicuramente un ritardo in alcuni sviluppi ma in qualche modo il team è stato sicuramente resiliente a questo cambiamento."
+        ],
+        "explanation": "The candidate demonstrated flexibility and adaptability when a team member unexpectedly resigned. They quickly adjusted by planning a knowledge transfer and rescheduling tasks, maintaining productivity despite the disruption. Their proactive approach and collaboration with product management ensured a positive outcome, showcasing their ability to adapt to changing priorities effectively.",
+        "indicator": "Demonstrate flexibility and adaptability when priorities change",
+        "score": 4
+      },
+      {
+        "excerpts": [
+          "È successo che il giorno dopo aver mandato sulla piattaforma e in dev dei nuovi sviluppi, un collega del team del front-end mi ha contattato perché aveva notato degli errori nelle chiamate del front-end verso le componenti back-end.",
+          "Ho affrontato la situazione innanzitutto andando a ripristinare quello che era la funzionalità prima antecedente del nostro sviluppo, quindi facendo un deploy di una versione del nostro prodotto precedente.",
+          "Poi in seguito, quando ho avuto modo, ho ripreso in mano tutti i log di quello che era stato questo errore, questo imprevisto e ho quindi pianificato la risoluzione del problema con il mio team."
+        ],
+        "explanation": "The candidate maintained composure under pressure when unexpected errors occurred after deploying new developments. They calmly restored previous functionality and analyzed logs to plan a resolution, demonstrating clear thinking and rational decision-making in high-pressure situations, which reassured their team and ensured continuity.",
+        "indicator": "Keep calm under pressure",
+        "score": 4
+      },
+      {
+        "excerpts": [
+          "È successo che il giorno dopo aver mandato sulla piattaforma e in dev dei nuovi sviluppi, un collega del team del front-end mi ha contattato perché aveva notato degli errori nelle chiamate del front-end verso le componenti back-end.",
+          "Ho affrontato la situazione innanzitutto andando a ripristinare quello che era la funzionalità prima antecedente del nostro sviluppo, quindi facendo un deploy di una versione del nostro prodotto precedente.",
+          "Poi in seguito, quando ho avuto modo, ho ripreso in mano tutti i log di quello che era stato questo errore, questo imprevisto e ho quindi pianificato la risoluzione del problema con il mio team."
+        ],
+        "explanation": "The candidate took ownership of mistakes by addressing errors in a deployment. They restored previous functionality and analyzed the issue to prevent recurrence, demonstrating a proactive approach to acknowledging and learning from mistakes, which helped maintain trust and improve future processes.",
+        "indicator": "Acknowledge own mistakes",
+        "score": 4
+      }
+    ],
+    "reliability": "100%",
+    "score": 4
+  },
+  "SLF": {
+    "behaviors": [
+      {
+        "excerpts": [
+          "Durante un pranzo tra colleghi ho dovuto in qualche modo illustrare quello che io e il mio team stavamo sviluppando, ovvero un nuovo prodotto per la gestione dei flussi di traffico del sistema di trasporti pubblico.",
+          "quello che ho fatto è stato veramente spiegare qual era la necessità reale dietro questa idea che a noi era evidente dal fatto che avevamo in qualche modo avuto un'esperienza diretta di come vengono al momento gestiti questi flussi di traffico.",
+          "Il risultato è stato che i colleghi hanno effettivamente visto, hanno toccato con mano e si sono convinti della bontà di questa idea e delle prospettive di questo prodotto."
+        ],
+        "explanation": "The candidate provided a detailed and engaging description of a traffic management product, explaining its value to colleagues. They tailored their explanation to highlight the product's benefits, demonstrating a solid understanding and ability to communicate effectively about the product's features and potential impact.",
+        "indicator": "Describe products and services accurately",
+        "score": 4
+      },
+      {
+        "excerpts": [
+          "quello che ho fatto è stato veramente spiegare qual era la necessità reale dietro questa idea che a noi era evidente dal fatto che avevamo in qualche modo avuto un'esperienza diretta di come vengono al momento gestiti questi flussi di traffico.",
+          "avevamo parlato direttamente con dei potenziali clienti e quindi avevamo capito in qualche modo quali potevano essere i loro bisogni di un prodotto che potesse automatizzare tutta una serie di processi.",
+          "Il risultato è stato che i colleghi hanno effettivamente visto, hanno toccato con mano e si sono convinti della bontà di questa idea e delle prospettive di questo prodotto."
+        ],
+        "explanation": "The candidate effectively linked their arguments to customer needs by discussing the automation of traffic management processes. They demonstrated an understanding of customer priorities and used this insight to persuade colleagues of the product's value, aligning their arguments with customer requirements.",
+        "indicator": "Link own arguments to customer needs and priorities",
+        "score": 4
+      },
+      {
+        "excerpts": [],
+        "explanation": "The candidate did not provide a relevant example of negotiating to reach solutions that meet customer interests. Their experience primarily involved internal discussions and persuasion rather than direct negotiation with customers, making this behavior unassessable based on the provided answers.",
+        "indicator": "Negotiate to reach solutions that meet the primary interests of customers",
+        "score": -1
+      }
+    ],
+    "reliability": "67%",
+    "score": 4
+  },
+  "STG": {
+    "behaviors": [
+      {
+        "excerpts": [
+          "Durante la fase di design di un nuovo prodotto basato sull'architettura multiservizi, diciamo che io insieme al mio team abbiamo avuto la lungimiranza di programmare lo sviluppo di questo prodotto in modo tale da prevenire diverse complicanze che potevano risultare dal dover poi, in un secondo momento, scalare le risorse che ogni microservizio avrebbe dovuto per bisogno.",
+          "Quindi diciamo che la programmazione è stata quella di pensare prima, cioè di pensare e di prevedere che appunto ogni microservizio o almeno alcuni microservizi avrebbero potuto aver bisogno in un futuro di risorse importanti e quindi sarebbero dovuti andare in dei namespace dedicati.",
+          "questo in effetti poi si è rivelato essere una scelta corretta in quanto questo ci ha permesso di scalare poi le risorse da allocare a ogni componente del prodotto."
+        ],
+        "explanation": "The candidate demonstrated foresight by planning the development of a microservices-based product to prevent future scalability issues. They anticipated resource needs and structured the architecture to accommodate growth, showing a strong understanding of the consequences of their actions on the project's success and sustainability.",
+        "indicator": "Understand the short- and medium-term consequences of own actions",
+        "score": 4
+      },
+      {
+        "excerpts": [
+          "Il modo in cui abbiamo affrontato la situazione è stato appunto quello di rivedere la pianificazione, di procedere con il knowledge transfer, di registrarli in modo tale da avere poi tempo di tornare su questi e allo stesso tempo di svolgere queste attività, in particolare la pianificazione, in concertazione con il product management.",
+          "La situazione si è conclusa direi in modo positivo nel senso che c'è stato sicuramente un ritardo in alcuni sviluppi ma in qualche modo il team è stato sicuramente resiliente a questo cambiamento.",
+          "abbiamo messo in pratica delle buone norme che ci hanno permesso di continuare tutto sommato lo sviluppo con qualche ritardo ma tutto sommato mantenendo gli stessi standard di qualità del prodotto."
+        ],
+        "explanation": "The candidate showed a functional understanding of organizational relationships by collaborating with product management to address team changes. They coordinated knowledge transfer and task rescheduling, demonstrating awareness of hierarchical structures, though more complex situations may require further development.",
+        "indicator": "Understand hierarchical and organizational relationships",
+        "score": 3
+      },
+      {
+        "excerpts": [
+          "Nella fattispecie quello che è successo è che stavamo appunto disegnando, progettando e sviluppando questo prodotto in congiunzione con quelli che sarebbero stati i clienti, che poi nella fattispecie sono delle autorità, delle public transport authority.",
+          "Abbiamo superato l'aspettativa del cliente nel senso che ci siamo ritrovati in realtà durante la fase di disegno a renderci conto che con uno sforzo minimo in più avremmo anche potuto già sviluppare tutta la parte che rende possibile almeno il caricamento e in qualche modo un processing iniziale anche di quello che invece viene chiamato real time feed.",
+          "L'impatto è stato sicuramente positivo perché il risultato è stato un commitment ancora più forte dei potenziali clienti verso lo sviluppo congiunto di questo prodotto."
+        ],
+        "explanation": "The candidate demonstrated a deep understanding of the organization's purpose and processes by aligning product development with client needs. They engaged in joint design efforts with public transport authorities, ensuring the product met strategic goals and enhanced client relationships, reflecting a strong alignment with business objectives.",
+        "indicator": "Know the purpose of the organization and how the main processes work",
+        "score": 4
+      }
+    ],
+    "reliability": "100%",
+    "score": 3.67
+  }
+}
