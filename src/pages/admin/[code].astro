@@ -1,0 +1,550 @@
+---
+import {
+  getCandidateByCode,
+  getProgress,
+  getSession,
+  getUtterances,
+  getIntegrityEvents,
+  computeIntegritySummary,
+  getSnapshots,
+  type SessionRow,
+} from '../../lib/db';
+import { questions } from '../../lib/prompt';
+import { rates } from '../../lib/pricing';
+import { INTEGRITY_LABELS, type IntegrityType } from '../../lib/proctor-config';
+
+export const prerender = false;
+
+const code = (Astro.params.code ?? '').toUpperCase();
+const candidate = getCandidateByCode(code);
+
+if (!candidate) {
+  return Astro.redirect('/admin');
+}
+
+const progress = getProgress(candidate.id);
+
+function calcCost(session: SessionRow | null, durationMin: number) {
+  if (!session?.ended_at) return { usd: 0, credits: null };
+  if (session.provider === 'heygen') {
+    const credits = durationMin * rates.heygenCreditsPerMin;
+    return { usd: credits * rates.heygenUsdPerCredit, credits: Math.round(credits * 10) / 10 };
+  }
+  return { usd: Math.max(0.5, Math.ceil(durationMin * 600) / 600) * rates.tavusUsdPerMin, credits: null };
+}
+
+const questionDetails = progress.map((p) => {
+  const session = p.session_id ? (getSession(p.session_id) ?? null) : null;
+  const utterances = session ? getUtterances(session.id) : [];
+  const integrityEvents = session ? getIntegrityEvents(session.id) : [];
+  const integrity = session ? computeIntegritySummary(session.id) : null;
+  const snapshots = session ? getSnapshots(session.id) : [];
+  const question = questions.questions[p.question_index] ?? null;
+  const durationMin = session?.ended_at
+    ? (new Date(session.ended_at).getTime() - new Date(session.started_at).getTime()) / 60_000
+    : 0;
+  const cost = calcCost(session, durationMin);
+  return { p, session, utterances, integrityEvents, integrity, snapshots, question, durationMin, cost };
+});
+
+const totalCostUsd = questionDetails.reduce((s, d) => s + d.cost.usd, 0);
+const totalDurationMin = questionDetails.reduce((s, d) => s + d.durationMin, 0);
+const totalIntegrityEvents = questionDetails.reduce(
+  (s, d) => s + (d.integrityEvents?.length ?? 0),
+  0,
+);
+
+const BAND_LABEL: Record<string, string> = { low: 'basso', medium: 'medio', high: 'alto' };
+const STATUS_LABEL: Record<string, string> = {
+  pending: 'In attesa',
+  completed: 'Completata',
+  timeout: 'Timeout',
+  skipped: 'Saltata',
+};
+
+function fmtTime(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? (iso ?? '—') : d.toLocaleTimeString('it-IT');
+}
+function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? (iso ?? '—')
+    : d.toLocaleString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+function fmtMeta(type: string, metaJson: string | null): string {
+  if (!metaJson) return '';
+  let meta: Record<string, unknown> = {};
+  try { meta = JSON.parse(metaJson) as Record<string, unknown>; } catch { return ''; }
+  const parts: string[] = [];
+  if (typeof meta.durationMs === 'number') parts.push(`${(meta.durationMs / 1000).toFixed(1)}s`);
+  if (type === 'multiple_faces' && typeof meta.count === 'number') parts.push(`${meta.count} volti`);
+  if (type === 'looking_away' && typeof meta.yaw === 'number') parts.push(`yaw ${meta.yaw}°`);
+  if (type === 'looking_down' && typeof meta.pitch === 'number') parts.push(`pitch ${meta.pitch}°`);
+  return parts.join(' · ');
+}
+---
+
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Intervista — {candidate.display_name ?? code}</title>
+  </head>
+  <body>
+    <main>
+      <!-- ── CANDIDATE HEADER ─────────────────────────────────────────────────── -->
+      <header class="cand-header">
+        <div class="cand-nav">
+          <a href="/admin" class="back">← Archivio</a>
+        </div>
+        <div class="cand-info">
+          <h1>{candidate.display_name ?? 'Candidato senza nome'}</h1>
+          <span class="resume-code">{candidate.resume_code}</span>
+        </div>
+        <div class="cand-stats">
+          <div class="stat">
+            <span class="stat-label">Domande</span>
+            <span class="stat-val">{progress.filter((p) => p.status === 'completed').length}/{progress.length}</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Durata totale</span>
+            <span class="stat-val">{totalDurationMin.toFixed(1)} min</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Costo totale</span>
+            <span class="stat-val cost">${totalCostUsd.toFixed(2)}</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Segnali integrità</span>
+            <span class="stat-val">{totalIntegrityEvents}</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Registrato</span>
+            <span class="stat-val">{fmtDate(candidate.created_at)}</span>
+          </div>
+        </div>
+      </header>
+
+      <!-- ── PER-QUESTION SECTIONS ───────────────────────────────────────────── -->
+      {questionDetails.map(({ p, session, utterances, integrityEvents, integrity, snapshots, question, durationMin, cost }) => (
+        <section class="q-section">
+          <!-- Question header -->
+          <div class="q-head">
+            <div class="q-title">
+              <span class="q-num">D{p.question_index + 1}</span>
+              <span class="q-text">{question?.text ?? `Domanda ${p.question_index + 1}`}</span>
+            </div>
+            <span class={`status-badge status-${p.status}`}>{STATUS_LABEL[p.status] ?? p.status}</span>
+          </div>
+
+          {/* Session meta */}
+          {session && (
+            <div class="session-meta">
+              <span class="badge-provider">{session.provider}</span>
+              {session.question_id && <span class="meta-chip">ID: {session.question_id}</span>}
+              <span class="meta-chip">Sessione #{session.id}</span>
+              <span class="meta-chip">Iniziata {fmtDate(session.started_at)}</span>
+              {session.ended_at && <span class="meta-chip">Terminata {fmtTime(session.ended_at)}</span>}
+              {session.ended_at && (
+                <span class="meta-chip cost">
+                  {durationMin.toFixed(1)} min · ${cost.usd.toFixed(2)}
+                  {cost.credits !== null && ` · ${cost.credits} crediti`}
+                </span>
+              )}
+              {session.ended_reason && <span class="meta-chip reason">{session.ended_reason}</span>}
+            </div>
+          )}
+          {!session && p.status === 'pending' && (
+            <p class="no-session">Nessuna sessione avviata per questa domanda.</p>
+          )}
+
+          {/* Integrity */}
+          {integrity && integrity.total > 0 && (
+            <div class="integrity-block">
+              <div class="integrity-head">
+                <span class="int-title">Integrità</span>
+                <span class={`band band-${integrity.band}`}>
+                  rischio {BAND_LABEL[integrity.band]} · {integrity.score}
+                </span>
+              </div>
+              <ol class="events">
+                {integrityEvents.map((e) => (
+                  <li class="event">
+                    <span class="ev-label">{INTEGRITY_LABELS[e.type as IntegrityType] ?? e.type}</span>
+                    <span class="ev-detail">{fmtMeta(e.type, e.meta)}</span>
+                    <span class="ev-time">{fmtTime(e.ts)}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+          {integrity && integrity.total === 0 && session && (
+            <p class="int-clean">✓ Nessun segnale di integrità registrato</p>
+          )}
+
+          {/* Answer summary */}
+          {p.answer_summary && (
+            <div class="answer-summary">
+              <span class="as-label">Sintesi risposta</span>
+              <p class="as-text">{p.answer_summary}</p>
+            </div>
+          )}
+
+          {/* Snapshots */}
+          {snapshots.length > 0 && (
+            <div class="snapshots">
+              <p class="snap-label">Snapshot webcam ({snapshots.length})</p>
+              <div class="snap-grid">
+                {snapshots.map((s) => (
+                  <div class="snap-item">
+                    <img
+                      src={`/api/snapshot/${s.path.replace(/^snapshots\//, '')}`}
+                      alt={`Snapshot ${fmtTime(s.ts)}`}
+                      class="snap-img"
+                      loading="lazy"
+                    />
+                    <span class="snap-time">{fmtTime(s.ts)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Transcript */}
+          {utterances.length > 0 && (
+            <div class="transcript-block">
+              <p class="transcript-label">Trascrizione ({utterances.length} turni)</p>
+              <ol class="transcript">
+                {utterances.map((u) => (
+                  <li class={`turn ${u.role}`}>
+                    <span class="who">
+                      {u.role === 'avatar' ? 'Alessandra' : 'Candidato'}
+                      <span class="turn-time">{fmtTime(u.created_at)}</span>
+                    </span>
+                    <span class="text">{u.text}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+          {session && utterances.length === 0 && (
+            <p class="no-session">Nessuna trascrizione disponibile.</p>
+          )}
+        </section>
+      ))}
+    </main>
+
+    <style>
+      :global(body) {
+        margin: 0;
+        background: #0b0c10;
+        color: #e8eaed;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      }
+      main {
+        max-width: 840px;
+        margin: 0 auto;
+        padding: 32px 20px 80px;
+      }
+
+      /* ── Candidate header ── */
+      .cand-header {
+        margin-bottom: 36px;
+      }
+      .cand-nav { margin-bottom: 12px; }
+      .back {
+        color: #6b7280;
+        font-size: 0.85rem;
+        text-decoration: none;
+      }
+      .back:hover { color: #9aa0aa; }
+      .cand-info {
+        display: flex;
+        align-items: baseline;
+        gap: 14px;
+        margin-bottom: 16px;
+      }
+      h1 { margin: 0; font-size: 1.6rem; }
+      .resume-code {
+        font-family: monospace;
+        font-size: 1rem;
+        color: #a7f3d0;
+        letter-spacing: 0.08em;
+        background: #0d2a1c;
+        padding: 2px 10px;
+        border-radius: 6px;
+      }
+      .cand-stats {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+      }
+      .stat {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 10px 16px;
+        background: #101119;
+        border: 1px solid #2a2c36;
+        border-radius: 10px;
+        min-width: 100px;
+      }
+      .stat-label {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #6b7280;
+      }
+      .stat-val {
+        font-size: 1rem;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+      .stat-val.cost { color: #a7f3d0; }
+
+      /* ── Per-question sections ── */
+      .q-section {
+        margin-bottom: 32px;
+        border: 1px solid #2a2c36;
+        border-radius: 14px;
+        overflow: hidden;
+      }
+      .q-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 16px 20px 12px;
+        background: #101119;
+        border-bottom: 1px solid #1c1e27;
+      }
+      .q-title {
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+      }
+      .q-num {
+        font-size: 0.75rem;
+        font-weight: 700;
+        color: #6b7280;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        flex-shrink: 0;
+      }
+      .q-text {
+        font-size: 0.95rem;
+        font-weight: 600;
+        line-height: 1.4;
+        color: #cbd5e1;
+      }
+      .status-badge {
+        flex-shrink: 0;
+        padding: 3px 12px;
+        border-radius: 999px;
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .status-completed { background: #10b981; color: #04150f; }
+      .status-pending   { background: #374151; color: #9aa0aa; }
+      .status-timeout   { background: #fbbf24; color: #1a1400; }
+      .status-skipped   { background: #4b5563; color: #d1d5db; }
+
+      /* Session meta */
+      .session-meta {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 20px;
+        background: #0e0f16;
+        border-bottom: 1px solid #1c1e27;
+        font-size: 0.82rem;
+      }
+      .badge-provider {
+        padding: 2px 10px;
+        border-radius: 999px;
+        font-size: 0.7rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        background: #10b981;
+        color: #04150f;
+      }
+      .meta-chip {
+        color: #9aa0aa;
+      }
+      .meta-chip.cost { color: #a7f3d0; font-weight: 600; }
+      .meta-chip.reason {
+        padding: 1px 8px;
+        border-radius: 6px;
+        background: #2a2c36;
+        color: #cbd5e1;
+      }
+      .no-session { padding: 12px 20px; color: #6b7280; font-size: 0.85rem; margin: 0; }
+      .int-clean  { padding: 10px 20px; color: #10b981; font-size: 0.83rem; margin: 0; }
+
+      /* Integrity */
+      .integrity-block {
+        padding: 14px 20px;
+        border-bottom: 1px solid #1c1e27;
+        background: #0b0c10;
+      }
+      .integrity-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 10px;
+      }
+      .int-title {
+        font-size: 0.78rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #6b7280;
+        font-weight: 600;
+      }
+      .band {
+        padding: 2px 10px;
+        font-size: 0.7rem;
+        font-weight: 700;
+        border-radius: 999px;
+        text-transform: uppercase;
+      }
+      .band-low    { color: #04150f; background: #10b981; }
+      .band-medium { color: #1a1400; background: #fbbf24; }
+      .band-high   { color: #fff;    background: #ef4444; }
+      .events {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .event {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        align-items: baseline;
+        gap: 10px;
+        padding: 5px 10px;
+        border-radius: 7px;
+        background: #17181f;
+        font-size: 0.82rem;
+      }
+      .ev-label  { font-weight: 600; }
+      .ev-detail { color: #9aa0aa; font-variant-numeric: tabular-nums; }
+      .ev-time   { color: #6b7280; font-size: 0.76rem; font-variant-numeric: tabular-nums; }
+
+      /* Answer summary */
+      .answer-summary {
+        padding: 14px 20px;
+        border-bottom: 1px solid #1c1e27;
+        background: #0e1620;
+      }
+      .as-label {
+        display: block;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #4ea1ff;
+        font-weight: 600;
+        margin-bottom: 6px;
+      }
+      .as-text {
+        margin: 0;
+        font-size: 0.9rem;
+        line-height: 1.5;
+        color: #cbd5e1;
+      }
+
+      /* Snapshots */
+      .snapshots {
+        padding: 14px 20px;
+        border-bottom: 1px solid #1c1e27;
+      }
+      .snap-label {
+        margin: 0 0 10px;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #6b7280;
+        font-weight: 600;
+      }
+      .snap-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+      .snap-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+      }
+      .snap-img {
+        width: 160px;
+        height: 90px;
+        object-fit: cover;
+        border-radius: 8px;
+        background: #1c1e27;
+        border: 1px solid #2a2c36;
+      }
+      .snap-time {
+        font-size: 0.72rem;
+        color: #6b7280;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* Transcript */
+      .transcript-block {
+        padding: 14px 20px;
+      }
+      .transcript-label {
+        margin: 0 0 10px;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #6b7280;
+        font-weight: 600;
+      }
+      .transcript {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .turn {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        padding: 10px 14px;
+        border-radius: 10px;
+        background: #17181f;
+        border: 1px solid #2a2c36;
+      }
+      .turn.avatar { border-left: 3px solid #10b981; }
+      .turn.user   { border-left: 3px solid #4ea1ff; }
+      .who {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #9aa0aa;
+      }
+      .turn-time {
+        font-size: 0.68rem;
+        color: #4b5563;
+        font-variant-numeric: tabular-nums;
+      }
+      .text { font-size: 0.9rem; line-height: 1.45; }
+    </style>
+  </body>
+</html>

@@ -397,6 +397,33 @@ export function getSnapshots(sessionId: number): SnapshotRow[] {
     .all(sessionId) as SnapshotRow[];
 }
 
+// ── Admin queries ──────────────────────────────────────────────────────────────
+
+export interface CandidateListRow extends CandidateRow {
+  session_count: number;
+  completed_questions: number;
+  total_questions: number;
+  last_activity: string | null;
+}
+
+export function getAllCandidates(): CandidateListRow[] {
+  return getDb()
+    .prepare(
+      `SELECT
+         c.id, c.display_name, c.resume_code, c.created_at,
+         COUNT(DISTINCT s.id) AS session_count,
+         SUM(CASE WHEN qp.status = 'completed' THEN 1 ELSE 0 END) AS completed_questions,
+         COUNT(DISTINCT qp.id) AS total_questions,
+         MAX(COALESCE(s.ended_at, s.started_at)) AS last_activity
+       FROM candidates c
+       LEFT JOIN sessions s ON s.candidate_id = c.id
+       LEFT JOIN question_progress qp ON qp.candidate_id = c.id
+       GROUP BY c.id
+       ORDER BY last_activity DESC, c.created_at DESC`,
+    )
+    .all() as CandidateListRow[];
+}
+
 // First question by index that is NOT completed (pending or timed-out both re-run) —
 // this is the "retry on resume" landing point. null when every question is completed.
 export function getNextQuestionIndex(candidateId: number): number | null {
