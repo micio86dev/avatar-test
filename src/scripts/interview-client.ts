@@ -6,7 +6,7 @@
 import type { InterviewProvider, ProviderName, TranscriptEntry } from '../providers/types';
 import { HeyGenProvider } from '../providers/heygen';
 import { TavusProvider } from '../providers/tavus';
-import { beaconProctor, enterFullscreen, setAvatarSpeaking, setViolationCallback, startProctor, stopProctor, warmupCamera, INTEGRITY_LABELS } from './proctor';
+import { beaconProctor, enterFullscreen, setAvatarSpeaking, setViolationCallback, startProctor, stopProctor } from './proctor';
 import { startDeviceCheck, type DeviceCheckHandle } from './device-check';
 
 type Phase = 'idle' | 'connecting' | 'live';
@@ -77,11 +77,8 @@ const deviceCheckEl = document.getElementById('device-check') as HTMLElement;
 const devicePreviewEl = document.getElementById('device-preview') as HTMLVideoElement;
 const micBarFillEl = document.getElementById('mic-bar-fill') as HTMLElement;
 const statusCameraEl = document.getElementById('status-camera') as HTMLElement;
-const statusDistanceEl = document.getElementById('status-distance') as HTMLElement;
-const statusGazeEl = document.getElementById('status-gaze') as HTMLElement;
 const statusMicEl = document.getElementById('status-mic') as HTMLElement;
 const deviceCheckDeniedEl = document.getElementById('device-check-denied') as HTMLElement;
-const deviceCheckHintEl = document.getElementById('device-check-hint') as HTMLElement;
 // Toast
 const toastEl = document.getElementById('toast') as HTMLElement;
 const toastMsgEl = document.getElementById('toast-msg') as HTMLElement;
@@ -104,9 +101,6 @@ let lastEndedReason: EndedReason | null = null;
 let rulesShown = false;
 // Active pre-join device check handle (mic meter + camera preview). Stopped on entry/reset.
 let deviceCheck: DeviceCheckHandle | null = null;
-// Pre-session camera proximity check. null = unknown/pending, true = OK, false = too far.
-let cameraOk: boolean | null = null;
-let cameraCheckCleanup: (() => void) | null = null;
 let pendingQuestionIndex = 0;
 let toastTimer: number | null = null;
 let rates: Rates = { heygenCreditsPerMin: 2, heygenUsdPerCredit: 0.1, tavusUsdPerMin: 0.37 };
@@ -173,7 +167,7 @@ function setButton(): void {
   const live = phase === 'live';
   button.textContent = phase === 'connecting' ? '… connessione' : live ? '⏹ Stop' : '🎤 Parla';
   button.dataset.on = String(live);
-  button.disabled = phase === 'connecting' || (phase === 'idle' && cameraOk === false);
+  button.disabled = phase === 'connecting';
 }
 function updateTopBar(): void {
   progressEl.textContent = `Domanda ${currentIndex + 1} di ${total}`;
@@ -334,16 +328,6 @@ async function ensureMicPermission(): Promise<void> {
 
 async function startSession(index: number): Promise<void> {
   if (phase !== 'idle') return;
-  // Block only when the proximity check has explicitly found the face too far.
-  // null means the check is still loading — we allow the session to proceed.
-  if (cameraOk === false) {
-    setStatus('waiting', 'Avvicinati alla webcam per iniziare');
-    return;
-  }
-  // Hand the open camera stream off to the proctor; stop the pre-session warmup.
-  cameraCheckCleanup?.();
-  cameraCheckCleanup = null;
-  cameraOk = null;
 
   currentIndex = index;
   phase = 'connecting';
@@ -458,9 +442,6 @@ async function teardown(reason: EndedReason): Promise<void> {
   lastEndedReason = reason;
   clearTimer();
   stopMeter();
-  cameraCheckCleanup?.(); // safety net: stop warmup if not already cleaned up
-  cameraCheckCleanup = null;
-  cameraOk = null;
   stopProctor(); // flush + release camera; captured its own sessionId at start
 
   const p = provider;
@@ -532,10 +513,7 @@ function resetDeviceCheck(): void {
   btnRulesOk.hidden = true;
   deviceCheckDeniedEl.hidden = true;
   statusCameraEl.dataset.ok = 'false';
-  statusDistanceEl.dataset.ok = 'false';
-  statusGazeEl.dataset.ok = 'false';
   statusMicEl.dataset.ok = 'false';
-  deviceCheckHintEl.textContent = '';
   micBarFillEl.dataset.ok = 'false';
   micBarFillEl.style.width = '0%';
 }
@@ -550,11 +528,8 @@ function onStartCheck(): void {
       preview: devicePreviewEl,
       micBarFill: micBarFillEl,
       cameraStatus: statusCameraEl,
-      distanceStatus: statusDistanceEl,
-      gazeStatus: statusGazeEl,
       micStatus: statusMicEl,
       deniedBox: deviceCheckDeniedEl,
-      hint: deviceCheckHintEl,
     },
     () => {
       btnRulesOk.hidden = false;
@@ -568,10 +543,6 @@ function onStartCheck(): void {
 // grants the mic and satisfies the browser's autoplay policy for the whole session.
 function beginQuestion(index: number, autoStart = false): void {
   clearAutoAdvance();
-  // Stop any previous proximity check before starting a fresh one.
-  cameraCheckCleanup?.();
-  cameraCheckCleanup = null;
-  cameraOk = null;
 
   currentIndex = index;
   phase = 'idle';
@@ -584,20 +555,6 @@ function beginQuestion(index: number, autoStart = false): void {
   setStatus('idle');
   setButton();
   setScreen('interview');
-
-  // Start a background camera check: opens the webcam preview and continuously reports
-  // whether the face is close enough. Blocks "Parla" with a status message if too far.
-  // null = model still loading (allow); false = too far (block); true = OK (allow).
-  cameraCheckCleanup = warmupCamera((ok) => {
-    cameraOk = ok;
-    if (phase !== 'idle') return; // session already started — ignore
-    setButton();
-    if (!ok) {
-      setStatus('waiting', 'Avvicinati alla webcam per iniziare');
-    } else {
-      setStatus('idle');
-    }
-  });
 
   if (autoStart) void startSession(index);
 }
@@ -700,9 +657,6 @@ async function onNext(): Promise<void> {
 
 function onPause(): void {
   clearAutoAdvance();
-  cameraCheckCleanup?.();
-  cameraCheckCleanup = null;
-  cameraOk = null;
   pausedCode.textContent = resumeCode;
   setScreen('paused');
 }
@@ -773,9 +727,6 @@ async function onResume(): Promise<void> {
 }
 
 function goHome(): void {
-  cameraCheckCleanup?.();
-  cameraCheckCleanup = null;
-  cameraOk = null;
   displayNameInput.value = '';
   resumeCodeInput.value = '';
   startError.textContent = '';
@@ -795,9 +746,9 @@ btnStartCheck.addEventListener('click', onStartCheck);
 btnRulesOk.addEventListener('click', () => {
   rulesShown = true;
   // Hand off to the interview: stop the mic meter + AudioContext but KEEP the camera stream
-  // (keepCamera=true). beginQuestion() then re-runs warmupCamera, which sees the camera is
-  // already open and reuses that same MediaStream — one camera, no second getUserMedia. Then
-  // follow the EXACT original entry path (enterFullscreen + beginQuestion).
+  // (keepCamera=true). The proctor's initCamera() reuses that same open MediaStream at session
+  // start — one camera, no second getUserMedia. Then follow the original entry path
+  // (enterFullscreen + beginQuestion).
   deviceCheck?.stop(true);
   deviceCheck = null;
   void enterFullscreen();

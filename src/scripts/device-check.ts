@@ -2,7 +2,7 @@
 // candidate runs on the "Prima di iniziare" screen before entering the interview.
 //
 // It is a HARD GATE: the "Entra nel colloquio" CTA stays disabled until BOTH the camera
-// (frames flowing + a face detected) and the microphone (level has crossed a "you spoke"
+// (a live video track is flowing) and the microphone (level has crossed a "you spoke"
 // threshold) are confirmed working.
 //
 // Camera ownership: this module does NOT open a second competing video stream. It reuses
@@ -12,7 +12,7 @@
 // is opened here as an independent audio-only stream purely to drive the level meter — the
 // proctor opens its own mic stream separately at session start, so there is no conflict.
 
-import { warmupCamera, type WarmupStatus } from './proctor';
+import { warmupCamera } from './proctor';
 
 // ── Tunables ───────────────────────────────────────────────────────────────────────
 // RMS level (0..1) above which the mic bar turns green and the level is considered
@@ -33,19 +33,10 @@ export interface DeviceCheckElements {
   micBarFill: HTMLElement;
   /** Camera status indicator — gets `data-ok="true"` once the webcam is actually streaming. */
   cameraStatus: HTMLElement;
-  /** Distance status indicator — gets `data-ok="true"` once the face is close enough. */
-  distanceStatus: HTMLElement;
-  /** Gaze status indicator — gets `data-ok="true"` once the candidate looks at the camera. */
-  gazeStatus: HTMLElement;
   /** Microphone status indicator — gets `data-ok="true"` once the user has spoken. */
   micStatus: HTMLElement;
   /** Permission-denied guidance block (Italian copy), hidden until a denial occurs. */
   deniedBox: HTMLElement;
-  /**
-   * Live positioning nudge. Its `data-hint-far` / `data-hint-gaze` attributes hold the
-   * Italian copy; this module only copies those attribute values into `textContent`.
-   */
-  hint: HTMLElement;
 }
 
 export interface DeviceCheckHandle {
@@ -80,18 +71,10 @@ export function startDeviceCheck(
   let micOk = false;
   let readyFired = false;
 
-  // Camera gate is split into independent latches (each latches once, never un-latches, so a
-  // momentary look-away or move can't re-gate the CTA):
-  // - `cameraLive`: a real live video track is flowing — the ONLY proof the camera works, since
-  //   warmupCamera is fail-open and reports faceOk even when getUserMedia was denied.
-  // - `distanceOk`: a status reported a face close enough (available && faceCount>=1 && !tooFar).
-  // - `gazeOk`: a status reported a face looking at the camera (available && faceCount>=1 && !lookingAway).
-  // - `detectionDegraded`: a status reported detection unavailable (available===false, model missing);
-  //   when set, distance/gaze/face are NOT required — but the camera must still be genuinely live.
+  // `cameraLive` latches once (never un-latches): a real live video track is flowing — the ONLY
+  // proof the camera works, since warmupCamera is fail-open and reports faceOk even when
+  // getUserMedia was denied.
   let cameraLive = false;
-  let distanceOk = false;
-  let gazeOk = false;
-  let detectionDegraded = false;
 
   let cameraWarmupCleanup: (() => void) | null = null;
   let previewLinkTimer: number | null = null;
@@ -102,53 +85,29 @@ export function startDeviceCheck(
   let analyser: AnalyserNode | null = null;
   let meterRaf: number | null = null;
 
-  // READY gate: the camera must be genuinely live and the mic confirmed; distance + gaze are
-  // required only when face detection actually ran. If detection is unavailable (model missing),
-  // it degrades to camera + mic — but never bypasses `cameraLive`, so a denied camera stays shut.
+  // READY gate: the camera must be genuinely live and the mic confirmed. `cameraLive` is never
+  // bypassed, so a denied camera keeps the gate shut.
   function maybeFireReady(): void {
     if (readyFired || stopped) return;
-    if (cameraLive && micOk && (detectionDegraded || (distanceOk && gazeOk))) {
+    if (cameraLive && micOk) {
       readyFired = true;
       onReady();
     }
   }
 
-  // ── Camera + distance + gaze check ──────────────────────────────────────────────────
-  // Reflects the shared latches into the DOM indicators and re-evaluates the READY gate.
+  // ── Camera check ─────────────────────────────────────────────────────────────────────
+  // Reflects the `cameraLive` latch into the DOM indicator and re-evaluates the READY gate.
   function updateCameraGate(): void {
     if (stopped) return;
     if (cameraLive) els.cameraStatus.dataset.ok = 'true';
-    if (distanceOk) els.distanceStatus.dataset.ok = 'true';
-    if (gazeOk) els.gazeStatus.dataset.ok = 'true';
     maybeFireReady();
   }
 
-  // Live positioning nudge, updated on every frame where a face is being tracked. The Italian
-  // copy lives in the hint element's `data-*` attributes — this module only reads them.
-  function updateHint(status: WarmupStatus): void {
-    if (!status.available || status.faceCount < 1) return;
-    if (status.tooFar) {
-      els.hint.textContent = els.hint.dataset.hintFar ?? '';
-    } else if (status.lookingAway) {
-      els.hint.textContent = els.hint.dataset.hintGaze ?? '';
-    } else {
-      els.hint.textContent = '';
-    }
-  }
-
   function startCamera(): void {
-    cameraWarmupCleanup = warmupCamera((_faceOk, status) => {
-      if (stopped || !status) return;
-      if (!status.available) {
-        detectionDegraded = true; // model unavailable — don't require distance/gaze/face
-        updateCameraGate();
-        return;
-      }
-      if (status.faceCount >= 1 && !status.tooFar) distanceOk = true;
-      if (status.faceCount >= 1 && !status.lookingAway) gazeOk = true;
-      updateHint(status);
-      updateCameraGate();
-    });
+    // We still run warmupCamera to open the shared camera stream (its liveness drives the gate
+    // below and the interview reuses it on handoff); the face-detection callback is unused now
+    // that distance/gaze are no longer gated.
+    cameraWarmupCleanup = warmupCamera(() => {});
 
     // Mirror the proctor's camera stream into our preview and confirm it is actually live.
     // warmupCamera attaches the stream to the proctor's #self-view element; we copy the same

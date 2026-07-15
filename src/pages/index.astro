@@ -106,18 +106,8 @@ import '../styles/brand.css';
 
           <ul class="device-check-status">
             <li id="status-camera" class="status-item" data-ok="false">Webcam attiva</li>
-            <li id="status-distance" class="status-item" data-ok="false">Distanza dalla webcam corretta</li>
-            <li id="status-gaze" class="status-item" data-ok="false">Sguardo rivolto alla webcam</li>
             <li id="status-mic" class="status-item" data-ok="false">Microfono attivo</li>
           </ul>
-
-          <p
-            id="device-check-hint"
-            class="device-check-hint"
-            aria-live="polite"
-            data-hint-far="Avvicinati alla webcam"
-            data-hint-gaze="Guarda verso lo schermo"
-          ></p>
 
           <p id="device-check-denied" class="device-check-denied" hidden>
             Permesso webcam o microfono bloccato. Riattivalo dalle impostazioni del sito
@@ -730,17 +720,6 @@ import '../styles/brand.css';
       }
       .device-check-denied[hidden] {
         display: none;
-      }
-      .device-check-hint {
-        margin: 0;
-        min-height: 1.1rem;
-        font-size: 0.85rem;
-        font-weight: 600;
-        color: var(--brand-orange);
-        text-align: center;
-      }
-      .device-check-hint:empty {
-        min-height: 0;
       }
 
       .toast {
