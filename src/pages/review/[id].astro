@@ -5,6 +5,7 @@ import { computeIntegritySummary, getIntegrityEvents, getSession, getSnapshots, 
 import type { SnapshotRow } from '../../lib/db';
 import { rates } from '../../lib/pricing';
 import { INTEGRITY_LABELS, type IntegrityType } from '../../lib/proctor-config';
+import '../../styles/brand.css';
 
 const id = Number(Astro.params.id);
 const session = Number.isInteger(id) ? getSession(id) : undefined;
@@ -53,6 +54,13 @@ function eventDetail(type: string, metaJson: string | null): string {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
     <title>Review — Interview #{id}</title>
   </head>
   <body>
@@ -136,9 +144,7 @@ function eventDetail(type: string, metaJson: string | null): string {
     <style>
       :global(body) {
         margin: 0;
-        background: #0b0c10;
-        color: #e8eaed;
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        color: var(--brand-text);
       }
       main {
         max-width: 760px;
@@ -148,6 +154,7 @@ function eventDetail(type: string, metaJson: string | null): string {
       h1 {
         margin: 0 0 6px;
         font-size: 1.4rem;
+        color: var(--brand-purple);
       }
       .meta {
         display: flex;
@@ -155,28 +162,28 @@ function eventDetail(type: string, metaJson: string | null): string {
         gap: 8px;
         margin: 0 0 24px;
         font-size: 0.85rem;
-        color: #9aa0aa;
+        color: var(--brand-text-muted);
       }
       .badge {
         padding: 2px 10px;
         font-weight: 700;
-        color: #04150f;
-        background: #10b981;
+        color: #fff;
+        background: var(--brand-purple);
         border-radius: 999px;
         text-transform: uppercase;
         font-size: 0.72rem;
       }
       .cost {
-        color: #a7f3d0;
+        color: var(--brand-purple);
       }
 
       /* Integrity panel */
       .integrity {
         margin: 0 0 28px;
         padding: 16px;
-        border: 1px solid #2a2c36;
+        border: 1px solid var(--brand-border);
         border-radius: 12px;
-        background: #101119;
+        background: var(--brand-surface);
       }
       .integrity-head {
         display: flex;
@@ -198,8 +205,8 @@ function eventDetail(type: string, metaJson: string | null): string {
         text-transform: uppercase;
       }
       .band-low {
-        color: #04150f;
-        background: #10b981;
+        color: #fff;
+        background: var(--brand-purple);
       }
       .band-medium {
         color: #1a1400;
@@ -224,18 +231,18 @@ function eventDetail(type: string, metaJson: string | null): string {
         gap: 12px;
         padding: 6px 10px;
         border-radius: 8px;
-        background: #17181f;
+        background: #f6f2fb;
         font-size: 0.85rem;
       }
       .ev-label {
         font-weight: 600;
       }
       .ev-detail {
-        color: #9aa0aa;
+        color: var(--brand-text-muted);
         font-variant-numeric: tabular-nums;
       }
       .ev-time {
-        color: #6b7280;
+        color: var(--brand-text-muted);
         font-size: 0.78rem;
         font-variant-numeric: tabular-nums;
       }
@@ -254,38 +261,39 @@ function eventDetail(type: string, metaJson: string | null): string {
         gap: 4px;
         padding: 12px 16px;
         border-radius: 12px;
-        background: #17181f;
-        border: 1px solid #2a2c36;
+        background: #f7f4fb;
+        border: 1px solid var(--brand-border);
       }
       .turn.avatar {
-        border-left: 3px solid #10b981;
+        border-left: 3px solid var(--brand-purple);
       }
       .turn.user {
-        border-left: 3px solid #4ea1ff;
+        border-left: 3px solid var(--brand-lavender);
       }
       .who {
         font-size: 0.72rem;
         text-transform: uppercase;
         letter-spacing: 0.04em;
-        color: #9aa0aa;
+        color: var(--brand-text-muted);
       }
       .text {
         line-height: 1.4;
       }
       .empty {
-        color: #9aa0aa;
+        color: var(--brand-text-muted);
       }
 
       .snapshots {
         margin: 0 0 28px;
         padding: 16px;
-        border: 1px solid #2a2c36;
+        border: 1px solid var(--brand-border);
         border-radius: 12px;
-        background: #101119;
+        background: var(--brand-surface);
       }
       .snapshots h2 {
         margin: 0 0 12px;
         font-size: 1rem;
+        color: var(--brand-purple);
       }
       .snap-grid {
         display: flex;
@@ -297,15 +305,15 @@ function eventDetail(type: string, metaJson: string | null): string {
         gap: 12px;
         padding: 4px 8px;
         font-size: 0.8rem;
-        background: #17181f;
+        background: #f6f2fb;
         border-radius: 6px;
       }
       .snap-time {
-        color: #9aa0aa;
+        color: var(--brand-text-muted);
         flex-shrink: 0;
       }
       .snap-path {
-        color: #6b7280;
+        color: var(--brand-text-muted);
         font-family: monospace;
       }
     </style>

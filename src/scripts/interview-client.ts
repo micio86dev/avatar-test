@@ -7,6 +7,7 @@ import type { InterviewProvider, ProviderName, TranscriptEntry } from '../provid
 import { HeyGenProvider } from '../providers/heygen';
 import { TavusProvider } from '../providers/tavus';
 import { beaconProctor, enterFullscreen, setAvatarSpeaking, setViolationCallback, startProctor, stopProctor, warmupCamera, INTEGRITY_LABELS } from './proctor';
+import { startDeviceCheck, type DeviceCheckHandle } from './device-check';
 
 type Phase = 'idle' | 'connecting' | 'live';
 type Screen = 'start' | 'code' | 'rules' | 'interview' | 'endq' | 'paused' | 'done';
@@ -69,8 +70,18 @@ const btnHome2 = document.getElementById('btn-home-2') as HTMLButtonElement;
 const meterEl = document.getElementById('meter') as HTMLElement;
 const meterCostEl = document.getElementById('meter-cost') as HTMLElement;
 const meterCreditsEl = document.getElementById('meter-credits') as HTMLElement;
-// Rules screen
+// Rules screen (pre-join device check)
+const btnStartCheck = document.getElementById('btn-start-check') as HTMLButtonElement;
 const btnRulesOk = document.getElementById('btn-rules-ok') as HTMLButtonElement;
+const deviceCheckEl = document.getElementById('device-check') as HTMLElement;
+const devicePreviewEl = document.getElementById('device-preview') as HTMLVideoElement;
+const micBarFillEl = document.getElementById('mic-bar-fill') as HTMLElement;
+const statusCameraEl = document.getElementById('status-camera') as HTMLElement;
+const statusDistanceEl = document.getElementById('status-distance') as HTMLElement;
+const statusGazeEl = document.getElementById('status-gaze') as HTMLElement;
+const statusMicEl = document.getElementById('status-mic') as HTMLElement;
+const deviceCheckDeniedEl = document.getElementById('device-check-denied') as HTMLElement;
+const deviceCheckHintEl = document.getElementById('device-check-hint') as HTMLElement;
 // Toast
 const toastEl = document.getElementById('toast') as HTMLElement;
 const toastMsgEl = document.getElementById('toast-msg') as HTMLElement;
@@ -91,6 +102,8 @@ let sessionId: number | null = null;
 let providerSessionId: string | undefined;
 let lastEndedReason: EndedReason | null = null;
 let rulesShown = false;
+// Active pre-join device check handle (mic meter + camera preview). Stopped on entry/reset.
+let deviceCheck: DeviceCheckHandle | null = null;
 // Pre-session camera proximity check. null = unknown/pending, true = OK, false = too far.
 let cameraOk: boolean | null = null;
 let cameraCheckCleanup: (() => void) | null = null;
@@ -504,7 +517,49 @@ async function onProviderError(): Promise<void> {
 // ── Screen flow ────────────────────────────────────────────────────────────────
 function showRules(index: number): void {
   pendingQuestionIndex = index;
+  resetDeviceCheck();
   setScreen('rules');
+}
+
+// Resets the pre-join device-check UI to its initial state: start CTA visible, check panel
+// and entry CTA hidden, indicators cleared. Stops any prior meter loop (the camera stream is
+// left alone — the proctor owns it). Called whenever the rules screen (re)appears.
+function resetDeviceCheck(): void {
+  deviceCheck?.stop();
+  deviceCheck = null;
+  btnStartCheck.hidden = false;
+  deviceCheckEl.hidden = true;
+  btnRulesOk.hidden = true;
+  deviceCheckDeniedEl.hidden = true;
+  statusCameraEl.dataset.ok = 'false';
+  statusDistanceEl.dataset.ok = 'false';
+  statusGazeEl.dataset.ok = 'false';
+  statusMicEl.dataset.ok = 'false';
+  deviceCheckHintEl.textContent = '';
+  micBarFillEl.dataset.ok = 'false';
+  micBarFillEl.style.width = '0%';
+}
+
+// "Avvia il test" — starts the device check: swaps the start CTA for the live preview + mic
+// meter. The entry CTA is revealed only once both camera and mic are confirmed.
+function onStartCheck(): void {
+  btnStartCheck.hidden = true;
+  deviceCheckEl.hidden = false;
+  deviceCheck = startDeviceCheck(
+    {
+      preview: devicePreviewEl,
+      micBarFill: micBarFillEl,
+      cameraStatus: statusCameraEl,
+      distanceStatus: statusDistanceEl,
+      gazeStatus: statusGazeEl,
+      micStatus: statusMicEl,
+      deniedBox: deviceCheckDeniedEl,
+      hint: deviceCheckHintEl,
+    },
+    () => {
+      btnRulesOk.hidden = false;
+    },
+  );
 }
 
 // autoStart=true makes the next question begin its session on its own, so a candidate
@@ -736,8 +791,15 @@ button.addEventListener('click', () => {
 btnNew.addEventListener('click', () => void onNew());
 btnResume.addEventListener('click', () => void onResume());
 btnBegin.addEventListener('click', () => showRules(0));
+btnStartCheck.addEventListener('click', onStartCheck);
 btnRulesOk.addEventListener('click', () => {
   rulesShown = true;
+  // Hand off to the interview: stop the mic meter + AudioContext but KEEP the camera stream
+  // (keepCamera=true). beginQuestion() then re-runs warmupCamera, which sees the camera is
+  // already open and reuses that same MediaStream — one camera, no second getUserMedia. Then
+  // follow the EXACT original entry path (enterFullscreen + beginQuestion).
+  deviceCheck?.stop(true);
+  deviceCheck = null;
   void enterFullscreen();
   beginQuestion(pendingQuestionIndex);
 });
