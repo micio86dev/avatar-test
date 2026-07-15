@@ -8,6 +8,15 @@ below is its backlog-level proposal.
 
 Source of truth: `docs/app_description/` (binding) + `CLAUDE.md`. Deploy: Railway, on request only.
 
+## Global Specifications
+
+Cross-cutting NFR specs that inform multiple changes. Each lives in `openspec/specs/` and is updated
+after the relevant archiving step completes.
+
+| Spec | Path | Informs |
+|---|---|---|
+| Observability & Analytics | `specs/observability/spec.md` | C1 (contracts), C9 (AI logging), C11 (dashboards), C13 (full enforcement) |
+
 ## Dependency graph
 
 ```
@@ -34,7 +43,7 @@ C1 ──┬─ C2 ──┬─ C3 ── C4 ─────────── C
 | C10 | `webhooks-integration` | Per-project webhook cfg; progress + evaluation events; HMAC; idempotency; retry/backoff; exit redirect | C6, C9 | Integration 03/04; SA-06, SA-07 |
 | C11 | `admin-dashboards` | Build in the **backoffice (SPA)** Nuxt app: participant status views; results/report viewer; transcript & report download; state-gated | C9 | FR-005; SA-09 |
 | C12 | `notifications-reminders` | Invitations; deadline reminders; queued email/notification jobs | C6 | FR-002 |
-| C13 | `nfr-hardening` | Audit logs; GDPR retention/purge (audio/snapshot/transcript); monitoring; white-label; accessibility; multi-test portal | C10, C11 | FR-006; NFR/GDPR |
+| C13 | `nfr-hardening` | Audit logs; GDPR retention/purge (audio/snapshot/transcript); full observability stack enforcement (Sentry, Laravel Pulse, Clarity, GA4, Cloudflare — see `specs/observability/spec.md`); white-label; accessibility; multi-test portal | C10, C11 | FR-006; NFR/GDPR |
 
 ## Open product decisions (gate downstream changes — close with client)
 
