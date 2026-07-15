@@ -557,13 +557,42 @@ function showEndq(): void {
   const timedOut = lastEndedReason === 'timeout';
   const completed = lastEndedReason === 'completed';
   const isLast = currentIndex >= total - 1;
-  endqTitle.textContent = timedOut ? 'Tempo scaduto' : 'Domanda conclusa';
-  btnNext.textContent = isLast ? 'Concludi' : 'Prossima domanda';
   setScreen('endq');
+
+  if (isLast) {
+    btnPause.hidden = true;
+    endqTitle.textContent = timedOut ? 'Tempo scaduto' : 'Colloquio terminato';
+    btnNext.textContent = 'Vai ai risultati';
+
+    // Avatar concluded the last question — auto-advance to done, no action needed.
+    if (completed) {
+      let remaining = AUTO_ADVANCE_SECONDS;
+      endqHint.textContent = `Reindirizzamento ai risultati tra ${remaining}s…`;
+      autoAdvanceInterval = window.setInterval(() => {
+        remaining -= 1;
+        if (remaining <= 0) {
+          clearAutoAdvance();
+          void onNext();
+        } else {
+          endqHint.textContent = `Reindirizzamento ai risultati tra ${remaining}s…`;
+        }
+      }, 1000);
+      return;
+    }
+
+    endqHint.textContent = timedOut
+      ? 'Il tempo è scaduto. Premi per completare il colloquio.'
+      : 'Hai risposto a tutte le domande.';
+    return;
+  }
+
+  btnPause.hidden = false;
+  endqTitle.textContent = timedOut ? 'Tempo scaduto' : 'Domanda conclusa';
+  btnNext.textContent = 'Prossima domanda';
 
   // Soft auto-advance: only when the avatar itself concluded (not a timeout or manual stop)
   // and more questions remain. The countdown auto-fires onNext; Pausa/Prossima take over.
-  if (completed && !isLast) {
+  if (completed) {
     let remaining = AUTO_ADVANCE_SECONDS;
     endqHint.textContent = `Prossima domanda tra ${remaining}s…`;
     autoAdvanceInterval = window.setInterval(() => {
