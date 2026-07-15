@@ -44,16 +44,28 @@ apps (`assets/css/main.css`). They MUST be kept in sync.
 
 ### 3.1 Color Palette
 
+> **Brand source of truth:** `docs/brand/quint-brand-guidelines.pdf` (official Quint
+> guidelines — logo usage, negative versions, Pantone/CMYK, do's & don'ts). Demo
+> implementation: `src/styles/brand.css`. Logo assets: `public/quint-logo.png` (logotype) +
+> `public/quint-mark.png` (favicon source).
+
 #### Brand
 
 | Token | Value | Usage |
 |-------|-------|-------|
-| `--color-primary` | `#1e3a5f` | Primary brand — headings, primary buttons, navigation active |
-| `--color-primary-light` | `#2d5282` | Hover state of primary elements |
-| `--color-primary-dark` | `#132740` | Active / pressed state |
-| `--color-accent` | `#0d9488` | Teal accent — CTAs, highlighted states, progress indicators |
-| `--color-accent-light` | `#14b8a6` | Hover state of accent elements |
-| `--color-accent-dark` | `#0f766e` | Active / pressed state of accent |
+| `--color-primary` | `#771AAF` | Quint purple (logo color) — headings, primary buttons, navigation active |
+| `--color-primary-light` | `#C222D3` | Hover state of primary elements (light violet) |
+| `--color-primary-dark` | `#4F1AAF` | Active / pressed state (dark violet) |
+| `--color-accent` | `#E45526` | Quint institutional orange — CTAs, highlighted / active states |
+| `--color-accent-light` | `#F19823` | Hover state of accent elements (orange) |
+| `--color-accent-dark` | `#B8431E` | Active / pressed state of accent |
+| `--color-lavender` | `#8373D2` | Supporting secondary (lavender) — subtle highlights, badges |
+
+**Background** — pages use a very light brand gradient, not a flat fill:
+`--color-bg-gradient: linear-gradient(135deg, #FAF7FD 0%, #F6F1FC 45%, #FDF4EF 100%)`
+(near-white lavender→peach; supersedes flat `--color-neutral-50` for page backgrounds.
+Strong purple/orange stay for accents only — per WCAG AA, orange `#E45526` is not used for
+small body text.)
 
 #### Neutrals
 
@@ -91,12 +103,12 @@ apps (`assets/css/main.css`). They MUST be kept in sync.
 
 ### 3.2 Typography
 
-**Primary font**: Inter (variable font, sourced via `@fontsource/inter` or CDN).
+**Primary font**: Open Sans (Quint institutional font — per brand guidelines; sourced via `@fontsource/open-sans` or Google Fonts).
 **Monospace font**: JetBrains Mono (code blocks, technical displays only).
 
 ```css
 /* @theme block — paste into assets/css/main.css */
---font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+--font-sans: "Open Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
 --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", monospace;
 ```
 
