@@ -50,11 +50,23 @@ needed.
 
 ### Requirement: API CI Job (Lint + Test + Coverage + OpenAPI)
 
-The `api` repository's CI workflow MUST run in sequence: install PHP
-dependencies (Composer), run a PHP linter (e.g. Pint), execute Pest with
-parallel mode, enforce a minimum coverage of 85% on authored code, generate
-the OpenAPI document (Scramble) to confirm it is producible, and **build the
-`api` Docker image**. The job MUST fail if any step exits non-zero.
+The `api` repository's CI workflow MUST declare a **PostgreSQL `services` block**
+(`pgvector/pgvector:pg17-alpine`, `POSTGRES_DB=beai_test`) and wait for it to
+reach healthy status before any application step runs. It then MUST run in
+sequence: install PHP dependencies (Composer), run a PHP linter (e.g. Pint),
+run `php artisan migrate` against `beai_test`, execute Pest with parallel mode,
+enforce a minimum coverage of 85% on authored code, generate the OpenAPI
+document (Scramble) to confirm it is producible, and **build the `api` Docker
+image**. The job MUST fail if any step exits non-zero. Pest MUST connect to
+the PostgreSQL `beai_test` service, never to SQLite.
+
+#### Scenario: API CI provisions PostgreSQL beai_test and migrates before Pest
+
+- GIVEN the `api` CI workflow declares a `services.postgres` block (`pgvector/pgvector:pg17-alpine`, `POSTGRES_DB=beai_test`)
+- WHEN the CI job runs
+- THEN PostgreSQL reaches healthy status before any application step executes
+- AND `php artisan migrate` runs against `beai_test` before Pest
+- AND all Pest feature tests connect to the PostgreSQL `beai_test` database, not SQLite
 
 #### Scenario: API job passes on a green codebase
 
@@ -279,7 +291,7 @@ pointer-freshness check). It MUST NOT re-run the submodules' own unit/E2E suites
 
 - GIVEN the wrapper `docker-compose.yml`
 - WHEN the wrapper CI compose-smoke step runs
-- THEN MySQL, Redis, and Mailpit services reach healthy status
+- THEN PostgreSQL, Redis, and Mailpit services reach healthy status
 - AND the step reports success without deploying anything
 
 #### Scenario: Wrapper CI does not deploy
@@ -360,3 +372,265 @@ After C1 is applied, the `status` fields for all test and coverage commands in
 - GIVEN the commands in `config.yaml` (e.g. `php artisan test --parallel`, `pnpm test:unit`, `pnpm test:e2e`, `php artisan test --coverage --min=85`, `pnpm test:unit --coverage`)
 - WHEN the CI workflow steps in each repo are inspected
 - THEN each step uses the corresponding command verbatim (or a documented equivalent with the same flags)
+
+---
+
+### Requirement: PHPStan Static Analysis in API CI
+
+The `api` CI workflow MUST include a **required blocking** PHPStan step that runs
+`./vendor/bin/phpstan analyse` after Pint lint and before Pest tests. The step
+MUST fail the job if any PHPStan level-8 violation is reported that is not covered
+by a committed `phpstan-baseline.neon`. The step MUST NOT be `continue-on-error`
+or scheduled to run only on certain branches.
+
+#### Scenario: API CI fails when PHPStan reports a new violation
+
+- GIVEN the `api` CI workflow includes a PHPStan step
+- WHEN PHPStan detects a type error not covered by the baseline
+- THEN the PHPStan step exits non-zero
+- AND the job fails before Pest runs
+
+#### Scenario: API CI passes when PHPStan exits clean
+
+- GIVEN all authored PHP code in `app/` satisfies PHPStan level 8 (or violations are baselined)
+- WHEN the PHPStan CI step runs
+- THEN it exits 0 and the job continues to Pest
+
+---
+
+### Requirement: TypeScript Type-Check in Nuxt CI
+
+Each Nuxt CI workflow (`frontend` and `backoffice`) MUST include a **required
+blocking** TypeScript type-check step that runs `nuxi typecheck` (or equivalent
+`tsc --noEmit`) after ESLint + Prettier check and before Vitest. The step MUST
+fail the job if any TypeScript strict-mode error is reported. The step MUST NOT
+be `continue-on-error`.
+
+#### Scenario: Nuxt CI fails when a TypeScript error is introduced
+
+- GIVEN a `.ts` or `.vue` file in `frontend` or `backoffice` that introduces a TypeScript type error
+- WHEN the `nuxi typecheck` step runs in CI
+- THEN it exits non-zero
+- AND the job fails before Vitest runs
+
+#### Scenario: Nuxt CI passes when TypeScript is clean
+
+- GIVEN all authored TypeScript/Vue source files satisfy `strict: true`
+- WHEN the typecheck step runs
+- THEN it exits 0 and the job continues to Vitest
+
+---
+
+### Requirement: Accessibility Gate in Playwright (CI)
+
+Both Nuxt CI workflows MUST include `@axe-core/playwright` integrated into
+Playwright E2E tests. Every E2E test that navigates to a page MUST run an axe
+audit at WCAG 2.1 AA level. A page with any AA violation MUST cause the E2E step
+to exit non-zero, failing the CI job. This is a required blocking check — not
+`continue-on-error`.
+
+#### Scenario: Playwright E2E fails when a WCAG 2.1 AA violation is present
+
+- GIVEN an E2E test that navigates to a page with a missing `lang` attribute or contrast violation
+- WHEN `@axe-core/playwright` audits the page
+- THEN it throws / returns violations
+- AND the test step exits non-zero, failing the CI job
+
+---
+
+### Requirement: Independent Deploy Pipelines (per-service Railway, no cross-service triggering)
+
+Each submodule (`api`, `frontend`, `backoffice`) MUST be configured as a **separate
+Railway service** that monitors ONLY its own repository's `main` branch. A deploy
+of `api` MUST NOT trigger or invalidate deployments of `frontend` or `backoffice`.
+A hotfix pushed to `api`'s `main` MUST be deployable without waiting for the
+frontend repos' release cycles (provided backward API compatibility per D33 is
+maintained). No CI workflow (submodule or wrapper) MAY trigger a Railway deployment
+automatically in C1 (Railway config is committed but inert — deploy is explicit and
+operator-initiated per CLAUDE.md). CI jobs in one submodule MUST NOT call, wait for,
+or otherwise depend on CI outcomes in another submodule.
+
+#### Scenario: Pushing to api main does not trigger frontend or backoffice deployments
+
+- GIVEN a commit merged to `api`'s `main` branch
+- WHEN Railway evaluates service triggers
+- THEN only the `api` Railway service rebuild/deploy triggers
+- AND `frontend` and `backoffice` Railway services remain at their current deployed version
+
+#### Scenario: Pushing to frontend main does not trigger api or backoffice deployments
+
+- GIVEN a commit merged to `frontend`'s `main` branch
+- WHEN Railway evaluates service triggers
+- THEN only the `frontend` Railway service rebuild/deploy triggers
+- AND `api` and `backoffice` Railway services are unaffected
+
+#### Scenario: api CI failure does not block frontend or backoffice CI
+
+- GIVEN a failing CI job in the `api` repository
+- WHEN CI evaluates triggers in `frontend` or `backoffice`
+- THEN `frontend` and `backoffice` CI pipelines run independently and are not blocked
+
+#### Scenario: API version bumps do not force immediate frontend/backoffice updates
+
+- GIVEN `api` releases a new version `v1.2.0` with additive (non-breaking) changes
+- WHEN the `frontend` and `backoffice` maintainers have not yet pulled the new `openapi.json`
+- THEN `frontend` and `backoffice` continue running against their committed `openapi.json` snapshot
+- AND they update the typed client only when explicitly chosen to (pull new snapshot → regenerate → test → release)
+
+---
+
+### Requirement: Security Pipeline
+
+Every submodule CI workflow MUST include a **security audit** step. The `api`
+workflow MUST run `composer audit` to check for known PHP dependency vulnerabilities
+(built into Composer 2.4+). Both Nuxt workflows MUST run `bun audit` (or equivalent)
+for known npm package vulnerabilities. Each Docker image build step MUST be followed
+by a **Trivy container scan** (`aquasecurity/trivy-action`) checking for HIGH and
+CRITICAL CVEs in the final image — scan failures at HIGH/CRITICAL MUST fail the CI
+job. GitHub's built-in **secret scanning** MUST be enabled on all submodule
+repositories to prevent credentials from being committed. Dependency monitoring
+(**Dependabot** or Renovate) MUST be enabled on each submodule to surface outdated
+or vulnerable dependencies as PRs automatically. All CI workflow YAML files MUST pin
+third-party GitHub Action versions to their **full SHA** (not floating `@v3` tags)
+to prevent supply chain attacks.
+
+#### Scenario: api CI fails when a Composer dependency has a known HIGH vulnerability
+
+- GIVEN `composer audit` detects a HIGH or CRITICAL CVE in an installed package
+- WHEN the security audit step runs in `api` CI
+- THEN the step exits non-zero
+- AND the job fails (audits are required, not advisory)
+
+#### Scenario: Nuxt CI fails when an npm dependency has a known HIGH vulnerability
+
+- GIVEN `bun audit` detects a HIGH or CRITICAL severity vulnerability
+- WHEN the security audit step runs in a Nuxt CI workflow
+- THEN the step exits non-zero and the job fails
+
+#### Scenario: Trivy scan fails when the built Docker image contains a CRITICAL CVE
+
+- GIVEN the built Docker image contains a package with a CRITICAL CVE
+- WHEN the `aquasecurity/trivy-action` scan step runs
+- THEN it exits non-zero and the CI job fails
+- AND the CVE details are reported in the scan output artifact
+
+#### Scenario: GitHub Actions versions are pinned to full SHA
+
+- GIVEN any CI workflow YAML file in any submodule
+- WHEN it is inspected
+- THEN every `uses:` reference to a third-party action specifies a full commit SHA
+  (e.g. `uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683`) — not a floating tag
+
+#### Scenario: Secret scanning alerts on a committed credential
+
+- GIVEN a developer accidentally commits an API key or secret to any submodule repo
+- WHEN GitHub's secret scanning processes the commit
+- THEN GitHub raises a secret scanning alert and notifies the repo maintainers
+
+---
+
+### Requirement: Load Testing (K6 — Local-Only, Manual Trigger)
+
+The `api` repository MUST include Grafana K6 load-test scripts in `tests/k6/`.
+The Taskfile at the wrapper root MUST include a `test:load` task that runs K6
+against the **local Docker Compose stack** (never against Railway stage/prod).
+The CI MUST expose a `workflow_dispatch`-only `load-test.yml` workflow in the `api`
+repository — it MUST NOT trigger automatically on any push or PR. When triggered,
+it spins up the Docker Compose stack and runs the K6 baseline and stress scenarios
+locally (within the CI runner), producing a **JSON + HTML report** stored as a CI
+artifact for 30 days. The LLM provider MUST be mocked in load tests (no real AI
+API calls). Results MUST be documented in `docs/load-testing/latest-report.{html,json}`.
+
+K6 scenarios and thresholds defined in design D35:
+- **Baseline**: 10 VU × 60 s — `GET /api/health` p95 < 100 ms, error rate < 0.5%
+- **Stress**: 50 VU × 120 s — p95 < 200 ms, error rate < 1%
+- **Spike**: 200 VU × 30 s burst — error rate < 5% (system should degrade gracefully, not crash)
+
+The spike scenario report answers: "how many concurrent users can the stack serve before the error rate exceeds 5%?"
+
+#### Scenario: Load test runs against local Docker Compose, not Railway
+
+- GIVEN the `test:load` Taskfile task or the `load-test.yml` CI workflow
+- WHEN it is inspected
+- THEN the K6 target URL is `http://localhost:${PORT}` or a Docker Compose internal hostname
+- AND no step references Railway URLs, production API keys, or live environment variables
+
+#### Scenario: Load test is NOT triggered automatically on PR or push to develop
+
+- GIVEN the `api` repository's CI workflow configuration
+- WHEN a PR is opened or a commit is pushed to `develop`
+- THEN `load-test.yml` does NOT run (it is `workflow_dispatch`-only)
+
+#### Scenario: Load test produces a report artifact
+
+- GIVEN the `load-test.yml` workflow has completed
+- WHEN the CI job artifacts are listed
+- THEN a JSON report and an HTML report are present as downloadable artifacts
+
+#### Scenario: LLM provider is mocked during load tests
+
+- GIVEN the K6 load-test environment
+- WHEN the `api` application boots with `APP_ENV=testing` or a load-test-specific env
+- THEN the `FakeLLMProvider` is bound in the service container and no real AI API calls are made
+
+#### Scenario: Spike scenario answers the concurrent-user capacity question
+
+- GIVEN the K6 spike scenario output at 200 VU
+- WHEN the error rate in the spike scenario is read from the report
+- THEN the report contains `http_req_failed` and `http_req_duration` metrics
+- AND the documented analysis states the estimated max-concurrent-user capacity at < 1% error rate
+
+---
+
+### Requirement: Cost-Aware AI Testing (Mock-First + @ai Group)
+
+ALL standard Pest tests in the `api` suite MUST use a `FakeLLMProvider` that
+implements the LLM provider interface — no real AI API calls in the standard
+`php artisan test` or `php artisan test --parallel` run. The `FakeLLMProvider`
+MUST be auto-bound in the Laravel service container when `APP_ENV=testing`. For
+integration tests that need realistic LLM responses, a **VCR cassette pattern**
+MUST be used: pre-recorded fixture JSON files committed in `tests/Fixtures/cassettes/`,
+replayed by the fake provider (cassette filename includes the model, prompt hash,
+and framework version for traceability). Tests that MUST call a real LLM API MUST
+be tagged with `->group('ai')` and MUST NOT run in the standard CI job. A dedicated
+`ai-integration.yml` workflow, triggered ONLY by `workflow_dispatch` or on
+`release/*` branches, runs the `@ai` group using a cheap model (`AI_TEST_MODEL`
+env var, defaults to `claude-haiku-4-5-20251001`). The 85% coverage gate counts
+AI-path code covered by mock-based tests — real LLM tests are additive. No AI API
+spend occurs on normal developer PR workflows.
+
+#### Scenario: Standard test run uses FakeLLMProvider with zero real AI calls
+
+- GIVEN `APP_ENV=testing` and the Pest suite running via `php artisan test`
+- WHEN a test exercises code that calls the LLM provider interface
+- THEN `FakeLLMProvider::complete()` is called (not the real OpenAI/Anthropic client)
+- AND zero HTTP requests are made to any AI API endpoint
+
+#### Scenario: VCR cassette replays a pre-recorded LLM response
+
+- GIVEN a cassette file `tests/Fixtures/cassettes/bars-eval--haiku--sha1abc.json`
+- WHEN the `FakeLLMProvider` is configured to replay that cassette in a Pest test
+- THEN the provider returns the pre-recorded response without making an external call
+- AND the test is deterministic across all environments and CI runs
+
+#### Scenario: @ai group tests do NOT run on PR to develop
+
+- GIVEN a Pest test tagged `->group('ai')`
+- WHEN a PR is opened targeting `develop` and the standard CI job runs
+- THEN the `@ai` test is excluded from the run (e.g. `--exclude-group ai`)
+- AND the standard 85% coverage gate passes without it
+
+#### Scenario: @ai group tests run in the ai-integration workflow with a cheap model
+
+- GIVEN the `ai-integration.yml` workflow triggered by `workflow_dispatch`
+- WHEN it runs
+- THEN Pest executes only the `@ai` group (`--group ai`)
+- AND the `AI_TEST_MODEL` env var is set to `claude-haiku-4-5-20251001` (not the production model)
+- AND the real AI API is called but billed at the cheapest available tier
+
+#### Scenario: Coverage gate passes using only mock-based AI tests
+
+- GIVEN all `@ai`-grouped tests are excluded from the standard run
+- WHEN the `--min=85` coverage gate is evaluated
+- THEN it passes solely on the basis of mock-based tests covering AI-path code
+- AND no AI API cost is incurred during coverage measurement
