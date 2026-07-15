@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "engineering-excellence": {
+      "source": "micio86dev/Engineering-Excellence",
+      "sourceType": "github",
+      "skillPath": "skills/engineering-excellence/SKILL.md",
+      "computedHash": "62b576166a7180d44602a33d067bdd27acbcb9ed575ca53fc7aeb01a85f5745c"
+    }
+  }
+}

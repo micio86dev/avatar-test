@@ -557,7 +557,23 @@ export function beaconProctor(): void {
 // cleanup function the caller must invoke before startProctor() takes over — the open
 // camera stream is left at module scope so initCamera() reuses it without a second
 // getUserMedia() call.
-export function warmupCamera(onResult: (faceOk: boolean) => void): () => void {
+// Rich per-frame signal emitted by warmupCamera alongside the legacy `faceOk` boolean.
+// It surfaces the distance (`tooFar`) and gaze (`lookingAway`) signals the proctor already
+// computes, so the pre-join device check can gate on them. `available:false` means face
+// detection could not run (model unavailable) — callers must degrade, not block.
+export interface WarmupStatus {
+  available: boolean; // false when face detection could not run (model unavailable)
+  faceCount: number;
+  faceWidth: number; // 0..1 normalized; 0 when no face
+  yaw: number | null;
+  pitch: number | null;
+  tooFar: boolean; // face present but width < FACE_MIN_WIDTH_RATIO
+  lookingAway: boolean; // face present but off-axis yaw/pitch beyond thresholds
+}
+
+export function warmupCamera(
+  onResult: (faceOk: boolean, status?: WarmupStatus) => void,
+): () => void {
   let localStream: MediaStream | null = null;
   let localSelfView: HTMLVideoElement | null = null;
   let stopped = false;
@@ -590,7 +606,19 @@ export function warmupCamera(onResult: (faceOk: boolean) => void): () => void {
 
     const lm = await ensureLandmarker();
     if (stopped) return;
-    if (!lm) { onResult(true); return; } // no model — don't block
+    if (!lm) {
+      // No model — don't block, and tell the caller detection is unavailable so it can degrade.
+      onResult(true, {
+        available: false,
+        faceCount: 0,
+        faceWidth: 0,
+        yaw: null,
+        pitch: null,
+        tooFar: false,
+        lookingAway: false,
+      });
+      return;
+    }
 
     const target = localSelfView;
     warmupTimer = window.setInterval(() => {
@@ -598,13 +626,45 @@ export function warmupCamera(onResult: (faceOk: boolean) => void): () => void {
       try {
         const result = lm.detectForVideo(target, performance.now());
         const faces = result.faceLandmarks ?? [];
-        if (faces.length === 0) { onResult(false); return; }
+        if (faces.length === 0) {
+          onResult(false, {
+            available: true,
+            faceCount: 0,
+            faceWidth: 0,
+            yaw: null,
+            pitch: null,
+            tooFar: false,
+            lookingAway: false,
+          });
+          return;
+        }
         let minX = 1, maxX = 0;
         for (const l of faces[0]) {
           if (l.x < minX) minX = l.x;
           if (l.x > maxX) maxX = l.x;
         }
-        onResult(maxX - minX >= FACE_MIN_WIDTH_RATIO);
+        const faceWidth = maxX - minX;
+        const pose = poseFromMatrix(
+          result.facialTransformationMatrixes?.[0]?.data ?? [],
+        );
+        const yaw = pose?.yaw ?? null;
+        const pitch = pose?.pitch ?? null;
+        const tooFar = faceWidth < FACE_MIN_WIDTH_RATIO;
+        const lookingAway =
+          pose != null &&
+          (Math.abs(pose.yaw) >= LOOK_AWAY_YAW_DEG ||
+            Math.abs(pose.pitch) >= LOOK_AWAY_PITCH_DEG ||
+            pose.pitch < -LOOK_DOWN_PITCH_DEG);
+        // faceOk = !tooFar keeps the existing distance-only semantics for the interview caller.
+        onResult(!tooFar, {
+          available: true,
+          faceCount: faces.length,
+          faceWidth,
+          yaw,
+          pitch,
+          tooFar,
+          lookingAway,
+        });
       } catch { /* transient */ }
     }, 500);
   };

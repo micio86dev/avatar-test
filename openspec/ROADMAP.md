@@ -8,6 +8,15 @@ below is its backlog-level proposal.
 
 Source of truth: `docs/app_description/` (binding) + `CLAUDE.md`. Deploy: Railway, on request only.
 
+## Global Specifications
+
+Cross-cutting NFR specs that inform multiple changes. Each lives in `openspec/specs/` and is updated
+after the relevant archiving step completes.
+
+| Spec | Path | Informs |
+|---|---|---|
+| Observability & Analytics | `specs/observability/spec.md` | C1 (contracts), C9 (AI logging), C11 (dashboards), C13 (full enforcement) |
+
 ## Dependency graph
 
 ```
@@ -22,7 +31,7 @@ C1 ──┬─ C2 ──┬─ C3 ── C4 ─────────── C
 
 | # | Name (`kebab`) | Intent | Depends on | Key acceptance / FR |
 |---|---|---|---|---|
-| C1 | `project-skeleton-ci` | Wrapper + 3 submodules (`api` Laravel 12 API-only + Scramble/OpenAPI, `frontend` Nuxt 4 SSR, `backoffice` Nuxt 4 SPA), MySQL/Redis via docker-compose, Pest/Vitest/Playwright harness per repo, i18n it/en in both Nuxt apps, OpenAPI→TS client codegen, Git Flow ×4, Railway config parked, CI with 85% gate | — | Foundation for all |
+| C1 | `project-skeleton-ci` | Wrapper + 3 submodules (`api` Laravel 13 + PHP 8.5 API-only + Scramble/OpenAPI, `frontend` Nuxt 4 SSR, `backoffice` Nuxt 4 SPA; Bun toolchain), PostgreSQL 17 (pgvector)/Redis 8 via docker-compose, Pest/Vitest/Playwright harness per repo, i18n it/en in both Nuxt apps, OpenAPI→TS client codegen, Git Flow ×4, Railway config parked, CI with 85% gate | — | Foundation for all |
 | C2 | `tenancy-identity` | Organization + User; **JWT auth (`tymon/jwt-auth`)** for the backoffice (access+refresh, denylist) + **`spatie/laravel-permission`** RBAC (teams mode, org-scoped) + global `organization_id` scoping + `TenantContext`; cross-tenant isolation tests | C1 | NFR tenant isolation; SA-09 |
 | C3 | `framework-catalog` | Seed Role/Competency/BarsIndicator/FrameworkVersion from `framework/*.json`; translatable columns; read API | C2 | Binding framework; i18n |
 | C4 | `project-configuration` | Project CRUD (role, type standard/potential, competency-subset validation, language, pause/nudge, deadline, branding, webhook cfg) | C2, C3 | FR-001; SA-09 |
@@ -34,7 +43,7 @@ C1 ──┬─ C2 ──┬─ C3 ── C4 ─────────── C
 | C10 | `webhooks-integration` | Per-project webhook cfg; progress + evaluation events; HMAC; idempotency; retry/backoff; exit redirect | C6, C9 | Integration 03/04; SA-06, SA-07 |
 | C11 | `admin-dashboards` | Build in the **backoffice (SPA)** Nuxt app: participant status views; results/report viewer; transcript & report download; state-gated | C9 | FR-005; SA-09 |
 | C12 | `notifications-reminders` | Invitations; deadline reminders; queued email/notification jobs | C6 | FR-002 |
-| C13 | `nfr-hardening` | Audit logs; GDPR retention/purge (audio/snapshot/transcript); monitoring; white-label; accessibility; multi-test portal | C10, C11 | FR-006; NFR/GDPR |
+| C13 | `nfr-hardening` | Audit logs; GDPR retention/purge (audio/snapshot/transcript); full observability stack enforcement (Sentry, Laravel Pulse, Clarity, GA4, Cloudflare — see `specs/observability/spec.md`); white-label; accessibility; multi-test portal | C10, C11 | FR-006; NFR/GDPR |
 
 ## Open product decisions (gate downstream changes — close with client)
 

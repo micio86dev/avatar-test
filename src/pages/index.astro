@@ -3,6 +3,7 @@
 // (HeyGen | Tavus). A candidate starts (or resumes with a code), answers one question per
 // short timed session, and can pause between questions. Every utterance is persisted to
 // local SQLite. The page is a small multi-screen state machine that never scrolls on Y.
+import '../styles/brand.css';
 ---
 
 <!doctype html>
@@ -10,12 +11,20 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
     <title>Interview Demo — HeyGen / Tavus</title>
   </head>
   <body>
     <main class="app" id="app" data-screen="start">
       <!-- ── START ─────────────────────────────────────────────────────────── -->
       <section class="screen panel" id="screen-start">
+        <img src="/quint-logo.png" alt="Quint" class="brand-logo" />
         <h1 class="brand">Colloquio conoscitivo</h1>
 
         <div class="provider-toggle" role="radiogroup" aria-label="Provider">
@@ -78,7 +87,47 @@
           <li>Rimanere in modalità schermo intero</li>
         </ul>
         <p class="rules-note">La webcam rimane attiva e vengono acquisiti snapshot periodici. Nessun video lascia il tuo dispositivo.</p>
-        <button type="button" id="btn-rules-ok" class="btn primary">Ho capito, inizia il colloquio</button>
+
+        <!-- Start CTA: triggers the device check. Hidden once the test is running. -->
+        <button type="button" id="btn-start-check" class="btn primary">Avvia il test</button>
+
+        <!-- Device check panel: webcam preview + mic level meter. Hidden until the test starts. -->
+        <div id="device-check" class="device-check" hidden>
+          <div class="device-check-preview">
+            <video id="device-preview" autoplay playsinline muted></video>
+          </div>
+
+          <div class="device-check-mic">
+            <span class="device-check-mic-label">Parla per testare il microfono</span>
+            <div class="mic-bar">
+              <div id="mic-bar-fill" class="mic-bar-fill" data-ok="false"></div>
+            </div>
+          </div>
+
+          <ul class="device-check-status">
+            <li id="status-camera" class="status-item" data-ok="false">Webcam attiva</li>
+            <li id="status-distance" class="status-item" data-ok="false">Distanza dalla webcam corretta</li>
+            <li id="status-gaze" class="status-item" data-ok="false">Sguardo rivolto alla webcam</li>
+            <li id="status-mic" class="status-item" data-ok="false">Microfono attivo</li>
+          </ul>
+
+          <p
+            id="device-check-hint"
+            class="device-check-hint"
+            aria-live="polite"
+            data-hint-far="Avvicinati alla webcam"
+            data-hint-gaze="Guarda verso lo schermo"
+          ></p>
+
+          <p id="device-check-denied" class="device-check-denied" hidden>
+            Permesso webcam o microfono bloccato. Riattivalo dalle impostazioni del sito
+            del browser (clicca sull'icona del lucchetto nella barra degli indirizzi),
+            poi ricarica la pagina. L'app non può richiederti di nuovo il permesso.
+          </p>
+        </div>
+
+        <!-- Entry CTA: gated on both camera and mic. Hidden until the check passes. -->
+        <button type="button" id="btn-rules-ok" class="btn primary" hidden>Entra nel colloquio</button>
       </section>
 
       <!-- ── INTERVIEW ─────────────────────────────────────────────────────────── -->
@@ -157,14 +206,21 @@
         overflow: hidden;
       }
       :global(body) {
-        background: #0b0c10;
-        color: #e8eaed;
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        color: var(--brand-text);
       }
 
       .app {
         height: 100dvh;
         overflow: hidden;
+      }
+
+      /* Quint logotype on the start screen. */
+      .brand-logo {
+        display: block;
+        width: 100%;
+        max-width: 180px;
+        height: auto;
+        margin: 0 auto 12px;
       }
 
       /* Only the active screen is shown; each fills the viewport. */
@@ -194,14 +250,16 @@
       .brand {
         margin: 0;
         font-size: 1.6rem;
+        color: var(--brand-purple);
       }
       .panel h2 {
         margin: 0;
         font-size: 1.25rem;
+        color: var(--brand-purple);
       }
       .hint {
         margin: 0;
-        color: #9aa0aa;
+        color: var(--brand-text-muted);
         font-size: 0.9rem;
       }
       .code-big {
@@ -209,13 +267,13 @@
         font-size: 2.4rem;
         font-weight: 800;
         letter-spacing: 0.18em;
-        color: #a7f3d0;
+        color: var(--brand-purple);
         font-variant-numeric: tabular-nums;
       }
       .error-line {
         margin: 0;
         min-height: 1.2em;
-        color: #f87171;
+        color: #d92d20;
         font-size: 0.85rem;
       }
       .admin-link {
@@ -223,10 +281,10 @@
         text-align: center;
         margin-top: 20px;
         font-size: 0.78rem;
-        color: #4b5563;
+        color: var(--brand-text-muted);
         text-decoration: none;
       }
-      .admin-link:hover { color: #9aa0aa; }
+      .admin-link:hover { color: var(--brand-orange); }
 
       /* Start-screen New / Resume paths. */
       .paths {
@@ -243,21 +301,26 @@
       }
       .path h2 {
         font-size: 1rem;
-        color: #cbd5e1;
+        color: var(--brand-text);
       }
       .path-sep {
         align-self: center;
-        color: #6b7280;
+        color: var(--brand-text-muted);
         font-size: 0.8rem;
       }
       input[type='text'] {
         padding: 10px 12px;
         font-size: 1rem;
-        color: #e8eaed;
-        background: #17181f;
-        border: 1px solid #2a2c36;
+        color: var(--brand-text);
+        background: var(--brand-surface);
+        border: 1px solid var(--brand-border);
         border-radius: 10px;
         text-align: center;
+      }
+      input[type='text']:focus-visible {
+        outline: 2px solid var(--brand-purple);
+        outline-offset: 1px;
+        border-color: var(--brand-purple);
       }
       #resume-code {
         text-transform: uppercase;
@@ -268,20 +331,25 @@
         padding: 11px 22px;
         font-size: 1rem;
         font-weight: 700;
-        color: #e8eaed;
-        background: #24262f;
-        border: 1px solid #2a2c36;
+        color: var(--brand-purple);
+        background: var(--brand-surface);
+        border: 1px solid var(--brand-border);
         border-radius: 999px;
         cursor: pointer;
-        transition: filter 0.15s ease;
+        transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
       }
       .btn:hover {
-        filter: brightness(1.12);
+        border-color: var(--brand-orange);
+        color: var(--brand-orange);
       }
       .btn.primary {
-        color: #04150f;
-        background: #10b981;
+        color: #fff;
+        background: var(--brand-purple);
         border-color: transparent;
+      }
+      .btn.primary:hover {
+        color: #fff;
+        background: var(--brand-orange);
       }
       .btn:disabled {
         opacity: 0.5;
@@ -304,27 +372,27 @@
         gap: 12px;
         padding: 10px 18px calc(10px);
         padding-top: calc(10px + env(safe-area-inset-top, 0px));
-        border-bottom: 1px solid #1b1d24;
+        border-bottom: 1px solid var(--brand-border);
       }
       .progress {
         font-size: 0.95rem;
         font-weight: 600;
       }
       .completed {
-        color: #9aa0aa;
+        color: var(--brand-text-muted);
         font-size: 0.85rem;
       }
       .timer {
         font-size: 1.15rem;
         font-weight: 800;
         font-variant-numeric: tabular-nums;
-        color: #a7f3d0;
+        color: var(--brand-purple);
       }
       .timer[data-warn='warn'] {
-        color: #fbbf24;
+        color: var(--brand-orange);
       }
       .timer[data-warn='critical'] {
-        color: #f87171;
+        color: #d92d20;
       }
 
       .stage {
@@ -338,9 +406,15 @@
         padding: 16px;
       }
       #avatar-video {
-        max-width: 100%;
+        /* Size is driven by the box, NOT the stream's intrinsic resolution.
+           Tavus ramps resolution up over the first seconds (adaptive bitrate); relying
+           on intrinsic size makes the video start small and grow. A fixed 16:9 box with
+           a max-width keeps both providers at a stable, identical, well-visible size. */
+        width: 100%;
+        max-width: 960px;
+        aspect-ratio: 16 / 9;
         max-height: 100%;
-        object-fit: contain;
+        object-fit: cover;
         border-radius: 20px;
         background: #000;
         box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
@@ -371,7 +445,7 @@
       }
       .meter-cost {
         font-weight: 700;
-        color: #a7f3d0;
+        color: #d9c9f0;
       }
       .meter-credits {
         color: #9aa0aa;
@@ -393,15 +467,18 @@
         left: 50%;
         transform: translateX(-50%);
         max-width: min(80%, 720px);
+        max-height: calc(100% - 28px);
         margin: 0;
         padding: 6px 14px;
         font-size: 0.9rem;
+        line-height: 1.4;
         color: #cbd5e1;
         background: rgba(11, 12, 16, 0.6);
         border-radius: 10px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        white-space: normal;
+        overflow-wrap: break-word;
+        overflow-y: auto;
+        text-align: center;
         pointer-events: none;
       }
       .caption:empty {
@@ -441,41 +518,41 @@
         margin: 0;
         font-size: 0.9rem;
         letter-spacing: 0.02em;
-        color: #9aa0aa;
+        color: var(--brand-text-muted);
         min-height: 1.2em;
       }
       .status[data-state='listening'] {
-        color: #4ea1ff;
+        color: var(--brand-lavender);
       }
       .status[data-state='speaking'] {
-        color: #34d399;
+        color: var(--brand-purple);
       }
       .status[data-state='ready'] {
-        color: #a7f3d0;
+        color: var(--brand-purple);
       }
       .status[data-state='connecting'] {
-        color: #fbbf24;
+        color: var(--brand-orange);
       }
       .status[data-state='waiting'] {
-        color: #fbbf24;
+        color: var(--brand-orange);
       }
       .status[data-state='error'] {
-        color: #f87171;
+        color: #d92d20;
       }
 
       .pulsantone {
-        --accent: #10b981;
+        --accent: var(--brand-purple);
         min-width: 240px;
         padding: 16px 40px;
         font-size: 1.3rem;
         font-weight: 700;
-        color: #04150f;
+        color: #fff;
         background: var(--accent);
         border: none;
         border-radius: 999px;
         cursor: pointer;
         transition: transform 0.08s ease, filter 0.15s ease, background 0.15s ease;
-        box-shadow: 0 8px 24px rgba(16, 185, 129, 0.35);
+        box-shadow: 0 8px 24px rgba(119, 26, 175, 0.35);
       }
       .pulsantone:hover {
         filter: brightness(1.06);
@@ -498,8 +575,8 @@
       .provider-toggle {
         display: inline-flex;
         padding: 3px;
-        background: #17181f;
-        border: 1px solid #2a2c36;
+        background: var(--brand-surface);
+        border: 1px solid var(--brand-border);
         border-radius: 999px;
       }
       .provider-toggle label {
@@ -515,13 +592,13 @@
         padding: 6px 18px;
         font-size: 0.9rem;
         font-weight: 600;
-        color: #9aa0aa;
+        color: var(--brand-text-muted);
         border-radius: 999px;
         transition: background 0.15s ease, color 0.15s ease;
       }
       .provider-toggle input:checked + span {
-        color: #04150f;
-        background: #10b981;
+        color: #fff;
+        background: var(--brand-purple);
       }
       .consent {
         display: flex;
@@ -530,13 +607,13 @@
         max-width: 520px;
         font-size: 0.78rem;
         line-height: 1.35;
-        color: #9aa0aa;
+        color: var(--brand-text-muted);
         cursor: pointer;
         text-align: left;
       }
       .consent input {
         margin-top: 2px;
-        accent-color: #10b981;
+        accent-color: var(--brand-purple);
         flex-shrink: 0;
       }
 
@@ -548,14 +625,122 @@
         flex-direction: column;
         gap: 8px;
         font-size: 0.9rem;
-        color: #cbd5e1;
+        color: var(--brand-text);
         max-width: 420px;
       }
       .rules-note {
         margin: 0;
         font-size: 0.76rem;
-        color: #6b7280;
+        color: var(--brand-text-muted);
         max-width: 420px;
+      }
+
+      /* ── Pre-join device check ─────────────────────────────────────────────── */
+      .device-check {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 12px;
+        width: 100%;
+        max-width: 420px;
+      }
+      .device-check[hidden] {
+        display: none;
+      }
+      .device-check-preview {
+        width: 100%;
+        max-width: 320px;
+        aspect-ratio: 4 / 3;
+        border-radius: 14px;
+        overflow: hidden;
+        background: #000;
+        border: 1px solid var(--brand-border);
+      }
+      #device-preview {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        /* Mirror the preview so it reads like a mirror to the candidate. */
+        transform: scaleX(-1);
+      }
+      .device-check-mic {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        width: 100%;
+        max-width: 320px;
+      }
+      .device-check-mic-label {
+        font-size: 0.82rem;
+        color: var(--brand-text-muted);
+      }
+      .mic-bar {
+        width: 100%;
+        height: 12px;
+        border-radius: 999px;
+        background: var(--brand-border);
+        overflow: hidden;
+      }
+      .mic-bar-fill {
+        width: 0%;
+        height: 100%;
+        border-radius: 999px;
+        background: var(--brand-lavender);
+        transition: width 0.08s linear, background 0.15s ease;
+      }
+      .mic-bar-fill[data-ok='true'] {
+        background: #22a06b; /* semantic green — mic level is adequate */
+      }
+      .device-check-status {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        width: 100%;
+        max-width: 320px;
+      }
+      .status-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.85rem;
+        color: var(--brand-text-muted);
+      }
+      .status-item::before {
+        content: '○';
+        font-weight: 700;
+        color: var(--brand-text-muted);
+      }
+      .status-item[data-ok='true'] {
+        color: var(--brand-text);
+      }
+      .status-item[data-ok='true']::before {
+        content: '✓';
+        color: #22a06b;
+      }
+      .device-check-denied {
+        margin: 0;
+        font-size: 0.8rem;
+        color: #d92d20;
+        max-width: 360px;
+        text-align: center;
+      }
+      .device-check-denied[hidden] {
+        display: none;
+      }
+      .device-check-hint {
+        margin: 0;
+        min-height: 1.1rem;
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: var(--brand-orange);
+        text-align: center;
+      }
+      .device-check-hint:empty {
+        min-height: 0;
       }
 
       .toast {
