@@ -102,13 +102,13 @@ the Supabase project version used for staging and production.
 #### Scenario: Frontend app boots in SSR development mode
 
 - GIVEN `docker compose up -d` has completed and `frontend/.env` is populated from `frontend/.env.example`
-- WHEN the contributor runs `pnpm dev` inside `frontend/`
+- WHEN the contributor runs `bun run dev` inside `frontend/`
 - THEN the Nuxt SSR dev server starts and the health page responds with HTTP 200
 
 #### Scenario: Backoffice app boots in SPA development mode
 
 - GIVEN `backoffice/.env` is populated from `backoffice/.env.example`
-- WHEN the contributor runs `pnpm dev` inside `backoffice/`
+- WHEN the contributor runs `bun run dev` inside `backoffice/`
 - THEN the Nuxt app starts with `ssr: false` and the health page responds with HTTP 200
 
 #### Scenario: Missing .env prevents silent misconfiguration
@@ -124,7 +124,10 @@ the Supabase project version used for staging and production.
 The `api` app MUST expose a `GET /api/health` route returning HTTP 200 and a
 JSON body confirming the app is alive. The `frontend` and `backoffice` apps MUST
 each expose a `/health` page returning HTTP 200. All health endpoints MUST be
-reachable without authentication.
+reachable without authentication. The `api` health JSON body is a
+**machine-readable status payload and MUST NOT be localized** — the literal
+`{ "status": "ok" }` is returned regardless of the active locale (see the i18n
+Mandate requirement's machine-readable exemption).
 
 #### Scenario: API health endpoint returns 200
 
@@ -254,21 +257,21 @@ is wired end-to-end and its CI can catch real regressions.
 
 - GIVEN Vitest is installed in `frontend` and the smoke test asserts the health page component renders an "ok" status text
 - WHEN the component does not yet render that text
-- WHEN `pnpm test:unit` is run
+- WHEN `bun run test:unit` is run
 - THEN the smoke test fails
 
 #### Scenario: Frontend smoke test passes after health component is implemented (GREEN)
 
 - GIVEN the frontend health page component renders an "ok" status text
-- WHEN `pnpm test:unit` is run
+- WHEN `bun run test:unit` is run
 - THEN the smoke test passes
 
 #### Scenario: Backoffice smoke test fails then passes (RED→GREEN)
 
 - GIVEN Vitest is installed in `backoffice` and the smoke test asserts the health page renders an "ok" status text
-- WHEN the component does not yet render that text and `pnpm test:unit` is run
+- WHEN the component does not yet render that text and `bun run test:unit` is run
 - THEN the smoke test fails
-- AND WHEN the health page is implemented and `pnpm test:unit` is re-run
+- AND WHEN the health page is implemented and `bun run test:unit` is re-run
 - THEN the smoke test passes
 
 ---
@@ -566,7 +569,7 @@ files (`.nuxt/`) MUST be excluded from strict checks. Running `tsc --noEmit` (or
 #### Scenario: TypeScript typecheck passes with no errors
 
 - GIVEN both Nuxt apps are scaffolded with C1 code
-- WHEN `npx nuxi typecheck` (or `tsc --noEmit`) is run in each Nuxt repo
+- WHEN `bunx nuxi typecheck` (or `tsc --noEmit`) is run in each Nuxt repo
 - THEN it exits 0 with no TypeScript errors
 
 #### Scenario: `any` type is rejected in authored source
@@ -737,6 +740,12 @@ MUST live in `lang/{it,en}.php` (api) or `i18n/locales/{it,en}.json` (Nuxt apps)
 Use `$t('key')` in Vue templates; `__('key')` in PHP. ARIA attributes, button
 labels, error messages, and meta description content MUST all be i18n keys.
 
+This mandate applies to **user-facing** strings only. Machine-readable values are
+explicitly exempt and MUST NOT be localized: API status payloads (e.g.
+`/api/health` → `{"status":"ok"}`), enum values, database column and API field
+names, log message keys, HTTP header names/values, and configuration keys. These
+are returned or emitted literally in every locale.
+
 #### Scenario: Zero inline string literals in Vue templates (outside translation files)
 
 - GIVEN all `.vue` files in `frontend` and `backoffice`
@@ -818,3 +827,53 @@ applies at the infrastructure layer.
 - GIVEN the built Docker image for any of the three apps
 - WHEN `docker inspect` or the Dockerfile `USER` instruction is checked
 - THEN the runtime user is NOT `root` (UID ≠ 0)
+
+---
+
+### Requirement: Dependency Resolution Policy
+
+All runtime, framework, and library versions are pinned by the Version Catalog
+(design.md D25) and locked in `composer.lock` / `bun.lockb`. An autonomous
+implementation session MUST treat these pins as immutable. If any pinned
+dependency cannot be installed or resolved — a version conflict, a yanked
+release, an unmet platform requirement, or a missing required tool — the session
+MUST **stop and report** the failure (the failing package, its version, and the
+error) and wait for a human decision. The session MUST NOT downgrade a package,
+MUST NOT replace a package with an alternative library, MUST NOT remove or loosen
+a version constraint, and MUST NOT substitute an unspecified tool. A blocked
+dependency is an open question for a human, never an autonomous implementation
+decision.
+
+#### Scenario: A pinned dependency that will not resolve halts the run
+
+- GIVEN an autonomous apply session installing dependencies at their pinned versions
+- WHEN a pinned package cannot be resolved or installed
+- THEN the session stops at the failing step and reports the package, version, and error
+- AND it does NOT downgrade, replace, unpin, or substitute the package to proceed
+
+#### Scenario: Version constraints are never loosened to force a build
+
+- GIVEN a dependency conflict between two pinned packages
+- WHEN the conflict is encountered
+- THEN the constraint is left unchanged and the conflict is reported
+- AND no `^minor` pin is widened (e.g. to `*`) and no alternative library is introduced
+
+---
+
+### Requirement: Required Local Development Toolchain
+
+An autonomous local implementation of C1 assumes the following tools are
+installed and available on `PATH`, at the versions defined in the Version Catalog
+(design.md D25): PHP 8.5 with the PCOV and `pdo_pgsql` extensions; Composer 2.4+;
+Bun 1.3; Node 24 LTS; Docker with Docker Compose v2; the Playwright browsers
+Chromium and WebKit (installed with `--with-deps`); go-task; and git. k6 is
+required only for the local load-test task. The toolchain MUST be documented in
+`docs/dev-setup.md`. A missing required tool MUST trigger the Dependency
+Resolution Policy (stop and report — never substitute an alternative).
+
+#### Scenario: Toolchain is documented and preconditions are checkable
+
+- GIVEN a fresh wrapper clone
+- WHEN a contributor (or an autonomous session) reads `docs/dev-setup.md`
+- THEN every required local tool and its pinned version is listed
+- AND a missing required tool causes the run to stop and report rather than substitute an alternative

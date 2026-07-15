@@ -5,8 +5,9 @@ Candidates enter through SSO/magic-link, take an adaptive spoken interview with 
 synthetic voice, and an asynchronous job produces a **BARS** competency evaluation
 that is pushed to the calling system via webhook.
 
-The current repo also contains a working **Astro demo** (avatar interview + proctoring).
-It is the product **kernel** and a reference for the port — not the final architecture.
+This repo is the **wrapper superproject**. The original working **Astro demo**
+(avatar interview + proctoring) lives in `legacy-demo/` — the product **kernel**
+and a reference for the port, not the final architecture.
 
 > **Source of truth for the domain:** `docs/app_description/` (marked *binding*) and
 > `docs/BEAI_BRIEF.md`. When in doubt, those documents win over any assumption.
@@ -41,8 +42,8 @@ It is the product **kernel** and a reference for the port — not the final arch
 
 | Layer | Choice |
 |---|---|
-| **API backend** | **Laravel 12 + Eloquent + MySQL 8**, **API-only** (no Blade UI). **Scramble** (`dedoc/scramble`) generates the OpenAPI spec. Stateless, horizontally scalable. |
-| Cache / Queue / Session | **Redis** (+ Laravel Horizon) for async scoring / notifications / webhooks |
+| **API backend** | **Laravel 13 + PHP 8.5 + Eloquent + PostgreSQL 17 (pgvector)**, **API-only** (no Blade UI). **Scramble** (`dedoc/scramble`) generates the OpenAPI spec. Stateless, horizontally scalable. |
+| Cache / Queue / Session | **Redis 8** (+ Laravel Horizon) for async scoring / notifications / webhooks |
 | **Frontend** (candidate) | **Nuxt 4 (Vue 3) — SSR**, `@nuxtjs/i18n`. Public interview app; ports the avatar/proctoring TS logic from the demo |
 | **Backoffice** (admin) | **Nuxt 4 (Vue 3) — SPA** (`ssr: false`), `@nuxtjs/i18n`. Separate app, always multilingual |
 | Object storage | S3-compatible (audio, snapshots, transcripts) |
@@ -70,7 +71,7 @@ clone/CI with `--recursive`. Keep a wrapper script/Taskfile to sync submodule po
 
 **Containers & runtime:** **Docker everywhere** — local and Railway. Multi-stage
 Dockerfiles per app (`api`, `frontend`, `backoffice`); `docker-compose` for local dev
-(MySQL 8, Redis, Mailpit + the 3 apps); Railway builds **via Docker** so the local image
+(PostgreSQL 17 + pgvector, Redis 8, Mailpit + the 3 apps); Railway builds **via Docker** so the local image
 equals prod. **Bun (hybrid):** Bun for install/dev/**build** of both Nuxt apps (and the
 backoffice SPA static runtime); **Node** for the frontend **SSR production runtime**
 (Nitro `node-server`) and for the **Playwright/Vitest** runners (officially Node-targeted).
@@ -80,6 +81,48 @@ Multi-stage Dockerfile: build with Bun → run SSR with Node.
 (global Eloquent scope + `TenantContext` middleware). Composite indexes lead with
 `organization_id`. Cross-tenant isolation must be enforced at the query layer and
 covered by dedicated tests. A tenant must never see another tenant's data.
+
+---
+
+## Autonomous implementation guardrails
+
+These rules govern any autonomous (loop-mode) implementation session. The pinned
+version catalog is the single source of truth: `openspec/changes/project-skeleton-ci/design.md`
+(**D25**). This stack table and D25 MUST never diverge.
+
+**Dependency Resolution Policy (hard stop).** All runtime, framework, and library
+versions are pinned by D25 and locked in `composer.lock` / `bun.lockb`. If a pinned
+dependency **cannot be installed or resolved** (version conflict, yanked release,
+unmet platform requirement) — or a required tool is missing:
+- **STOP** at the failing step. Do not proceed.
+- **Never downgrade** a package, **never replace** it with an alternative library,
+  **never remove or loosen** a version constraint, **never substitute** an
+  unspecified tool.
+- **Report** the exact package, version, and error, and wait for a human decision.
+  A blocked dependency is an open question, not an implementation choice.
+
+**Required local toolchain** (versions per D25; documented in `docs/dev-setup.md`):
+PHP 8.5 + PCOV + `pdo_pgsql`, Composer 2.4+, Bun 1.3, Node 24 LTS, Docker +
+Docker Compose v2, Playwright browsers (Chromium + WebKit, `--with-deps`),
+go-task, git; k6 for local load tests only. A missing required tool triggers the
+Dependency Resolution Policy above.
+
+**Package manager: Bun only.** Bun is the sole package manager for both Nuxt apps
+(`frontend`, `backoffice`) — install/dev/build. Node runs only the SSR production
+runtime and the Vitest/Playwright runners. **Never** use `pnpm`, `npm`, `yarn`,
+`npx`, or `pnpx` in the new apps — use `bun` / `bunx`. (`legacy-demo/` keeps its
+original npm toolchain; it is reference-only and outside the Bun standard.)
+
+**Machine-facing responses are not localized.** The i18n mandate applies to
+user-facing strings only. Machine-readable values — API status payloads (e.g.
+`/api/health` → `{"status":"ok"}`), enum values, DB column / API field names, log
+keys, and HTTP header values — are NOT user-facing and are returned literally in
+every locale.
+
+**Observability scope in C1: health endpoints only.** Sentry, Microsoft Clarity,
+GA4, Laravel Pulse, Cloudflare, the `ai_requests` log, and domain events are
+specified in `openspec/specs/observability/spec.md` but are delivered by their
+owning slices (C2+), **not C1**. Do not install or wire any of them during C1.
 
 ---
 
@@ -142,8 +185,8 @@ dashboards → notifications → NFR hardening). See the SDD store / roadmap for
 table and dependencies.
 
 ## Key reference files
-- `src/providers/types.ts` — provider abstraction contract to port (C7).
-- `src/lib/proctor-config.ts` — proctoring taxonomy + `summarizeIntegrity()` (C7/C9).
-- `src/lib/db.ts` — current SQLite schema to evolve into MySQL/Eloquent.
+- `legacy-demo/src/providers/types.ts` — provider abstraction contract to port (C7).
+- `legacy-demo/src/lib/proctor-config.ts` — proctoring taxonomy + `summarizeIntegrity()` (C7/C9).
+- `legacy-demo/src/lib/db.ts` — current SQLite schema to evolve into PostgreSQL/Eloquent.
 - `docs/app_description/02-domain/framework/{roles,competencies,bars/*}.json` — binding catalog (C3).
 - `docs/app_description/03-ux-reference/esempio-report-valutazione.json` — evaluation output shape (C9).

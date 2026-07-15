@@ -7,10 +7,12 @@ user-behavior analytics, product-event tracking, application error monitoring,
 application-health dashboards, infrastructure analytics, internal business intelligence,
 AI request logging, and domain event emission.
 
-This is a **global NFR spec** that informs all changes from C1 onward. Early changes
-introduce the instrumentation contracts (health endpoints, AI logging schema, domain
-events); C13 (NFR Hardening) enforces the complete stack and validates every
-integration end-to-end.
+This is a **global NFR spec** that informs all changes from C1 onward, but each
+capability is implemented by exactly one owning slice (see the **C1 Scope Boundary**
+requirement below). **C1 introduces health endpoints only**; the AI logging schema
+(C9), domain events (C2+), and internal dashboards (C11) arrive with their owning
+slices; C13 (NFR Hardening) enforces the complete stack (Sentry, Clarity, GA4,
+Pulse, Cloudflare) and validates every integration end-to-end.
 
 The design philosophy is **one responsibility = one tool**: each platform has a
 clearly defined, non-overlapping scope. All services are replaceable without
@@ -19,6 +21,36 @@ affecting the application's core logic.
 ---
 
 ## Requirements
+
+### Requirement: Phased Rollout — C1 Scope Boundary
+
+This spec is a global NFR that informs many changes, but each capability is
+implemented by exactly one owning slice. In **C1 (project skeleton), the ONLY
+observability deliverable is the health-check endpoints** defined in the Project
+Skeleton spec. Every other capability in this document is OUT of C1 scope and MUST
+NOT be implemented, installed, or wired during C1:
+
+| Capability | Owning slice |
+|---|---|
+| Health-check endpoints | **C1** |
+| Domain events (per entity) | C2+ (the slice that introduces the entity) |
+| AI request logging (`ai_requests`) | C9 (scoring engine) |
+| Internal business-metric dashboards | C11 (admin dashboards) |
+| Sentry, Microsoft Clarity, GA4, Laravel Pulse, Cloudflare | C13 (NFR hardening) |
+
+An autonomous C1 implementation session MUST NOT install, configure, or wire
+Sentry, Clarity, GA4, Pulse, Cloudflare, the `ai_requests` table, or domain-event
+classes. Encountering these requirements while implementing C1 is expected — they
+are satisfied later by their owning slice, never in C1.
+
+#### Scenario: C1 implements only health endpoints from this spec
+
+- GIVEN an autonomous session implementing the C1 project-skeleton change
+- WHEN it reads this observability spec
+- THEN it implements only the health-check endpoints (owned by C1)
+- AND it does NOT install or wire Sentry, Clarity, GA4, Pulse, Cloudflare, `ai_requests`, or domain events (each owned by a later slice)
+
+---
 
 ### Requirement: Tool Responsibility Boundaries
 

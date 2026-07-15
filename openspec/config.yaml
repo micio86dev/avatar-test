@@ -6,14 +6,16 @@ strict_tdd: true
 
 context: |
   Project: BEAI — Business Evaluation AI (multi-tenant AI voice-interview assessment)
-  Backend: Laravel 12 + Eloquent + MySQL 8 + Redis (Horizon) — target dir: api/
-  Frontend: Nuxt 4 (Vue 3) + @nuxtjs/i18n — target dir: web/
-  Auth: Laravel Sanctum (SPA cookies / token abilities / signed magic-link guard)
-  Queue: Redis + Laravel Horizon (async scoring, webhooks)
+  Backend: Laravel 13 + PHP 8.5 + Eloquent + PostgreSQL 17 (pgvector) + Redis 8 (Horizon) — target dir: api/
+  Frontend (candidate, SSR): Nuxt 4 (Vue 3) + @nuxtjs/i18n — target dir: frontend/
+  Backoffice (admin, SPA ssr:false): Nuxt 4 (Vue 3) + @nuxtjs/i18n — target dir: backoffice/
+  Package manager (both Nuxt apps): Bun (install/dev/build); Node runs the SSR runtime + Vitest/Playwright
+  Auth: JWT (tymon/jwt-auth) — bearer access+refresh + Redis denylist; short-lived JWT magic-link; RBAC via spatie/laravel-permission (teams mode); NOT Sanctum. Built in C2.
+  Queue: Redis 8 + Laravel Horizon (async scoring, webhooks)
   Deploy: Railway — Git Flow (main/develop + feature/release/hotfix branches)
   Domain: BARS soft-skill assessment; 5 roles; 18 standard competencies + MTG/LAT
   Multi-tenancy: shared DB, row-level scoping by organization_id
-  Current repo: Astro 7 + TypeScript demo (kernel/reference — NOT the target architecture)
+  Topology: wrapper superproject + 3 git submodules (api, frontend, backoffice); Astro demo in legacy-demo/ (reference — NOT the target architecture)
 
 testing:
   strict_tdd: true
@@ -26,18 +28,18 @@ testing:
       status: not-yet-scaffolded
     frontend_unit:
       framework: Vitest + Vue Test Utils
-      command: "pnpm test:unit"  # to-be-wired-in-C1
+      command: "bun run test:unit"  # to-be-wired-in-C1
       status: not-yet-scaffolded
     frontend_e2e:
       framework: Playwright
-      command: "pnpm test:e2e"  # to-be-wired-in-C1
+      command: "bun run test:e2e"  # to-be-wired-in-C1
       status: not-yet-scaffolded
   coverage:
     backend:
       command: "php artisan test --coverage --min=85"  # to-be-wired-in-C1
       status: not-yet-scaffolded
     frontend:
-      command: "pnpm test:unit --coverage"  # to-be-wired-in-C1
+      command: "bun run test:unit --coverage"  # to-be-wired-in-C1
       status: not-yet-scaffolded
   note: >
     All test commands are INTENDED targets. Code is greenfield;
@@ -62,9 +64,10 @@ rules:
     - TDD tasks: RED task always precedes GREEN+REFACTOR tasks
   apply:
     - Follow existing code patterns
+    - Dependency Resolution Policy — if a pinned dependency cannot be resolved/installed, STOP and report; never downgrade, replace, remove/loosen constraints, or swap libraries (see CLAUDE.md → Autonomous implementation guardrails; design.md D25/D37)
     tdd: true
     test_command: "php artisan test --parallel"  # to-be-wired-in-C1 (backend)
-    frontend_test_command: "pnpm test:unit"       # to-be-wired-in-C1 (frontend)
+    frontend_test_command: "bun run test:unit"    # to-be-wired-in-C1 (frontend)
   verify:
     test_command: "php artisan test --parallel"   # to-be-wired-in-C1
     build_command: ""

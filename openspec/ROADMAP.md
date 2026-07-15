@@ -31,7 +31,7 @@ C1 ──┬─ C2 ──┬─ C3 ── C4 ─────────── C
 
 | # | Name (`kebab`) | Intent | Depends on | Key acceptance / FR |
 |---|---|---|---|---|
-| C1 | `project-skeleton-ci` | Wrapper + 3 submodules (`api` Laravel 12 API-only + Scramble/OpenAPI, `frontend` Nuxt 4 SSR, `backoffice` Nuxt 4 SPA), MySQL/Redis via docker-compose, Pest/Vitest/Playwright harness per repo, i18n it/en in both Nuxt apps, OpenAPI→TS client codegen, Git Flow ×4, Railway config parked, CI with 85% gate | — | Foundation for all |
+| C1 | `project-skeleton-ci` | Wrapper + 3 submodules (`api` Laravel 13 + PHP 8.5 API-only + Scramble/OpenAPI, `frontend` Nuxt 4 SSR, `backoffice` Nuxt 4 SPA; Bun toolchain), PostgreSQL 17 (pgvector)/Redis 8 via docker-compose, Pest/Vitest/Playwright harness per repo, i18n it/en in both Nuxt apps, OpenAPI→TS client codegen, Git Flow ×4, Railway config parked, CI with 85% gate | — | Foundation for all |
 | C2 | `tenancy-identity` | Organization + User; **JWT auth (`tymon/jwt-auth`)** for the backoffice (access+refresh, denylist) + **`spatie/laravel-permission`** RBAC (teams mode, org-scoped) + global `organization_id` scoping + `TenantContext`; cross-tenant isolation tests | C1 | NFR tenant isolation; SA-09 |
 | C3 | `framework-catalog` | Seed Role/Competency/BarsIndicator/FrameworkVersion from `framework/*.json`; translatable columns; read API | C2 | Binding framework; i18n |
 | C4 | `project-configuration` | Project CRUD (role, type standard/potential, competency-subset validation, language, pause/nudge, deadline, branding, webhook cfg) | C2, C3 | FR-001; SA-09 |

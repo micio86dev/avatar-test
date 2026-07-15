@@ -142,7 +142,7 @@ app runs in SSR mode — both otherwise share this contract.
 #### Scenario: Nuxt job fails when unit coverage is below 85%
 
 - GIVEN all Vitest tests pass but authored-code coverage is 70%
-- WHEN the coverage step runs `pnpm test:unit --coverage`
+- WHEN the coverage step runs `bun run test:unit --coverage`
 - THEN the step exits non-zero
 - AND the job status is failure
 
@@ -369,7 +369,7 @@ After C1 is applied, the `status` fields for all test and coverage commands in
 
 #### Scenario: CI uses exact commands from config.yaml
 
-- GIVEN the commands in `config.yaml` (e.g. `php artisan test --parallel`, `pnpm test:unit`, `pnpm test:e2e`, `php artisan test --coverage --min=85`, `pnpm test:unit --coverage`)
+- GIVEN the commands in `config.yaml` (e.g. `php artisan test --parallel`, `bun run test:unit`, `bun run test:e2e`, `php artisan test --coverage --min=85`, `bun run test:unit --coverage`)
 - WHEN the CI workflow steps in each repo are inspected
 - THEN each step uses the corresponding command verbatim (or a documented equivalent with the same flags)
 
@@ -484,7 +484,7 @@ or otherwise depend on CI outcomes in another submodule.
 Every submodule CI workflow MUST include a **security audit** step. The `api`
 workflow MUST run `composer audit` to check for known PHP dependency vulnerabilities
 (built into Composer 2.4+). Both Nuxt workflows MUST run `bun audit` (or equivalent)
-for known npm package vulnerabilities. Each Docker image build step MUST be followed
+for known JavaScript (Bun-managed) package vulnerabilities. Each Docker image build step MUST be followed
 by a **Trivy container scan** (`aquasecurity/trivy-action`) checking for HIGH and
 CRITICAL CVEs in the final image — scan failures at HIGH/CRITICAL MUST fail the CI
 job. GitHub's built-in **secret scanning** MUST be enabled on all submodule
@@ -501,7 +501,7 @@ to prevent supply chain attacks.
 - THEN the step exits non-zero
 - AND the job fails (audits are required, not advisory)
 
-#### Scenario: Nuxt CI fails when an npm dependency has a known HIGH vulnerability
+#### Scenario: Nuxt CI fails when a JavaScript dependency has a known HIGH vulnerability
 
 - GIVEN `bun audit` detects a HIGH or CRITICAL severity vulnerability
 - WHEN the security audit step runs in a Nuxt CI workflow
