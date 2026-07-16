@@ -80,18 +80,34 @@ tasks:
       - php artisan test --parallel
 
   test:frontend:
-    desc: "Run the frontend Vitest unit suite + Playwright E2E (all 3 projects)"
-    dir: frontend
+    desc: "Run the frontend Vitest unit suite (host) + Playwright E2E (pinned container)"
     cmds:
-      - bun run test:unit
-      - bun run test:e2e
+      - (cd frontend && bun run test:unit)
+      - bash "{{.ROOT_DIR}}/scripts/e2e-container.sh" frontend
 
   test:backoffice:
-    desc: "Run the backoffice Vitest unit suite + Playwright E2E (all 3 projects)"
-    dir: backoffice
+    desc: "Run the backoffice Vitest unit suite (host) + Playwright E2E (pinned container)"
     cmds:
-      - bun run test:unit
-      - bun run test:e2e
+      - (cd backoffice && bun run test:unit)
+      - bash "{{.ROOT_DIR}}/scripts/e2e-container.sh" backoffice
+
+  # E2E in the pinned Playwright container — same env as CI, so the committed
+  # -linux screenshot baselines match deterministically (visual regression 100% green).
+  e2e:frontend:
+    desc: "Run frontend Playwright E2E in the pinned Playwright container (matches CI)"
+    cmds:
+      - bash "{{.ROOT_DIR}}/scripts/e2e-container.sh" frontend
+
+  e2e:backoffice:
+    desc: "Run backoffice Playwright E2E in the pinned Playwright container (matches CI)"
+    cmds:
+      - bash "{{.ROOT_DIR}}/scripts/e2e-container.sh" backoffice
+
+  e2e:update:
+    desc: "Regenerate ALL Playwright screenshot baselines (both apps) in the pinned container"
+    cmds:
+      - bash "{{.ROOT_DIR}}/scripts/e2e-container.sh" frontend --update-snapshots
+      - bash "{{.ROOT_DIR}}/scripts/e2e-container.sh" backoffice --update-snapshots
 
   test:load:
     desc: "Run K6 load tests against local docker-compose stack (never Railway). Prereq: task up"
