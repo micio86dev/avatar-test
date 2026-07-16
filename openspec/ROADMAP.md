@@ -39,7 +39,7 @@ C1 ──┬─ C2 ──┬─ C3 ── C4 ─────────── C
 | C6 | `participant-sso` | Participant + lifecycle state machine; signed magic-link SSO ingress (create-on-first-access); opaque candidate id | C4 | FR-002; SA-01, SA-12 |
 | C7 | `interview-engine-port` | Port `providers/*`, `proctor.ts`, `proctor-config.ts` into the **frontend (SSR)** Nuxt app; session-credentials API; utterance/integrity/snapshot ingestion; WebRTC direct; unsupported-browser gate | C6 | SA-01, SA-11; latency NFR |
 | C8 | `conversation-orchestration` | Follow-up vs advance; answer→competency attribution; nudge on short answers; pause every N; standard vs potential flow | C7 | SA-02, SA-03, SA-04, SA-08 |
-| C9 | `scoring-engine` | Async `ScoreEvaluationJob`; LLM BARS (JSON-schema, indicators 1–5, competency mean, verbatim excerpts); reliability; 90% gate; retry | C3, C8 | FR-004; SA-05, SA-06, SA-07 |
+| C9 | `scoring-engine` | Async `ScoreEvaluationJob`; LLM BARS (JSON-schema, indicators {1,3,5}, competency mean (assessed only), verbatim excerpts); reliability; 90% gate; retry | C3, C8 | FR-004; SA-05, SA-06, SA-07 |
 | C10 | `webhooks-integration` | Per-project webhook cfg; progress + evaluation events; HMAC; idempotency; retry/backoff; exit redirect | C6, C9 | Integration 03/04; SA-06, SA-07 |
 | C11 | `admin-dashboards` | Build in the **backoffice (SPA)** Nuxt app: participant status views; results/report viewer; transcript & report download; state-gated | C9 | FR-005; SA-09 |
 | C12 | `notifications-reminders` | Invitations; deadline reminders; queued email/notification jobs | C6 | FR-002 |

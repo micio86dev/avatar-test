@@ -136,8 +136,11 @@ owning slices (C2+), **not C1**. Do not install or wire any of them during C1.
   Type is **immutable** after go-live.
 - **BARS scoring:** each competency has **N indicators**; each indicator carries
   reference anchors `{5, 3, 1}`. The LLM semantically matches the answer against the
-  anchors and scores each indicator on a **1–5** scale (interpolation allowed, e.g. 4).
-  `competency.score` = **mean of indicator scores** (e.g. COL 3.67 from 4,3,4), plus a
+  anchors and scores each indicator on the **discrete set {1,3,5}** — the single closest
+  anchor, never an in-between value (no 2, no 4). An indicator with no assessable evidence
+  is scored **-1** (unassessable: exempt from {1,3,5} and **excluded** from the competency
+  mean). `competency.score` = **mean of the assessed indicator scores** (e.g. COL 3.67
+  from 5,3,3), plus a
   `reliability` value. Anchors are the source of truth; the prompt **injects** the
   competency anchors; `temperature=0` and versioned `model/prompt/framework` for
   determinism/traceability. `excerpts` must be **verbatim** from the transcript
