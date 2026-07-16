@@ -571,36 +571,31 @@ function showEndq(): void {
   const isLast = currentIndex >= total - 1;
   setScreen('endq');
 
-  if (isLast) {
+  // Terminal screen ONLY when the avatar actually concluded the last question. A manual
+  // stop or timeout on the last question is NOT an ending: the question stays unanswered
+  // and resumable, so it keeps the pause + retry affordances like any other.
+  if (isLast && completed) {
     btnPause.hidden = true;
-    endqTitle.textContent = timedOut ? 'Tempo scaduto' : 'Colloquio terminato';
+    endqTitle.textContent = 'Colloquio terminato';
     btnNext.textContent = 'Vai ai risultati';
-
-    // Avatar concluded the last question — auto-advance to done, no action needed.
-    if (completed) {
-      let remaining = AUTO_ADVANCE_SECONDS;
-      endqHint.textContent = `Reindirizzamento ai risultati tra ${remaining}s…`;
-      autoAdvanceInterval = window.setInterval(() => {
-        remaining -= 1;
-        if (remaining <= 0) {
-          clearAutoAdvance();
-          void onNext();
-        } else {
-          endqHint.textContent = `Reindirizzamento ai risultati tra ${remaining}s…`;
-        }
-      }, 1000);
-      return;
-    }
-
-    endqHint.textContent = timedOut
-      ? 'Il tempo è scaduto. Premi per completare il colloquio.'
-      : 'Hai risposto a tutte le domande.';
+    let remaining = AUTO_ADVANCE_SECONDS;
+    endqHint.textContent = `Reindirizzamento ai risultati tra ${remaining}s…`;
+    autoAdvanceInterval = window.setInterval(() => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        clearAutoAdvance();
+        void onNext();
+      } else {
+        endqHint.textContent = `Reindirizzamento ai risultati tra ${remaining}s…`;
+      }
+    }, 1000);
     return;
   }
 
   btnPause.hidden = false;
   endqTitle.textContent = timedOut ? 'Tempo scaduto' : 'Domanda conclusa';
-  btnNext.textContent = 'Prossima domanda';
+  // On the last question a non-concluded stop re-asks the same question (there is no next).
+  btnNext.textContent = isLast ? 'Riprova domanda' : 'Prossima domanda';
 
   // Soft auto-advance: only when the avatar itself concluded (not a timeout or manual stop)
   // and more questions remain. The countdown auto-fires onNext; Pausa/Prossima take over.
@@ -621,16 +616,19 @@ function showEndq(): void {
 
   endqHint.textContent = timedOut
     ? 'Il tempo per questa domanda è finito. Puoi continuare o riprendere più tardi.'
-    : 'Vuoi continuare con la prossima domanda?';
+    : isLast
+      ? 'Non hai completato questa domanda. Riprovala o mettila in pausa per riprendere più tardi.'
+      : 'Vuoi continuare con la prossima domanda?';
 }
 
 async function onNext(): Promise<void> {
   clearAutoAdvance();
   btnNext.disabled = true;
   try {
-    // Timeouts stay 'timeout' (retried on resume); only an affirmed, non-timed-out
-    // question is marked completed.
-    if (lastEndedReason !== 'timeout') {
+    // A question is answered only when the avatar itself concluded it (end_interview).
+    // Any manual stop, error, or timeout leaves it non-completed so it stays resumable
+    // on the server (getNextQuestionIndex re-runs every status != 'completed').
+    if (lastEndedReason === 'completed') {
       await setProgress(currentIndex, 'completed');
       completedSet.add(currentIndex);
     }
