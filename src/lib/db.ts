@@ -436,23 +436,29 @@ export interface CandidateListRow extends CandidateRow {
 export function getAllCandidates(): CandidateListRow[] {
   return getDb()
     .prepare(
+      // Independent per-candidate subqueries — NOT two parallel LEFT JOINs. Joining
+      // sessions and question_progress at once fans out to #sessions × #questions rows,
+      // which inflates any non-DISTINCT aggregate (completed_questions ×#sessions, the
+      // minute sums ×#questions). Correlated subqueries keep each aggregate independent.
       `SELECT
          c.id, c.display_name, c.resume_code, c.created_at,
-         COUNT(DISTINCT s.id) AS session_count,
-         SUM(CASE WHEN qp.status = 'completed' THEN 1 ELSE 0 END) AS completed_questions,
-         COUNT(DISTINCT qp.id) AS total_questions,
-         MAX(COALESCE(s.ended_at, s.started_at)) AS last_activity,
-         GROUP_CONCAT(DISTINCT s.provider) AS providers_used,
-         SUM(CASE WHEN s.provider = 'heygen' AND s.ended_at IS NOT NULL
-               THEN (julianday(s.ended_at) - julianday(s.started_at)) * 1440.0
-               ELSE 0 END) AS total_heygen_min,
-         SUM(CASE WHEN s.provider = 'tavus' AND s.ended_at IS NOT NULL
-               THEN (julianday(s.ended_at) - julianday(s.started_at)) * 1440.0
-               ELSE 0 END) AS total_tavus_min
+         (SELECT COUNT(*) FROM sessions s WHERE s.candidate_id = c.id) AS session_count,
+         (SELECT COUNT(*) FROM question_progress qp
+            WHERE qp.candidate_id = c.id AND qp.status = 'completed') AS completed_questions,
+         (SELECT COUNT(*) FROM question_progress qp WHERE qp.candidate_id = c.id) AS total_questions,
+         (SELECT MAX(COALESCE(s.ended_at, s.started_at)) FROM sessions s
+            WHERE s.candidate_id = c.id) AS last_activity,
+         (SELECT GROUP_CONCAT(DISTINCT s.provider) FROM sessions s
+            WHERE s.candidate_id = c.id) AS providers_used,
+         (SELECT COALESCE(SUM((julianday(s.ended_at) - julianday(s.started_at)) * 1440.0), 0)
+            FROM sessions s
+            WHERE s.candidate_id = c.id AND s.provider = 'heygen' AND s.ended_at IS NOT NULL)
+           AS total_heygen_min,
+         (SELECT COALESCE(SUM((julianday(s.ended_at) - julianday(s.started_at)) * 1440.0), 0)
+            FROM sessions s
+            WHERE s.candidate_id = c.id AND s.provider = 'tavus' AND s.ended_at IS NOT NULL)
+           AS total_tavus_min
        FROM candidates c
-       LEFT JOIN sessions s ON s.candidate_id = c.id
-       LEFT JOIN question_progress qp ON qp.candidate_id = c.id
-       GROUP BY c.id
        ORDER BY last_activity DESC, c.created_at DESC`,
     )
     .all() as CandidateListRow[];
