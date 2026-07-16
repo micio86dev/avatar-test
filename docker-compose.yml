@@ -9,11 +9,11 @@ services:
 
   # ---------------------------------------------------------------------------
   # PostgreSQL 17 + pgVector
-  # Image: pgvector/pgvector:pg17-alpine (D25)
+  # Image: pgvector/pgvector:0.8.0-pg17 (D25)
   # The init.sql script creates both `beai` (dev) and `beai_test` (Pest) databases.
   # ---------------------------------------------------------------------------
   postgres:
-    image: pgvector/pgvector:pg17-alpine
+    image: pgvector/pgvector:0.8.0-pg17
     container_name: beai_postgres
     restart: unless-stopped
     environment:

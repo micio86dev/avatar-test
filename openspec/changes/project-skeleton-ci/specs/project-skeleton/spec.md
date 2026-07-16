@@ -77,7 +77,7 @@ bootable and testable without the wrapper present.
 ### Requirement: Local Development Infrastructure
 
 The wrapper MUST provide a `docker-compose.yml` at the root that provisions
-**PostgreSQL 17** (via `pgvector/pgvector:pg17-alpine` — PostgreSQL 17 + pgVector
+**PostgreSQL 17** (via `pgvector/pgvector:0.8.0-pg17` — PostgreSQL 17 + pgVector
 pre-installed), **Redis 8** (`redis:8.0-alpine`), and Mailpit (`axllent/mailpit:v1.22`)
 with **pinned image tags** (no `latest`, no bare majors — see Version Catalog in
 design.md D25). All three apps MUST connect to these services using values from
@@ -279,7 +279,7 @@ is wired end-to-end and its CI can catch real regressions.
 ### Requirement: Test Database — Dedicated PostgreSQL & Migration Standards
 
 The `api` test suite MUST run against a dedicated PostgreSQL database (`beai_test`),
-using the same `pgvector/pgvector:pg17-alpine` image as local development. Using
+using the same `pgvector/pgvector:0.8.0-pg17` image as local development. Using
 a different engine for tests than for production masks constraint enforcement
 differences, JSON operator semantics, full-text search behaviour, and
 PostgreSQL-specific type handling (including pgVector column types). The
@@ -499,7 +499,7 @@ the Git Flow docs.
 Each app (`api`, `frontend`, `backoffice`) MUST ship a **multi-stage,
 production-grade Dockerfile**: a small final image, a **non-root** runtime user,
 and a `HEALTHCHECK`. The wrapper `docker-compose.yml` MUST run the local dev
-stack — **PostgreSQL 17** (`pgvector/pgvector:pg17-alpine`) + **Redis 8** (`redis:8.0-alpine`) + Mailpit (`axllent/mailpit:v1.22`)
+stack — **PostgreSQL 17** (`pgvector/pgvector:0.8.0-pg17`) + **Redis 8** (`redis:8.0-alpine`) + Mailpit (`axllent/mailpit:v1.22`)
 **plus the three app services** built from those Dockerfiles; all base image
 tags MUST be pinned (no `latest`) — see Version Catalog in design.md D25. **Railway MUST build via Docker** using the same Dockerfiles
 so the local image equals the production image (Railway config committed but

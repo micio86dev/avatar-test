@@ -51,7 +51,7 @@ needed.
 ### Requirement: API CI Job (Lint + Test + Coverage + OpenAPI)
 
 The `api` repository's CI workflow MUST declare a **PostgreSQL `services` block**
-(`pgvector/pgvector:pg17-alpine`, `POSTGRES_DB=beai_test`) and wait for it to
+(`pgvector/pgvector:0.8.0-pg17`, `POSTGRES_DB=beai_test`) and wait for it to
 reach healthy status before any application step runs. It then MUST run in
 sequence: install PHP dependencies (Composer), run a PHP linter (e.g. Pint),
 run `php artisan migrate` against `beai_test`, execute Pest with parallel mode,
@@ -62,7 +62,7 @@ the PostgreSQL `beai_test` service, never to SQLite.
 
 #### Scenario: API CI provisions PostgreSQL beai_test and migrates before Pest
 
-- GIVEN the `api` CI workflow declares a `services.postgres` block (`pgvector/pgvector:pg17-alpine`, `POSTGRES_DB=beai_test`)
+- GIVEN the `api` CI workflow declares a `services.postgres` block (`pgvector/pgvector:0.8.0-pg17`, `POSTGRES_DB=beai_test`)
 - WHEN the CI job runs
 - THEN PostgreSQL reaches healthy status before any application step executes
 - AND `php artisan migrate` runs against `beai_test` before Pest
