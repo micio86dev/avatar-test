@@ -1,0 +1,6 @@
+# Auto-generated files
+.nuxt/
+.output/
+node_modules/
+types/api.ts
+dist/

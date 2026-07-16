@@ -1,0 +1,10 @@
+{
+  "welcome": "Welcome",
+  "unsupported": {
+    "title": "Unsupported Browser",
+    "message": "This application requires a supported desktop browser (Chrome, Edge, Safari). Please access from a desktop computer."
+  },
+  "health": {
+    "status": "ok"
+  }
+}

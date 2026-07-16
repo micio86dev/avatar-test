@@ -1,0 +1,10 @@
+@import 'tailwindcss';
+@import '@tailwindcss/forms';
+@import '@tailwindcss/typography';
+
+@theme {
+  /* Design tokens from DESIGN.md */
+  --color-primary: #1e3a5f;
+  --color-accent: #0d9488;
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+}
