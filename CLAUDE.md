@@ -193,3 +193,6 @@ table and dependencies.
 - `legacy-demo/src/lib/db.ts` — current SQLite schema to evolve into PostgreSQL/Eloquent.
 - `docs/app_description/02-domain/framework/{roles,competencies,bars/*}.json` — binding catalog (C3).
 - `docs/app_description/03-ux-reference/esempio-report-valutazione.json` — evaluation output shape (C9).
+- `docs/dev-setup.md` — required local toolchain + Dependency Resolution Policy (D37/D38). See this before any `composer install` / `bun install` in a new environment.
+- `docs/git-flow.md` — Git Flow ×4 + SemVer M.m.p release flow for all four repos.
+- `openspec/changes/project-skeleton-ci/design.md` — D25 Version Catalog (single source of truth for all pinned versions), D37 Dependency Resolution Policy.

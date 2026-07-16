@@ -1,4 +1,9 @@
-# dependencies
+# ---------------------------------------------------------------------------
+# Wrapper-level gitignore
+# Each submodule (api/, frontend/, backoffice/) has its own .gitignore.
+# ---------------------------------------------------------------------------
+
+# dependencies (legacy-demo keeps its own node_modules)
 node_modules/
 
 # build output
@@ -6,7 +11,7 @@ dist/
 .astro/
 .vercel/
 
-# local SQLite transcript store
+# local SQLite transcript store (legacy-demo reference data)
 data/
 
 # env — secrets never committed
@@ -21,3 +26,12 @@ data/
 
 # skill-registry local cache (machine-local fingerprint, not content)
 .atl/.skill-registry.cache.json
+
+# Docker / local dev artifacts
+.docker/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo

@@ -1,0 +1,102 @@
+---
+# BEAI — wrapper Taskfile
+# Requires: go-task >= 3.0 (https://taskfile.dev)
+# Install: brew install go-task  (macOS) | see docs/dev-setup.md for other platforms
+version: "3"
+
+vars:
+  # Path to the wrapper docker-compose file.
+  COMPOSE_FILE: "{{.ROOT_DIR}}/docker-compose.yml"
+
+tasks:
+
+  # ---------------------------------------------------------------------------
+  # Infrastructure lifecycle
+  # ---------------------------------------------------------------------------
+
+  up:
+    desc: "Start local dev infra (postgres, redis, mailpit) in detached mode"
+    cmds:
+      - docker compose -f "{{.COMPOSE_FILE}}" up -d
+
+  down:
+    desc: "Stop and remove local dev infra containers (volumes are preserved)"
+    cmds:
+      - docker compose -f "{{.COMPOSE_FILE}}" down
+
+  # ---------------------------------------------------------------------------
+  # Submodule management
+  #
+  # NOTE: submodule repos (api, frontend, backoffice) are declared in .gitmodules
+  # but exist as plain local directories in this batch (not yet registered as git
+  # submodules). These tasks will become fully operational once the directories
+  # are converted to proper git submodules in a later batch (C1 Unit 5).
+  # TODO(C1-Unit5): replace stub bodies with real git submodule commands once
+  #   .gitmodules contains real remote URLs.
+  # ---------------------------------------------------------------------------
+
+  submodules:init:
+    desc: "Initialise and clone all git submodules"
+    cmds:
+      - |
+        echo "TODO(C1-Unit5): submodule URLs not yet registered."
+        echo "Once real URLs are set, this task will run:"
+        echo "  git submodule update --init --recursive"
+
+  submodules:update:
+    desc: "Pull the latest commit for each submodule (following pinned branch/tag)"
+    cmds:
+      - |
+        echo "TODO(C1-Unit5): submodule URLs not yet registered."
+        echo "Once real URLs are set, this task will run:"
+        echo "  git submodule update --remote --merge"
+
+  submodules:sync:
+    desc: "Sync submodule URLs from .gitmodules into .git/config"
+    cmds:
+      - |
+        echo "TODO(C1-Unit5): submodule URLs not yet registered."
+        echo "Once real URLs are set, this task will run:"
+        echo "  git submodule sync --recursive"
+
+  submodules:status:
+    desc: "Show submodule pointer freshness (ahead/behind tracking branch)"
+    cmds:
+      - |
+        echo "TODO(C1-Unit5): submodule URLs not yet registered."
+        echo "Once real URLs are set, this task will run:"
+        echo "  git submodule status --recursive"
+
+  # ---------------------------------------------------------------------------
+  # Per-app test runners
+  # These delegate to each app's own test suite.
+  # Prereq: task up (infra must be healthy for api integration tests).
+  # ---------------------------------------------------------------------------
+
+  test:api:
+    desc: "Run the api Pest test suite (requires postgres + redis healthy)"
+    dir: api
+    cmds:
+      - php artisan test --parallel
+
+  test:frontend:
+    desc: "Run the frontend Vitest unit suite + Playwright E2E (all 3 projects)"
+    dir: frontend
+    cmds:
+      - bun run test:unit
+      - bun run test:e2e
+
+  test:backoffice:
+    desc: "Run the backoffice Vitest unit suite + Playwright E2E (all 3 projects)"
+    dir: backoffice
+    cmds:
+      - bun run test:unit
+      - bun run test:e2e
+
+  test:load:
+    desc: "Run K6 load tests against local docker-compose stack (never Railway)"
+    dir: api
+    cmds:
+      - k6 run tests/k6/scenarios/baseline.js
+      - k6 run tests/k6/scenarios/stress.js
+      - k6 run tests/k6/scenarios/spike.js

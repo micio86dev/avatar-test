@@ -1,0 +1,162 @@
+---
+# BEAI — local development stack
+# All image tags are pinned per D25 (design.md Version Catalog). Never use `latest`.
+# Run: docker compose up -d
+# Stop: docker compose down
+# Full teardown (remove volumes): docker compose down -v
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL 17 + pgVector
+  # Image: pgvector/pgvector:pg17-alpine (D25)
+  # The init.sql script creates both `beai` (dev) and `beai_test` (Pest) databases.
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: pgvector/pgvector:pg17-alpine
+    container_name: beai_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-beai}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-beai}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - beai_network
+
+  # ---------------------------------------------------------------------------
+  # Redis 8
+  # Image: redis:8.0-alpine (D25)
+  # Used for: queue, cache, session, JWT denylist (C2+), Horizon (C2+).
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:8.0-alpine
+    container_name: beai_redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - beai_network
+
+  # ---------------------------------------------------------------------------
+  # Mailpit — local mail catcher
+  # Image: axllent/mailpit:v1.22 (D25)
+  # SMTP: port 1025 | Web UI: port 8025
+  # ---------------------------------------------------------------------------
+  mailpit:
+    image: axllent/mailpit:v1.22
+    container_name: beai_mailpit
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+    networks:
+      - beai_network
+
+  # ---------------------------------------------------------------------------
+  # App services — COMMENTED OUT until each app's Dockerfile exists (PR 5 / Unit 2-4).
+  # Uncomment and wire env after the respective submodule PR lands.
+  # ---------------------------------------------------------------------------
+
+  # api:
+  #   build:
+  #     context: ./api
+  #     dockerfile: Dockerfile
+  #   container_name: beai_api
+  #   restart: unless-stopped
+  #   env_file:
+  #     - ./api/.env
+  #   ports:
+  #     - "${API_PORT:-8000}:8000"
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "curl -f http://localhost:8000/api/health || exit 1"]
+  #     interval: 15s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 30s
+  #   networks:
+  #     - beai_network
+
+  # frontend:
+  #   build:
+  #     context: ./frontend
+  #     dockerfile: Dockerfile
+  #   container_name: beai_frontend
+  #   restart: unless-stopped
+  #   env_file:
+  #     - ./frontend/.env
+  #   ports:
+  #     - "${FRONTEND_PORT:-3000}:3000"
+  #   depends_on:
+  #     api:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
+  #     interval: 15s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 30s
+  #   networks:
+  #     - beai_network
+
+  # backoffice:
+  #   build:
+  #     context: ./backoffice
+  #     dockerfile: Dockerfile
+  #   container_name: beai_backoffice
+  #   restart: unless-stopped
+  #   env_file:
+  #     - ./backoffice/.env
+  #   ports:
+  #     - "${BACKOFFICE_PORT:-3001}:3001"
+  #   depends_on:
+  #     api:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "curl -f http://localhost:3001/health || exit 1"]
+  #     interval: 15s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 30s
+  #   networks:
+  #     - beai_network
+
+# ---------------------------------------------------------------------------
+# Named volumes (data persists across `docker compose restart`)
+# Use `docker compose down -v` to wipe volumes (destructive — resets databases).
+# ---------------------------------------------------------------------------
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+# ---------------------------------------------------------------------------
+# Internal network — all services communicate over `beai_network`.
+# ---------------------------------------------------------------------------
+networks:
+  beai_network:
+    driver: bridge
