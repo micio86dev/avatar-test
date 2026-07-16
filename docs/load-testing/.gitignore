@@ -1,0 +1,4 @@
+# Raw K6 report outputs — generated at run time, not committed
+*.json
+*.html
+!README.md

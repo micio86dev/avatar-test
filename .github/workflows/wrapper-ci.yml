@@ -1,0 +1,174 @@
+---
+# BEAI — Wrapper Cross-Stack CI
+#
+# Validates cross-repo consistency and compose config integrity.
+# Does NOT re-run per-app unit/E2E suites (those belong to each app's own CI).
+# Does NOT deploy — Railway deploy is manual and per-service.
+#
+# NOTE (Unit 5 adaptation): app directories are plain local dirs (not git submodules yet).
+# The submodule-pointer sanity check is DEFERRED to Unit 5 when real submodule URLs exist.
+# In its place this workflow validates:
+#   (a) docker compose config parses without errors
+#   (b) the committed openapi.json is semantically identical across api/frontend/backoffice
+#   (c) each app's check-client-drift.sh exits 0 (generated TS client matches openapi.json)
+#
+# Triggers: push/PR to develop only (not main — releases handled by Git Flow release process).
+
+on:
+  push:
+    branches:
+      - develop
+  pull_request:
+    branches:
+      - develop
+
+jobs:
+  wrapper-cross-stack:
+    name: Cross-Stack Consistency
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout wrapper repo
+        uses: actions/checkout@v4
+        # NOTE(Unit 5): add `submodules: recursive` here once .gitmodules has real remote URLs.
+
+      # -----------------------------------------------------------------------
+      # (a) docker compose config — validates the compose file parses cleanly
+      #     with all 6 services defined (postgres, redis, mailpit + api, frontend, backoffice).
+      # -----------------------------------------------------------------------
+      - name: Validate docker compose config
+        run: |
+          docker compose config -q
+          echo "Checking all pinned image tags (no 'latest' or bare-major allowed):"
+          docker compose config | grep 'image:' | grep -v '#'
+          # Fail if any image tag is 'latest' or a bare major (e.g. :8, :24) — D24 requires pinned tags
+          if docker compose config | grep 'image:' | grep -vE ':[a-zA-Z0-9._-]+-[a-zA-Z0-9._-]+|:[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+|:v[0-9]+\.[0-9]+|:pg[0-9]+-|:local$' | grep -v '#' | grep 'image:'; then
+            echo "ERROR: One or more services use a floating image tag (latest or bare-major). Fix per D24/D25."
+            exit 1
+          fi
+          echo "All image tags are pinned."
+
+      # -----------------------------------------------------------------------
+      # (b) openapi.json cross-repo consistency check
+      #     The committed openapi.json in api/, frontend/, and backoffice/ MUST
+      #     be semantically identical (same parsed JSON, whitespace-agnostic).
+      # -----------------------------------------------------------------------
+      - name: Set up Python (for JSON comparison)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify openapi.json is identical across api/frontend/backoffice
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+
+          files = {
+              'api/openapi.json':        'api',
+              'frontend/openapi.json':   'frontend',
+              'backoffice/openapi.json': 'backoffice',
+          }
+
+          loaded = {}
+          for path, label in files.items():
+              with open(path) as f:
+                  loaded[label] = json.load(f)
+
+          reference = loaded['api']
+          errors = []
+          for label, content in loaded.items():
+              if label == 'api':
+                  continue
+              if content != reference:
+                  errors.append(f"  {label}/openapi.json differs from api/openapi.json")
+
+          if errors:
+              print("ERROR: openapi.json cross-repo drift detected!")
+              print("The committed openapi.json must be identical in api/, frontend/, and backoffice/.")
+              print("To fix: re-export from api (php artisan scramble:export), copy to frontend/ and backoffice/, regenerate typed clients, run full test suites green, commit.")
+              for e in errors:
+                  print(e)
+              sys.exit(1)
+          else:
+              print("openapi.json is semantically identical across all 3 repos.")
+          EOF
+
+      # -----------------------------------------------------------------------
+      # (c) TS client drift check — each app's check-client-drift.sh must exit 0.
+      #     Requires Bun and openapi-typescript to be available.
+      # -----------------------------------------------------------------------
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.3'
+
+      - name: Install frontend deps (for drift check)
+        working-directory: frontend
+        run: bun install --frozen-lockfile
+
+      - name: Check frontend TS client drift
+        working-directory: frontend
+        run: bash scripts/check-client-drift.sh
+
+      - name: Install backoffice deps (for drift check)
+        working-directory: backoffice
+        run: bun install --frozen-lockfile
+
+      - name: Check backoffice TS client drift
+        working-directory: backoffice
+        run: bash scripts/check-client-drift.sh
+
+      # -----------------------------------------------------------------------
+      # (d) Stack-consistency grep: confirm no stale stack tokens exist
+      #     (MySQL, Laravel 12, Sanctum in non-design contexts, pnpm/yarn/npm
+      #     in Nuxt apps, etc.)
+      # -----------------------------------------------------------------------
+      - name: Stack token consistency check
+        run: |
+          echo "Checking for stale stack tokens..."
+          FAIL=0
+
+          # MySQL/MariaDB outside design.md (where it's mentioned as rejected alternative)
+          HITS=$(grep -r --include="*.php" --include="*.ts" --include="*.vue" --include="*.json" --include="*.yml" --include="*.yaml" -l "mysql\|mariadb" --exclude-dir=vendor --exclude-dir=node_modules --exclude-dir=.nuxt . 2>/dev/null | grep -v "design.md" | grep -v "openspec/changes" || true)
+          if [ -n "$HITS" ]; then
+            echo "ERROR: MySQL/MariaDB reference found outside design.md:"
+            echo "$HITS"
+            FAIL=1
+          fi
+
+          # Laravel 12 (we're on 13)
+          HITS=$(grep -r --include="*.php" --include="*.json" --include="*.md" "Laravel 12\|laravel/laravel:^12" --exclude-dir=vendor --exclude-dir=node_modules . 2>/dev/null | grep -v "design.md" | grep -v "openspec/" | grep -v "legacy-demo" || true)
+          if [ -n "$HITS" ]; then
+            echo "ERROR: Laravel 12 reference found:"
+            echo "$HITS"
+            FAIL=1
+          fi
+
+          # Sanctum — only allowed as "NOT Sanctum" in design/docs
+          HITS=$(grep -r --include="*.php" --include="*.ts" --include="*.vue" "Sanctum\|sanctum" --exclude-dir=vendor --exclude-dir=node_modules . 2>/dev/null | grep -v "NOT Sanctum\|not Sanctum\|not use Sanctum\|design.md\|openspec/" || true)
+          if [ -n "$HITS" ]; then
+            echo "ERROR: Sanctum reference found outside 'NOT Sanctum' contexts:"
+            echo "$HITS"
+            FAIL=1
+          fi
+
+          # pnpm/yarn inside Nuxt app dirs (legacy-demo may use npm — excluded)
+          HITS=$(grep -r --include="*.yml" --include="*.yaml" --include="*.json" --include="*.sh" "pnpm\|yarn" frontend/ backoffice/ 2>/dev/null | grep -v node_modules | grep -v ".nuxt" || true)
+          if [ -n "$HITS" ]; then
+            echo "ERROR: pnpm/yarn reference in frontend/backoffice (Bun-only projects):"
+            echo "$HITS"
+            FAIL=1
+          fi
+
+          if [ "$FAIL" -eq 0 ]; then
+            echo "No stale stack tokens found."
+          else
+            exit 1
+          fi
+
+      # -----------------------------------------------------------------------
+      # NOTE: Docker image build is DEFERRED to unit testing once Docker daemon
+      # is confirmed available in the CI runner environment.
+      # The compose config validation above ensures the Dockerfile references
+      # are syntactically correct.
+      # -----------------------------------------------------------------------

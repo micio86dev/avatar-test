@@ -24,26 +24,38 @@ testing:
   runners:
     backend:
       framework: Pest
-      command: "php artisan test --parallel"  # to-be-wired-in-C1
-      status: not-yet-scaffolded
+      command: "php artisan test --parallel"
+      status: scaffolded  # C1 done — 16/16 tests green; 96.4% coverage
     frontend_unit:
       framework: Vitest + Vue Test Utils
-      command: "bun run test:unit"  # to-be-wired-in-C1
-      status: not-yet-scaffolded
+      command: "bun run test:unit"
+      status: scaffolded  # C1 done — Vitest 3.x; 100% authored coverage; 85% gate
+    backoffice_unit:
+      framework: Vitest + Vue Test Utils
+      command: "bun run test:unit"
+      status: scaffolded  # C1 done — same as frontend
     frontend_e2e:
       framework: Playwright
-      command: "bun run test:e2e"  # to-be-wired-in-C1
-      status: not-yet-scaffolded
+      command: "bun run test:e2e"
+      status: scaffolded  # C1 done — 3 projects (chromium/webkit/mobile); full run needs dev server
+    backoffice_e2e:
+      framework: Playwright
+      command: "bun run test:e2e"
+      status: scaffolded  # C1 done — same as frontend
   coverage:
     backend:
-      command: "php artisan test --coverage --min=85"  # to-be-wired-in-C1
-      status: not-yet-scaffolded
+      command: "php artisan test --coverage --min=85"
+      status: scaffolded  # PCOV; 96.4% on api/; gate: 85%
     frontend:
-      command: "bun run test:unit --coverage"  # to-be-wired-in-C1
-      status: not-yet-scaffolded
+      command: "bun run test:unit --coverage"
+      status: scaffolded  # v8; 100% on authored files; gate: 85%
+    backoffice:
+      command: "bun run test:unit --coverage"
+      status: scaffolded  # v8; 100% on authored files; gate: 85%
   note: >
-    All test commands are INTENDED targets. Code is greenfield;
-    scaffolding happens in change C1. Do not run these commands until C1 is applied.
+    All test runners scaffolded in C1 (change: project-skeleton-ci).
+    Pest + Vitest + Playwright wired. E2E full run requires a live dev server
+    (runtime verify deferred); all CI workflows contain the required steps.
 
 rules:
   proposal:

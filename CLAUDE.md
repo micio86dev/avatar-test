@@ -188,6 +188,7 @@ dashboards → notifications → NFR hardening). See the SDD store / roadmap for
 table and dependencies.
 
 ## Key reference files
+- `DESIGN.md` — **authoritative UX/UI reference**: Tailwind `@theme` tokens, typography, color palette, component library decisions, Lighthouse targets. All design decisions live here. No UI decision that contradicts it may be implemented without updating it first.
 - `legacy-demo/src/providers/types.ts` — provider abstraction contract to port (C7).
 - `legacy-demo/src/lib/proctor-config.ts` — proctoring taxonomy + `summarizeIntegrity()` (C7/C9).
 - `legacy-demo/src/lib/db.ts` — current SQLite schema to evolve into PostgreSQL/Eloquent.

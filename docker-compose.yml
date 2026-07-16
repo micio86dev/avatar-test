@@ -72,77 +72,109 @@ services:
       - beai_network
 
   # ---------------------------------------------------------------------------
-  # App services — COMMENTED OUT until each app's Dockerfile exists (PR 5 / Unit 2-4).
-  # Uncomment and wire env after the respective submodule PR lands.
+  # App services — enabled once the Dockerfiles exist in each app directory.
+  # Each app requires postgres + redis healthy before starting.
+  # PHP-FPM api: served on port 9000 internally; expose via a web server in C2+.
+  # frontend SSR: Nitro node-server on port 3000.
+  # backoffice SPA: nginx static serve on port 3001 (mapped from container 80).
+  #
+  # NOTE: These services use env_file pointing at each app's .env file.
+  # Copy each app's .env.example to .env and fill in the values before running.
   # ---------------------------------------------------------------------------
 
-  # api:
-  #   build:
-  #     context: ./api
-  #     dockerfile: Dockerfile
-  #   container_name: beai_api
-  #   restart: unless-stopped
-  #   env_file:
-  #     - ./api/.env
-  #   ports:
-  #     - "${API_PORT:-8000}:8000"
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "curl -f http://localhost:8000/api/health || exit 1"]
-  #     interval: 15s
-  #     timeout: 5s
-  #     retries: 5
-  #     start_period: 30s
-  #   networks:
-  #     - beai_network
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    image: beai-api:local
+    container_name: beai_api
+    restart: unless-stopped
+    env_file:
+      - path: ./api/.env
+        required: false
+    environment:
+      # Override DB/Redis to use compose service names (not localhost)
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: ${POSTGRES_DB:-beai}
+      DB_USERNAME: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MAIL_HOST: mailpit
+      MAIL_PORT: 1025
+    ports:
+      - "${API_PORT:-8000}:9000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "php-fpm -t 2>/dev/null && echo ok"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - beai_network
 
-  # frontend:
-  #   build:
-  #     context: ./frontend
-  #     dockerfile: Dockerfile
-  #   container_name: beai_frontend
-  #   restart: unless-stopped
-  #   env_file:
-  #     - ./frontend/.env
-  #   ports:
-  #     - "${FRONTEND_PORT:-3000}:3000"
-  #   depends_on:
-  #     api:
-  #       condition: service_healthy
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
-  #     interval: 15s
-  #     timeout: 5s
-  #     retries: 5
-  #     start_period: 30s
-  #   networks:
-  #     - beai_network
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: beai-frontend:local
+    container_name: beai_frontend
+    restart: unless-stopped
+    env_file:
+      - path: ./frontend/.env
+        required: false
+    environment:
+      NUXT_PUBLIC_API_BASE: http://api:9000/api
+      NUXT_PUBLIC_APP_ENV: local
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:3000/health | grep -q ok || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - beai_network
 
-  # backoffice:
-  #   build:
-  #     context: ./backoffice
-  #     dockerfile: Dockerfile
-  #   container_name: beai_backoffice
-  #   restart: unless-stopped
-  #   env_file:
-  #     - ./backoffice/.env
-  #   ports:
-  #     - "${BACKOFFICE_PORT:-3001}:3001"
-  #   depends_on:
-  #     api:
-  #       condition: service_healthy
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "curl -f http://localhost:3001/health || exit 1"]
-  #     interval: 15s
-  #     timeout: 5s
-  #     retries: 5
-  #     start_period: 30s
-  #   networks:
-  #     - beai_network
+  backoffice:
+    build:
+      context: ./backoffice
+      dockerfile: Dockerfile
+    image: beai-backoffice:local
+    container_name: beai_backoffice
+    restart: unless-stopped
+    env_file:
+      - path: ./backoffice/.env
+        required: false
+    environment:
+      NUXT_PUBLIC_API_BASE: http://api:9000/api
+    ports:
+      - "${BACKOFFICE_PORT:-3001}:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:80/health 2>&1 | grep -q '200 OK' || wget -qO- http://localhost:80/health | grep -q ok || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - beai_network
 
 # ---------------------------------------------------------------------------
 # Named volumes (data persists across `docker compose restart`)

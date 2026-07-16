@@ -8,20 +8,28 @@ that is pushed to the calling HR system via webhook.
 - **Domain source of truth (binding):** [`docs/app_description/`](docs/app_description/)
   and [`docs/BEAI_BRIEF.md`](docs/BEAI_BRIEF.md).
 - **Project rules & constraints:** [`CLAUDE.md`](CLAUDE.md).
+- **UX/UI reference (authoritative):** [`DESIGN.md`](DESIGN.md).
+- **Local dev setup:** [`docs/dev-setup.md`](docs/dev-setup.md).
 - **How we work:** Spec-Driven Development (SDD) **+** Test-Driven Development (TDD),
   coverage target 85%, Git Flow (`main`/`develop` + `feature`/`release`/`hotfix`).
 
 ### Target stack
-This repo is a **wrapper superproject** with three git submodules:
-- **`api`** — Laravel 12 + Eloquent + MySQL 8 + Redis (Horizon), **API-only**; **Scramble**
-  publishes the OpenAPI spec. Stateless, scalable to thousands of concurrent candidates.
-- **`frontend`** — Nuxt 4 (Vue 3) **SSR** + `@nuxtjs/i18n`: the candidate interview app
-  (ports the avatar/proctoring logic below).
-- **`backoffice`** — Nuxt 4 (Vue 3) **SPA** + `@nuxtjs/i18n`: the admin panel (separate app).
 
-Both Nuxt apps **codegen a typed client from the API's OpenAPI**. Auth: Sanctum (SPA cookies
-for the backoffice + token abilities for external API + signed candidate magic-link). Tests:
-Pest (`api`) + Vitest/Vue Test Utils + Playwright. Deploy: Railway, three services, on request.
+This repo is a **wrapper superproject**. The `api`, `frontend`, and `backoffice` directories
+are currently local scaffolds; they will be converted to git submodules in C1 Unit 5
+once their first `v0.1.0` releases are tagged.
+
+- **`api`** — **Laravel 13** + PHP 8.5 + Eloquent + **PostgreSQL 17** (pgvector) + Redis 8,
+  **API-only** (no Blade). **Scramble** (`dedoc/scramble ^0.13`) publishes `openapi.json`.
+  Auth: **JWT (`tymon/jwt-auth`)** + **`spatie/laravel-permission`** teams mode (built in C2).
+- **`frontend`** — **Nuxt 4** (Vue 3) **SSR** + `@nuxtjs/i18n`: the candidate interview app.
+  Bun install/build → Node 24 SSR runtime (Nitro `node-server`).
+- **`backoffice`** — **Nuxt 4** (Vue 3) **SPA** (`ssr: false`) + `@nuxtjs/i18n`: the admin panel.
+  Bun install/build → nginx 1.27 static serve.
+
+Both Nuxt apps **codegen a typed TS client** from the API's committed `openapi.json` snapshot
+(`openapi-typescript`). Tests: Pest + PCOV (`api`) + Vitest + Playwright 3-project matrix
+(both Nuxt apps). Deploy: **Railway** (Docker, three independent services), on explicit request only.
 
 The build is greenfield (no legacy backward compatibility). The SDD roadmap slices it into
 13 vertical changes (C1→C13). See [`openspec/ROADMAP.md`](openspec/ROADMAP.md).

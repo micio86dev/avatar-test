@@ -31,11 +31,20 @@ RUN rm /etc/nginx/conf.d/default.conf
 COPY --from=builder /app/.output/public /usr/share/nginx/html
 
 # SPA routing: serve index.html for all unknown paths (client-side router)
+# Security headers applied at nginx level (D29 / task 7.8).
 RUN printf 'server {\n\
-    listen 3000;\n\
+    listen 80;\n\
     server_name _;\n\
     root /usr/share/nginx/html;\n\
     index index.html;\n\
+\n\
+    # Security headers (D29 / task 7.8)\n\
+    add_header X-Frame-Options "DENY" always;\n\
+    add_header X-Content-Type-Options "nosniff" always;\n\
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;\n\
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;\n\
+    # HSTS applied by Railway (HTTPS termination at edge) — not needed here\n\
+    # CSP deferred to C2\n\
 \n\
     # Serve the health page as a static file\n\
     location /health {\n\
@@ -65,10 +74,10 @@ RUN chown -R nginx:nginx /usr/share/nginx/html \
 
 USER nginx
 
-EXPOSE 3000
+EXPOSE 80
 
-# Health check against the SPA health page
+# Health check against the SPA health page (nginx listens on port 80)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-  CMD wget -qO- http://localhost:3000/health > /dev/null 2>&1 || exit 1
+  CMD wget -qO- http://localhost:80/health > /dev/null 2>&1 || exit 1
 
 CMD ["nginx", "-g", "daemon off;"]

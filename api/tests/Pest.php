@@ -18,6 +18,11 @@ pest()->extend(TestCase::class)
  // ->use(RefreshDatabase::class)
     ->in('Feature');
 
+// Wire the base TestCase to Unit/Testing so withCassette() and other
+// helpers are available in unit tests that need them (D36 cassette pattern).
+pest()->extend(TestCase::class)
+    ->in('Unit/Testing');
+
 /*
 |--------------------------------------------------------------------------
 | Expectations

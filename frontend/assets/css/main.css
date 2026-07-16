@@ -3,8 +3,56 @@
 @import '@tailwindcss/typography';
 
 @theme {
-  /* Design tokens from DESIGN.md */
+  /* === Colors === */
+  /* Source of truth: DESIGN.md at wrapper root. Keep in sync. */
   --color-primary: #1e3a5f;
+  --color-primary-light: #2d5282;
+  --color-primary-dark: #132740;
   --color-accent: #0d9488;
-  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --color-accent-light: #14b8a6;
+  --color-accent-dark: #0f766e;
+
+  --color-neutral-50: #f8fafc;
+  --color-neutral-100: #f1f5f9;
+  --color-neutral-200: #e2e8f0;
+  --color-neutral-400: #94a3b8;
+  --color-neutral-600: #475569;
+  --color-neutral-800: #1e293b;
+  --color-neutral-900: #0f172a;
+
+  --color-success: #22c55e;
+  --color-success-light: #dcfce7;
+  --color-warning: #f59e0b;
+  --color-warning-light: #fef3c7;
+  --color-error: #ef4444;
+  --color-error-light: #fee2e2;
+  --color-info: #3b82f6;
+  --color-info-light: #dbeafe;
+
+  --color-recording: #dc2626;
+  --color-avatar-bg: #0f172a;
+
+  /* === Typography === */
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* === Spacing === */
+  --spacing-section: 4rem;
+  --spacing-panel: 1.5rem;
+  --spacing-avatar-panel: 2rem;
+  --spacing-nav: 4rem;
+  --spacing-sidebar: 16rem;
+
+  /* === Border radius === */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-full: 9999px;
+
+  /* === Shadows === */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1);
+  --shadow-avatar: 0 25px 50px -12px rgb(0 0 0 / 0.5);
 }

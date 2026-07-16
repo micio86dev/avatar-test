@@ -36,6 +36,22 @@ export default defineNuxtConfig({
     },
   },
 
+  // Security headers (D29 / task 7.8).
+  // For the SPA (ssr: false), these are primarily applied at nginx level (see Dockerfile).
+  // Nitro route rules are included here for dev server and `nuxt preview` consistency.
+  nitro: {
+    routeRules: {
+      '/**': {
+        headers: {
+          'X-Frame-Options': 'DENY',
+          'X-Content-Type-Options': 'nosniff',
+          'Referrer-Policy': 'strict-origin-when-cross-origin',
+          'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+        },
+      },
+    },
+  },
+
   // Runtime config
   runtimeConfig: {
     public: {

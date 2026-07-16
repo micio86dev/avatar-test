@@ -94,9 +94,10 @@ tasks:
       - bun run test:e2e
 
   test:load:
-    desc: "Run K6 load tests against local docker-compose stack (never Railway)"
+    desc: "Run K6 load tests against local docker-compose stack (never Railway). Prereq: task up"
     dir: api
     cmds:
-      - k6 run tests/k6/scenarios/baseline.js
-      - k6 run tests/k6/scenarios/stress.js
-      - k6 run tests/k6/scenarios/spike.js
+      # Reports saved to docs/load-testing/ (gitignored raw files — README is committed)
+      - k6 run --summary-export=../docs/load-testing/baseline-report.json tests/k6/scenarios/baseline.js
+      - k6 run --summary-export=../docs/load-testing/stress-report.json tests/k6/scenarios/stress.js
+      - k6 run --summary-export=../docs/load-testing/spike-report.json tests/k6/scenarios/spike.js
