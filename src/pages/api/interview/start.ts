@@ -10,7 +10,7 @@ import {
   TAVUS_PERSONA_ID,
 } from 'astro:env/server';
 import { composeQuestionPrompt, questions, type PriorAnswer } from '../../../lib/prompt';
-import { HEYGEN_END_PHRASE } from '../../../providers/types';
+import { HEYGEN_END_PHRASE, HEYGEN_FINAL_PHRASE } from '../../../providers/types';
 import { rates } from '../../../lib/pricing';
 import { timing } from '../../../lib/timing';
 import {
@@ -43,20 +43,47 @@ const TAVUS_CONCURRENCY_BACKOFF_MS = 2000;
 // Tavus-only: after its closing phrase the persona calls the end_interview tool (registered
 // once on the PAL). It reaches the client as a conversation.tool_call app-message and drives
 // the soft auto-advance. HeyGen has no equivalent hook, so this instruction is Tavus-scoped.
-const TAVUS_END_TOOL_INSTRUCTION =
-  '\n\nDopo la tua frase di conclusione per questa domanda, chiama SUBITO lo strumento ' +
-  'end_interview per segnalare che hai finito. Non annunciarlo: chiamalo in silenzio.';
+// On the LAST question the persona thanks the candidate instead of announcing the next one;
+// the tool call is unchanged, so completion detection is unaffected either way.
+function tavusEndToolInstruction(isLast: boolean): string {
+  const closing = isLast
+    ? `pronuncia una breve frase di ringraziamento e chiusura (es. "${questions.closing}"), NON annunciare altre domande, ` +
+      'poi chiama'
+    : 'dopo la tua frase di conclusione per questa domanda chiama SUBITO';
+  return (
+    `\n\n${closing} lo strumento end_interview per segnalare che hai finito. ` +
+    'Non annunciarlo: chiamalo in silenzio.'
+  );
+}
+
+// Coupling invariant: on the last question the avatar speaks questions.closing verbatim,
+// and the client detects completion via HEYGEN_FINAL_PHRASE (a short substring of it). If
+// they drift apart, HeyGen would never register the final question as complete — so fail
+// loudly at module load rather than hang a live interview.
+if (!questions.closing.toLowerCase().includes(HEYGEN_FINAL_PHRASE.toLowerCase())) {
+  throw new Error(
+    `questions.closing must contain HEYGEN_FINAL_PHRASE ("${HEYGEN_FINAL_PHRASE}") for HeyGen completion detection.`,
+  );
+}
 
 // HeyGen FULL mode has no tool-calling, so completion is signalled by SPEAKING a fixed
 // phrase. The client (heygen.ts matchesEndPhrase) detects it and drives the auto-advance.
-const HEYGEN_END_PHRASE_INSTRUCTION =
-  '\n\nQuando hai raccolto l’obiettivo di questa domanda, dopo la tua breve frase di ' +
-  `conclusione pronuncia ESATTAMENTE, parola per parola, questa frase finale e poi fermati: "${HEYGEN_END_PHRASE}"`;
+// On the LAST question the avatar says the thank-you closing instead of the transition
+// phrase — matchesEndPhrase recognizes BOTH (see the coupling invariant above), so the
+// spoken text stays natural while completion still fires.
+function heygenEndPhraseInstruction(isLast: boolean): string {
+  const phrase = isLast ? questions.closing : HEYGEN_END_PHRASE;
+  return (
+    '\n\nQuando hai raccolto l’obiettivo di questa domanda, dopo la tua breve frase di ' +
+    `conclusione pronuncia ESATTAMENTE, parola per parola, questa frase finale e poi fermati: "${phrase}"`
+  );
+}
 
 interface StartRequest {
   candidateId: number;
   questionIndex: number;
   questionId: string;
+  isLast: boolean;
   systemPrompt: string;
   greeting: string;
   meta: SessionMeta;
@@ -99,6 +126,7 @@ function prepare(
     candidateId,
     questionIndex,
     questionId: question.id,
+    isLast: questionIndex === questions.questions.length - 1,
     systemPrompt,
     greeting,
     meta: { candidateId, questionId: question.id, questionIndex, timezone: timezone ?? undefined },
@@ -165,7 +193,7 @@ async function startHeygen(req: StartRequest): Promise<Response> {
   // A fresh Context per start: the prompt is candidate- and question-specific now, so
   // there is nothing stable to cache (caching by version would inject the wrong question).
   const contextId = await createHeygenContext(
-    timezoneContext(req.timezone) + req.systemPrompt + HEYGEN_END_PHRASE_INSTRUCTION,
+    timezoneContext(req.timezone) + req.systemPrompt + heygenEndPhraseInstruction(req.isLast),
     req.greeting,
     req.questionId,
     req.candidateId,
@@ -275,7 +303,8 @@ async function createTavusConversation(req: StartRequest): Promise<Response> {
       replica_id: TAVUS_REPLICA_ID,
       persona_id: TAVUS_PERSONA_ID,
       // Tavus uses its OWN default LLM ("its brain"); the script is injected as context.
-      conversational_context: timezoneContext(req.timezone) + req.systemPrompt + TAVUS_END_TOOL_INSTRUCTION,
+      conversational_context:
+        timezoneContext(req.timezone) + req.systemPrompt + tavusEndToolInstruction(req.isLast),
       custom_greeting: req.greeting,
       properties: {
         language: 'italian',

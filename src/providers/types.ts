@@ -31,18 +31,30 @@ export type ProviderEvent = 'transcript' | 'state' | 'error';
 // end_interview tool instead). Shared here so both sides stay in sync.
 export const HEYGEN_END_PHRASE = 'Passiamo alla prossima domanda.';
 
-// Accent/case/punctuation-insensitive containment check, so minor TTS/transcription
-// variance in the spoken closing phrase still matches.
-export function matchesEndPhrase(text: string): boolean {
-  const norm = (s: string): string =>
+// On the LAST question there is no next question, so the avatar closes with a thank-you
+// instead. This is a DISTINCT completion signal for HeyGen (see start.ts): the client must
+// recognize it too, otherwise it would wait forever for HEYGEN_END_PHRASE. Kept short so
+// the substring match in matchesEndPhrase stays robust to TTS/transcription variance.
+export const HEYGEN_FINAL_PHRASE = 'Grazie per il tuo tempo.';
+
+function normalizePhrase(s: string): string {
+  return (
     s
       .toLowerCase()
       .normalize('NFD')
       // NFD splits accents into combining marks; [^a-z0-9 ] then drops them and punctuation.
       .replace(/[^a-z0-9 ]/g, ' ')
       .replace(/\s+/g, ' ')
-      .trim();
-  return norm(text).includes(norm(HEYGEN_END_PHRASE));
+      .trim()
+  );
+}
+
+// Accent/case/punctuation-insensitive containment check, so minor TTS/transcription
+// variance in the spoken closing phrase still matches. Matches EITHER the between-questions
+// transition phrase OR the final thank-you phrase — both mean "this question is done".
+export function matchesEndPhrase(text: string): boolean {
+  const norm = normalizePhrase(text);
+  return norm.includes(normalizePhrase(HEYGEN_END_PHRASE)) || norm.includes(normalizePhrase(HEYGEN_FINAL_PHRASE));
 }
 
 // Whatever the /api/interview/start endpoint returned for this provider, plus the DB
