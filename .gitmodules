@@ -1,12 +1,12 @@
 [submodule "api"]
 	path = api
-	url = git@github.com:micio86dev/backend.git
+	url = https://github.com/micio86dev/backend.git
 	branch = develop
 [submodule "frontend"]
 	path = frontend
-	url = git@github.com:micio86dev/frontend.git
+	url = https://github.com/micio86dev/frontend.git
 	branch = develop
 [submodule "backoffice"]
 	path = backoffice
-	url = git@github.com:micio86dev/backoffice.git
+	url = https://github.com/micio86dev/backoffice.git
 	branch = develop
