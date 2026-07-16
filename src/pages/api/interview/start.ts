@@ -10,7 +10,7 @@ import {
   TAVUS_PERSONA_ID,
 } from 'astro:env/server';
 import { composeQuestionPrompt, questions, type PriorAnswer } from '../../../lib/prompt';
-import { HEYGEN_END_PHRASE, HEYGEN_FINAL_PHRASE } from '../../../providers/types';
+import { HEYGEN_END_PHRASE, matchesEndPhrase } from '../../../providers/types';
 import { rates } from '../../../lib/pricing';
 import { timing } from '../../../lib/timing';
 import {
@@ -57,12 +57,14 @@ function tavusEndToolInstruction(isLast: boolean): string {
 }
 
 // Coupling invariant: on the last question the avatar speaks questions.closing verbatim,
-// and the client detects completion via HEYGEN_FINAL_PHRASE (a short substring of it). If
-// they drift apart, HeyGen would never register the final question as complete — so fail
-// loudly at module load rather than hang a live interview.
-if (!questions.closing.toLowerCase().includes(HEYGEN_FINAL_PHRASE.toLowerCase())) {
+// and the client detects completion via matchesEndPhrase. If the closing is not recognized
+// as an end phrase, HeyGen would never register the final question as complete — so fail
+// loudly at module load rather than hang a live interview. Uses matchesEndPhrase itself
+// (not a raw substring check) so the guard mirrors the EXACT runtime detection, including
+// its accent/case/punctuation normalization.
+if (!matchesEndPhrase(questions.closing)) {
   throw new Error(
-    `questions.closing must contain HEYGEN_FINAL_PHRASE ("${HEYGEN_FINAL_PHRASE}") for HeyGen completion detection.`,
+    'questions.closing must be recognized by matchesEndPhrase for HeyGen completion detection.',
   );
 }
 
