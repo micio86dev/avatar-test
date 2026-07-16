@@ -38,7 +38,7 @@ referenced/noted here but implemented in C2. Realizes proposal capabilities
 |---|---|---|---|---|
 | D1 | Repo topology | Wrapper superproject + 3 git submodules (`api`, `frontend`, `backoffice`); `legacy-demo/` plain folder | Single monorepo (old plan); split repos with no wrapper; nested `apps/` | CLAUDE.md/ROADMAP.md make the wrapper+submodules authoritative; independent Git Flow ×4, independent deploy units later, clean per-repo CI |
 | D2 | Two Nuxt apps | `frontend` = SSR (candidate); `backoffice` = SPA `ssr: false` (admin); both `@nuxtjs/i18n` it/en | One combined Nuxt app with route groups | Different render modes + auth models (candidate magic-link JWT vs admin bearer JWT — see D13); separate repos keep bundles and CI isolated (C7/C8 land in `frontend`, C11 in `backoffice`) |
-| D3 | API shape | **Laravel 13** + PHP 8.5, **API-only** + Scramble `dedoc/scramble:^0.12` publishing `openapi.json` | Blade/Inertia UI in Laravel; hand-written OpenAPI; API Platform | Stateless API scales horizontally; Scramble derives the spec from routes/types so it stays honest; no server-rendered UI in Laravel |
+| D3 | API shape | **Laravel 13** + PHP 8.5, **API-only** + Scramble `dedoc/scramble:^0.13` publishing `openapi.json` | Blade/Inertia UI in Laravel; hand-written OpenAPI; API Platform | Stateless API scales horizontally; Scramble derives the spec from routes/types so it stays honest; no server-rendered UI in Laravel |
 | D4 | API contract / type sync | Scramble emits `openapi.json`; `frontend` + `backoffice` each run `openapi-typescript` to codegen + commit a typed client | Hand-maintained TS types per repo; shared npm types package; tRPC (not PHP-compatible) | Single source of truth (the API) keeps 3 repos in sync by construction; committed client is diffable and CI-checkable for drift |
 | D5 | Submodule wiring | `.gitmodules` pins each repo; wrapper `Taskfile.yml` `init`/`update`/`sync`/`status` tasks; clone/CI `--recursive` | Manual submodule commands only; monorepo; `git subtree` | Explicit tasks reduce detached-HEAD/forgotten-`--recursive` friction; pointer-freshness check catches stale pins in CI |
 | D6 | Demo relocation | Move Astro wholesale to `legacy-demo/` as a **plain folder** (not a submodule) | Delete; keep at root; make it a 4th submodule | Kept runnable as a C7 port reference; plain folder avoids submodule overhead for throwaway reference code; isolated so it never pollutes app coverage |
@@ -108,7 +108,7 @@ referenced/noted here but implemented in C2. Realizes proposal capabilities
 | wrapper: `docs/git-flow.md` | Create | Git Flow ×4 + SemVer `M.m.p` release flow (`release/*` bump, `vM.m.p` tag, merge back, wrapper pins submodule release tags) + submodule considerations (recursive clone, pointers, merge order) |
 | wrapper: `package.json`/`VERSION` | Create | Wrapper SemVer source of truth seeded `0.1.0` |
 | wrapper: `openspec/config.yaml` | Modify | Flip `testing.*.status` to `scaffolded`; keep commands |
-| `api`: Laravel 13 scaffold (PHP 8.5) | Create | `routes/api.php` health `/api/health`, `HealthController`, `lang/{it,en}`, Pest `^3.0`, `phpunit.xml` coverage filter, `.env.example`, `VERSION` `0.1.0` |
+| `api`: Laravel 13 scaffold (PHP 8.5) | Create | `routes/api.php` health `/api/health`, `HealthController`, `lang/{it,en}`, Pest `^4.0`, `phpunit.xml` coverage filter, `.env.example`, `VERSION` `0.1.0` |
 | `api`: Scramble | Create | Install `dedoc/scramble`; publish `openapi.json`; export command wired |
 | `api`: JWT + RBAC packages | Create | `composer require tymon/jwt-auth spatie/laravel-permission` (installed + config published, **not wired** — auth is C2); Spatie teams mode config flag noted |
 | `api`: `Dockerfile` | Create | Multi-stage (Composer/PHP-FPM), non-root, `HEALTHCHECK`; small final image; same image local↔Railway |
@@ -254,9 +254,9 @@ Authoritative reference for all pinned versions used in C1. Update this table wh
 | Package | Constraint | Purpose |
 |---------|-----------|---------|
 | `laravel/framework` | `^13.0` | Framework (via `laravel/laravel` scaffold) |
-| `pestphp/pest` | `^3.0` | Test runner |
-| `pestphp/pest-plugin-laravel` | `^3.0` | Pest Laravel integration |
-| `dedoc/scramble` | `^0.12` | OpenAPI spec generation |
+| `pestphp/pest` | `^4.0` | Test runner (bumped from `^3.0`: Laravel 13 requires PHPUnit 12, which Pest 3 does not support) |
+| `pestphp/pest-plugin-laravel` | `^4.0` | Pest Laravel integration (tracks Pest 4) |
+| `dedoc/scramble` | `^0.13` | OpenAPI spec generation (bumped from `^0.12`: 0.12 supports Laravel ≤12 only; 0.13 adds Laravel 13) |
 | `tymon/jwt-auth` | `^2.2` | JWT auth (not wired in C1; wired in C2) |
 | `spatie/laravel-permission` | `^6.0` | RBAC — teams mode (not wired in C1) |
 | `laravel/pint` | `^1.18` | PHP code formatter (CI lint + pre-commit) |
