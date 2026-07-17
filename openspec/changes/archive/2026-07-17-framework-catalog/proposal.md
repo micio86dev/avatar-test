@@ -52,7 +52,9 @@ Hybrid tenancy (exploration recommendation): the binding JSON is a SHARED base, 
 |------|------------|------------|
 | `bars/SRX.json` missing → incomplete SRX seed | High | Seeder skips + flags; tracked authoring task; not a C3 blocker |
 | MTG/LAT absent → no `potential` competency data | High | Explicit non-goal; flagged authoring task; blocks C9 potential flow only |
-| BUL.json covers 8/14 competencies | Med | Verify at spec/design; seed present, flag gaps |
+| BUL.json covers 8/14 competencies | Med | Seed present (8), flag 6 gaps as competency_no_bars |
+| FLL.json covers 8/18 competencies | Med | Seed present (8), flag 10 gaps as competency_no_bars |
+| MLL.json covers 8/18 competencies | Med | Seed present (8), flag 10 gaps as competency_no_bars |
 | EN-only anchors (no IT) degrade IT scoring | Med | Seed EN base; IT pending (decision #6); translatable columns ready; gates non-EN scoring in C9 |
 | `spatie/laravel-translatable` incompatible with Laravel 13 | Med | Verify at design/spec (D37); if unresolvable STOP + report — do NOT substitute |
 | Global-vs-tenant architecture wrong → costly retrofit | Low | Locked: global base + `FrameworkVersion` pin; additive overrides later |
@@ -72,8 +74,8 @@ Feature branch on the `api` submodule. Migrations reversible (`down()` drops fra
 - [ ] GLOBAL `Role`/`Competency`/`BarsIndicator` models + migrations; NOT tenant-scoped.
 - [ ] `FrameworkVersion` extends `TenantModel`; `organization_id`-first composite index; migrations reversible (D22).
 - [ ] `spatie/laravel-translatable` installed (L13 compat verified); name/definition/anchor columns translatable `{it,en}`.
-- [ ] `FrameworkCatalogSeeder` idempotent (re-run = no duplicates); seeds EN + present BARS roles; skips+flags missing files (SRX) without failing.
+- [ ] `FrameworkCatalogSeeder` idempotent + delete-stale (`sync` for pivots, delete-stale for bars_indicators); seeds EN via `setTranslation` per locale; skips+flags missing files (SRX) without failing.
 - [ ] Seeder reads split-file shape AND tolerates a future unified competency object.
-- [ ] Read-only org-scoped API: list roles, list competencies, a role's BARS indicators/anchors.
+- [ ] Read-only org-scoped API: `GET /api/framework/roles`, `GET /api/framework/roles/{roleCode}/competencies`, `GET /api/framework/roles/{roleCode}/competencies/{competencyCode}/indicators`.
 - [ ] Seeder exactness + idempotency covered at ~high (correctness-critical) coverage.
-- [ ] Data gaps (SRX BARS, MTG/LAT, IT anchors, BUL coverage) recorded as explicit authoring tasks — none fabricated.
+- [ ] Data gaps (SRX BARS, FLL 10 + MLL 10 + BUL 6 competency_no_bars, MTG/LAT, IT anchors) recorded in `framework_gaps` table — none fabricated.
