@@ -95,27 +95,32 @@ this user. The superadmin MUST NOT be silently assigned any org. No Spatie
 
 ---
 
-### Requirement: Token Refresh
+### Requirement: Token Refresh (jwt-auth rotation)
 
-The system MUST accept a valid, non-revoked refresh token and issue a new
-access token. A revoked or expired refresh token MUST be rejected with HTTP 401.
+The system uses `tymon/jwt-auth`'s native token ROTATION — there is NO separate
+long-lived opaque refresh token. `POST /api/auth/refresh` presents the current
+bearer access token and receives a NEW access token; the previous token's `jti`
+is denylisted (blacklist) so it can no longer be used. A denylisted (e.g. after
+logout) or expired token MUST be rejected with HTTP 401. Revocation is therefore
+achieved by the short access TTL (30 min) + jti denylist, not by a separately
+revocable refresh token.
 
-#### Scenario: Valid refresh token → new access token
+#### Scenario: Valid token → rotated new access token
 
-- GIVEN a valid refresh token issued at login
-- WHEN `POST /api/auth/refresh` is called with that token
+- GIVEN a valid, non-denylisted access token
+- WHEN `POST /api/auth/refresh` is called with that token as the bearer
 - THEN the response is HTTP 200
-- AND a new `access_token` is returned
+- AND a new `access_token` is returned, and the old token's `jti` is denylisted
 
-#### Scenario: Revoked refresh token → 401
+#### Scenario: Denylisted token cannot be refreshed → 401
 
-- GIVEN a refresh token that has been revoked (e.g. via logout)
-- WHEN `POST /api/auth/refresh` is called
+- GIVEN an access token whose `jti` has been denylisted (e.g. via logout)
+- WHEN `POST /api/auth/refresh` is called with it
 - THEN the response is HTTP 401
 
-#### Scenario: Expired refresh token → 401
+#### Scenario: Expired token cannot be refreshed → 401
 
-- GIVEN a refresh token past its expiry
+- GIVEN an access token past its expiry (and past the refresh TTL)
 - WHEN `POST /api/auth/refresh` is called
 - THEN the response is HTTP 401
 
