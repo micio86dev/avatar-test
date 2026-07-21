@@ -103,7 +103,7 @@ small body text.)
 
 ### 3.2 Typography
 
-**Primary font**: Open Sans (Quint institutional font — per brand guidelines; sourced via `@fontsource/open-sans` or Google Fonts).
+**Primary font**: Open Sans (Quint institutional font — per brand guidelines; sourced via `@fontsource/open-sans` — self-hosted, GDPR-safe; Google Fonts CDN is NOT permitted due to cross-origin data transfer obligations).
 **Monospace font**: JetBrains Mono (code blocks, technical displays only).
 
 ```css
@@ -188,18 +188,26 @@ tokens below supplement Tailwind's built-in scale for BEAI-specific layout needs
 ### `assets/css/main.css` (both Nuxt apps)
 
 ```css
+@import '@fontsource/open-sans';
 @import "tailwindcss";
 @plugin "@tailwindcss/forms";
 @plugin "@tailwindcss/typography";
 
 @theme {
   /* === Colors === */
-  --color-primary: #1e3a5f;
-  --color-primary-light: #2d5282;
-  --color-primary-dark: #132740;
-  --color-accent: #0d9488;
-  --color-accent-light: #14b8a6;
-  --color-accent-dark: #0f766e;
+  /* Normative Quint brand values — see §3.1 token table (authoritative) */
+  --color-primary: #771aaf;
+  --color-primary-light: #c222d3;
+  --color-primary-dark: #4f1aaf;
+  --color-accent: #e45526;
+  --color-accent-light: #f19823;
+  --color-accent-dark: #b8431e;
+
+  /* Supporting secondary */
+  --color-lavender: #8373d2;
+
+  /* Page background gradient */
+  --color-bg-gradient: linear-gradient(135deg, #faf7fd 0%, #f6f1fc 45%, #fdf4ef 100%);
 
   --color-neutral-50: #f8fafc;
   --color-neutral-100: #f1f5f9;
@@ -222,7 +230,8 @@ tokens below supplement Tailwind's built-in scale for BEAI-specific layout needs
   --color-avatar-bg: #0f172a;
 
   /* === Typography === */
-  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  /* Open Sans loaded via @fontsource/open-sans (self-hosted, GDPR-safe) */
+  --font-sans: "Open Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 
   /* === Spacing === */
@@ -482,9 +491,13 @@ All text against its background MUST achieve:
 |------------|------------|-------|------|
 | `--color-neutral-800` (`#1e293b`) | `--color-neutral-50` (`#f8fafc`) | 16.4:1 | ✓ |
 | `--color-neutral-900` (`#0f172a`) | white | 19.2:1 | ✓ |
-| white | `--color-primary` (`#1e3a5f`) | 9.2:1 | ✓ |
-| white | `--color-accent` (`#0d9488`) | 4.6:1 | ✓ AA |
+| white | `--color-primary` (`#771aaf`) | 8.2:1 | ✓ AA (normal text) |
+| white | `--color-accent` (`#e45526`) | 3.7:1 | ✗ FAILS 4.5:1 AA for normal text; passes 3:1 large-text/UI |
+| white | `--color-accent-dark` (`#b8431e`) | 5.4:1 | ✓ AA (valid text-sized accent alternative) |
+| white | `--color-primary-light` (`#c222d3`) | 4.7:1 | ≈ AA marginal (verify per use-case before body text) |
 | white | `--color-error` (`#ef4444`) | 3.8:1 | ✗ (use `#b91c1c` for text on white) |
+
+> ⚠️ Do NOT use `--color-accent` (`#e45526`) for small text on white — it fails the 4.5:1 AA threshold for normal text (3.7:1). Use `--color-accent-dark` (`#b8431e`, 5.4:1) for text-sized accent elements.
 
 > ⚠️ Do NOT use `--color-error` (#ef4444) as text on white. Use `#b91c1c` for error text.
 
@@ -607,7 +620,7 @@ export default defineNuxtConfig({
 | INP | < 200 ms | Both apps |
 
 **Strategy to hit targets:**
-- Preload Inter font via `<link rel="preload">` in `nuxt.config.ts` `app.head`.
+- Preload Open Sans via `@fontsource/open-sans` (self-hosted import in `main.css`; no `<link rel="preload">` needed — @fontsource handles font-face declarations).
 - Use `@nuxtjs/image` for optimized images (C7+).
 - Tailwind v4 JIT ensures minimal CSS bundle (zero dead utility classes).
 - SSR (frontend) serves pre-rendered HTML — LCP resolved at document load.
