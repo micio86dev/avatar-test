@@ -284,5 +284,9 @@ Authoritative reference for all pinned versions used in C1. Update this table wh
 | `@tailwindcss/forms` | `^0.5` | Tailwind forms plugin (resets + styled base for form elements) |
 | `@tailwindcss/typography` | `^0.5` | Tailwind prose plugin (rich text formatting) |
 | `@axe-core/playwright` | `^4.10` | Accessibility assertions in Playwright E2E (WCAG 2.1 AA; see D29) |
+| `@heygen/liveavatar-web-sdk` | `^0.0.18` | HeyGen live-avatar SDK (C7b; `frontend` only; pre-1.0 → caret locks to exact patch `0.0.18`; matches legacy-demo) |
+| `@daily-co/daily-js` | `^0.91.0` | Daily WebRTC SDK backing the Tavus provider (C7b; `frontend` only; requires Node ≥22.14 — met by Node 24; latest stable, legacy-demo used `^0.90.0`) |
+| `@mediapipe/tasks-vision` | `^0.10.35` | MediaPipe FaceLandmarker/vision tasks for proctoring (C7b; `frontend` only; WASM + model assets under `public/proctor/` via Git LFS; matches legacy-demo) |
+| `@fontsource/open-sans` | `^5.3.0` | Self-hosted Open Sans brand font (C7b; GDPR — no Google Fonts runtime call; see D9 + DESIGN.md §3.2) |
 
 > **Rule**: when any entry in this catalog changes, update this table, D24/D25 rationale, and CLAUDE.md (if it affects the stack description) in the same commit. The SDD version catalog and CLAUDE.md must never diverge.
