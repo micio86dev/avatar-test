@@ -270,6 +270,59 @@ failure for manual cleanup. Do NOT suppress the original DB error.
 
 ---
 
+### Requirement: POST /start question_context — localized completion phrases (C7b addendum)
+
+`POST /api/candidate/interview/start` MUST include `end_phrase` and `final_phrase` fields
+in the `question_context` response object. Both strings MUST be the completion-signal
+phrases the avatar will speak at the end of an intermediate question and at the end of the
+final question, respectively, localized to the project language. The frontend consumes
+these fields as the SOLE source for completion-signal detection; it MUST NOT contain
+hardcoded phrase strings. If the project language is unavailable for a phrase, the backend
+MUST fall back to the platform default language and MUST include the fallback phrase in the
+response (an absent field is a contract violation).
+
+This addendum is a backward-compatible addition to the existing `/start` response shape.
+The five-endpoint contract and all other `question_context` fields are unchanged.
+`POST /end` continues to return `200` on success — there is NO `203` variant. Last-competency
+detection is performed client-side by the frontend (tracking `question_index` against the
+total competency count from the C6 bootstrap); the backend does not signal "last question"
+via a distinct HTTP status.
+
+**Frontend consumption contract:** `end_phrase` and `final_phrase` are NESTED inside
+`question_context` — they are NOT top-level fields of the `/start` response. The frontend
+MUST destructure as `response.question_context.end_phrase` / `response.question_context.final_phrase`.
+Reading from the top level returns `undefined` and triggers the absent-phrase terminal guard.
+BOTH fields must be non-empty; an absent or empty value causes the HeyGen provider to emit an
+`error` event immediately (a terminal, non-retryable condition).
+
+**Delivery note:** this requirement was merged to `api/develop` as a C7a follow-up PR (#10)
+before C7b apply. The `openapi.json` and `types/api.ts` in the frontend were regenerated
+from the merged api/develop to include these fields.
+
+#### Scenario: /start returns end_phrase in project language (it)
+
+- GIVEN a project with `language = 'it'`
+- WHEN `POST /start` returns `201`
+- THEN `question_context.end_phrase` is a non-empty string in Italian (the inter-question
+  completion phrase) and `question_context.final_phrase` is a non-empty string in Italian
+  (the closing thank-you phrase)
+
+#### Scenario: /start returns end_phrase in project language (en)
+
+- GIVEN a project with `language = 'en'`
+- WHEN `POST /start` returns `201`
+- THEN `question_context.end_phrase` and `question_context.final_phrase` are non-empty
+  English strings; no Italian phrase is present in either field
+
+#### Scenario: end_phrase and final_phrase are never absent
+
+- GIVEN any valid project language
+- WHEN `POST /start` returns `201`
+- THEN `question_context.end_phrase` and `question_context.final_phrase` are both present
+  and non-null in the response body
+
+---
+
 ### Requirement: POST /end — finalization, transcript REPLACE, and CAS last-question detection (CRITICAL-3 atomicity)
 
 `POST /api/candidate/interview/end` MUST:
