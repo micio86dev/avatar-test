@@ -89,10 +89,10 @@ Two interfaces bound in `AppServiceProvider`. Default `AssessableFractionReliabi
 
 **No LLM call for unscorables**: unscorable competencies make no LLM call and produce no `ai_requests` row. `CompetencyResult.unscorable_reason` is the sole audit trace. Absence of an `ai_requests` row for an unscorable competency is expected and is not an audit anomaly.
 
-### D7 — Real LLM binding + versioning ✅ D25 BLOCKER RESOLVED
+### D7 — Real LLM binding + versioning — D25 BLOCKER RESOLVED
 The production `LLMProvider` binding calls the Anthropic Messages API (`POST https://api.anthropic.com/v1/messages`) **directly via Laravel's `Http` client — NO third-party SDK**, therefore NO D25 dependency to pin and NO Dependency-Resolution-Policy blocker. The previous STOP-and-report was predicated on installing a PHP SDK; that path is abandoned in favour of a zero-dependency Http client call.
 
-**Implementation** (branch `feat/c9-llm-binding`, commit `fe7b675`): `app/Services/LLM/AnthropicLLMProvider.php` implements `LLMProvider`; `app/Exceptions/LLM/AnthropicException.php` carries retryable classification; `config/scoring.php` holds the `anthropic` sub-key (`api_key`/`base_url`/`version`/`max_tokens`/`timeout_seconds`); `AppServiceProvider` binds `AnthropicLLMProvider` for non-testing environments and `FakeLLMProvider` for `APP_ENV=testing` (D36 invariant preserved).
+**Implementation** (branch `feat/c9-llm-binding`, commit `fe7b675`, merged via PR #14): `app/Services/LLM/AnthropicLLMProvider.php` implements `LLMProvider`; `app/Exceptions/LLM/AnthropicException.php` carries retryable classification; `config/scoring.php` holds the `anthropic` sub-key (`api_key`/`base_url`/`version`/`max_tokens`/`timeout_seconds`); `AppServiceProvider` binds `AnthropicLLMProvider` for non-testing environments and `FakeLLMProvider` for `APP_ENV=testing` (D36 invariant preserved).
 
 **Determinism invariant**: `temperature=0` is **always** sent and **cannot** be overridden via `$options`. `model_version`/`prompt_version` are config-pinned and recorded on `evaluations` + `ai_requests`. Config: `SCORING_MODEL_VERSION=claude-haiku-4-5-20251001` (exact versioned ID — NOT the alias). The `@ai` group test uses the real API (skipped unless `ANTHROPIC_API_KEY` is set in env) and runs only in the `ai-integration` workflow — never on PR or develop push (D36).
 
@@ -193,9 +193,10 @@ The 400-line budget applies to net authored production code per PR (excluding mi
 | `api/database/migrations/*_evaluations/_competency_results/_indicator_scores/_ai_requests` | Create | org_id-first, reversible (D22) |
 | `api/app/Services/Scoring/{PromptBuilder,EvaluationParser,IndicatorValidator,ExcerptValidator,MeanCalculator}.php` | Create | Deterministic core (D3/D4) |
 | `api/app/Services/Scoring/{ReliabilityStrategy,ValidityPredicate}.php` + defaults | Create | Injectable (D5) |
-| `api/app/Providers/AppServiceProvider.php` | Modify | Bind real LLMProvider (D7 ⚠), strategy bindings |
-| `api/config/scoring.php` | Create | `validity_threshold`, `model_version`, `prompt_version` |
-| `api/composer.json` | Modify | Anthropic SDK — **BLOCKED on D25 gap (D7)** |
+| `api/app/Providers/AppServiceProvider.php` | Modify | Bind real LLMProvider (D7), strategy bindings |
+| `api/config/scoring.php` | Create | `validity_threshold`, `model_version`, `prompt_version`, `anthropic` sub-key |
+| `api/app/Services/LLM/AnthropicLLMProvider.php` | Create | Production LLM binding via Laravel Http (no SDK) |
+| `api/app/Exceptions/LLM/AnthropicException.php` | Create | Retryable classification |
 | `api/tests/**` + `tests/Fixtures/cassettes/` | Create | Golden cassette + ~95% critical-zone (D8) |
 
 ## Interfaces / Contracts
@@ -242,8 +243,8 @@ interface MeanCalculator {
 ## Migration / Rollout
 Feature branch on `api`. Migrations reversible (`down()` drops the 4 tables). No prod data/deploy. Rollback = `git revert` + `migrate:rollback`; `FinalizeInterview` reverts to `TODO(C9)`; remove LLM SDK.
 
-## Open Questions
-- [ ] **D25 gap (D7)**: no Anthropic/Claude PHP SDK pinned — apply MUST STOP-and-report before install.
+## Open Questions (at archive time — status)
+- [x] **D7/D25 gap**: RESOLVED — AnthropicLLMProvider via Laravel Http client, no SDK required.
 - [ ] Client ratifies reliability `T` (config default 0.5) and IT anchor translations before IT prod scoring.
 - [ ] RT-B retry candidate UX (re-ask invalid vs all; token reuse) — cross-slice C6/C7/C9 ratification before chain-PR 4.
 - [ ] **[DEFERRED to chain-PR 4]** RT-B guard branches: `processing+retry_attempt=true` and `completato+retry_attempt=true` — see "Chain-PR 4 Open Items" section (RT-B-O1).

@@ -8,6 +8,18 @@ lifecycle resolution. All correctness-critical paths MUST be held to ~95% test c
 
 ---
 
+## Delivery Status
+
+**First-pass (PRs 1–3 + D7 LLM binding) — DELIVERED** (merged to `api/develop`, tip `41d3d76`, 2026-07-22).
+
+**Retry sub-system (chain-PR 4) — DEFERRED** (see Requirement: Retry — Fast-Follow Work Unit
+below). The retry requirement is fully specced and encoded here for tracking, but its
+implementation is blocked on product ratification of the retry candidate-UX (spans C6/C7/C9).
+It MUST NOT be implemented until chain-PR 4 is explicitly authorized. All requirements except
+the RT-B retry block are DELIVERED and in force.
+
+---
+
 ## Requirements
 
 ### Requirement: Job Dispatch and Lifecycle
@@ -540,9 +552,23 @@ rows belonging to org B.
 
 ### Requirement: Retry — Fast-Follow Work Unit (RT-B)
 
-NOTE: This requirement is scoped as chain-PR 4 (fast-follow). The first-pass scoring
-(PRs 1–3) ships without retry. This requirement MUST be encoded and tracked but its
-implementation is deferred.
+> **DEFERRED — chain-PR 4. NOT implemented in first-pass (PRs 1–3).**
+>
+> This requirement is specced and tracked here but its implementation is explicitly blocked
+> on product ratification of the retry candidate-UX (cross-slice C6/C7/C9). The open items
+> from the design's "Chain-PR 4 — Open Items [DEFERRED]" section are:
+>
+> - **RT-B-O1**: Guard branches for `processing + retry_attempt=true` (prior RT-B job crashed
+>   mid-retry) and `completato + retry_attempt=true` (retry superseded or race). The correct
+>   actions are unspecified and require product ratification.
+> - **RT-B-O2**: `ScoreEvaluationJob::failed()` behavior when the RT-B retry exhausts queue
+>   retries and the participant is already `completato` (forbidden `completato → errore`
+>   transition). The PR 1 `failed()` skeleton does not handle this case.
+> - **RT-B-O3**: Post-failed-retry lifecycle re-entry guard — the RT-B completion path MUST NOT
+>   re-attempt the `in_valutazione → completato` transition (participant is already `completato`).
+>
+> This requirement MUST NOT be implemented until chain-PR 4 is explicitly authorized with
+> product ratification of retry candidate-UX.
 
 When an Evaluation has status `pending` and the participant has not yet consumed their
 single retry, the system MUST support a retry path: re-interview INVALID competencies only.
@@ -642,3 +668,21 @@ position-mapping, score-domain, count mismatch, and rounding use single-response
 `FakeLLMProvider` (no `CassetteLLMProvider` needed for those); determinism (same input →
 same output); `ScoreEvaluationJob::failed()` → errore + event; `indicator_text` persisted
 in project scoring locale from pinned catalog version.
+
+---
+
+## Quality Debt (Documented — First-Pass Delivery)
+
+Known gaps documented at archive time (2026-07-22), to be addressed in a follow-up pass:
+
+1. **Pint violations in 3 test files**: `LifecycleResolutionTest.php`, `ZeroCompetenciesGuardTest.php`,
+   `GoldenCassetteTest.php` — minor style violations in test files only, not production code.
+2. **ScoreEvaluationJob at 81.3% coverage** (target ~95% for critical zone): uncovered
+   branches are edge cases (null participant, null project, double re-entry, CW5 unique violation
+   on scoreCompetency, alt unscorable policy=false, secondary PromptBuilder throw path,
+   persistUnscorable() unique violation, resolveFrameworkVersionId null project, failed()
+   transition catch). Several are near-impossible in production given C6 minting guarantees.
+3. **RoleNoBarsException at 0% direct coverage**: exercised indirectly via AiRequestLoggingTest
+   and LifecycleResolutionTest; the exception class constructor line is never explicitly hit.
+4. **No standalone determinism run-twice test**: the golden cassette with CassetteLLMProvider
+   at temperature=0 provides de-facto determinism evidence; a dedicated run-twice test is absent.
