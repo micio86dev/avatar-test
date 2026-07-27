@@ -84,13 +84,17 @@ order, using ONE org-scoped Eloquent read of the project's webhook config
 (`webhook_url`, `webhook_secret`, `webhook_events`):
 
 1. `webhook_url` is null → create a terminal `skipped` row, `skip_reason = no_webhook_url`.
-2. `webhook_url` is set but the triggering `event_type` is not present in
-   `project.webhook_events` → create a terminal `skipped` row,
+2. `webhook_url` is set but `webhook_secret` is null → create a terminal `skipped` row,
+   `skip_reason = no_webhook_secret`. Sending an unsigned webhook would silently violate
+   the binding "verificabile dal ricevente" requirement, so a missing secret is treated as
+   a delivery-blocking misconfiguration, not a signable delivery.
+3. `webhook_url` and `webhook_secret` are both set, but the triggering `event_type` is not
+   present in `project.webhook_events` → create a terminal `skipped` row,
    `skip_reason = event_type_disabled`.
-3. Otherwise → create a `pending` row and dispatch `DeliverWebhookJob`.
+4. Otherwise → create a `pending` row and dispatch `DeliverWebhookJob`.
 
 Both `skipped` variants are terminal: never retried, never HMAC-signed, no HTTP call is
-made, never counted as a failure, never dead-lettered. The two `skip_reason` values MUST
+made, never counted as a failure, never dead-lettered. The three `skip_reason` values MUST
 be distinguishable by any reader of `webhook_deliveries`.
 
 #### Scenario: Null webhook_url produces a skipped row (no_webhook_url)
@@ -100,16 +104,24 @@ be distinguishable by any reader of `webhook_deliveries`.
 - THEN a `webhook_deliveries` row is created with `status = skipped`, `skip_reason = no_webhook_url`
 - AND no HTTP call is made and no HMAC signature is computed
 
+#### Scenario: webhook_url set but webhook_secret null produces a skipped row (no_webhook_secret)
+
+- GIVEN a project with `webhook_url` set and `webhook_secret = null`
+- WHEN a `progress` or `evaluation` trigger fires for that project
+- THEN a `webhook_deliveries` row is created with `status = skipped`, `skip_reason = no_webhook_secret`
+- AND no HTTP call is made and no HMAC signature is computed
+- AND this skip reason is distinguishable from `no_webhook_url` and `event_type_disabled`
+
 #### Scenario: Disabled event type produces a skipped row (event_type_disabled)
 
-- GIVEN a project with `webhook_url` set and `webhook_events = ['evaluation']` (progress disabled)
+- GIVEN a project with `webhook_url` and `webhook_secret` set and `webhook_events = ['evaluation']` (progress disabled)
 - WHEN a `progress` trigger fires for that project
 - THEN a `webhook_deliveries` row is created with `status = skipped`, `skip_reason = event_type_disabled`
-- AND the two skip reasons remain distinguishable when both a null-URL and a disabled-event-type project are queried side by side
+- AND the three skip reasons remain distinguishable when a null-URL, a null-secret, and a disabled-event-type project are queried side by side
 
 #### Scenario: Configured and enabled — delivery proceeds
 
-- GIVEN a project with `webhook_url` set and `webhook_events` containing the triggering event type
+- GIVEN a project with `webhook_url` and `webhook_secret` set and `webhook_events` containing the triggering event type
 - WHEN the trigger fires
 - THEN a `pending` row is created and `DeliverWebhookJob` is dispatched
 

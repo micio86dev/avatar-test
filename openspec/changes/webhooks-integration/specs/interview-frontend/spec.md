@@ -13,9 +13,11 @@ resource (`ParticipantResource.project.exit_redirect_url`,
 `Project.exit_redirect_url`, validated at `StoreProjectRequest.php:74`) — this addendum
 consumes it for the first time; no backend change is required.
 
-If `exit_redirect_url` is null or empty, the existing static Done screen
-(`frontend/app/pages/interview/done.vue`) MUST be shown unchanged — "no further API
-calls" per its existing doc comment. The redirect MUST fire regardless of the resulting
+If `exit_redirect_url` is null or empty, the existing inline `done` branch in
+`frontend/app/pages/interview/[token].vue` MUST be shown unchanged — "no further API
+calls" per its existing doc comment. (`frontend/app/pages/interview/done.vue` is
+unreachable dead code — no `navigateTo('/interview/done')` call exists anywhere in
+`frontend/` — and is not the rendered surface; see design.md S15.) The redirect MUST fire regardless of the resulting
 `Evaluation` status (`completed` or `pending`, per C9): evaluation is asynchronous and
 NOT yet known at redirect time (per
 `docs/app_description/04-integration-surface/04-uscita-utente.md` — "la valutazione non
@@ -47,7 +49,7 @@ this is a design-time concern, not a change to this requirement's observable con
 
 - GIVEN a project with `exit_redirect_url = null`
 - WHEN the candidate's session reaches the `done` state
-- THEN the existing static Done screen (`interview/done.vue`) is displayed unchanged
+- THEN the existing inline `done` branch in `frontend/app/pages/interview/[token].vue` is displayed unchanged
 - AND no redirect navigation occurs and no further API calls are made
 
 #### Scenario: Redirect fires identically for a pending evaluation
