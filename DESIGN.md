@@ -83,10 +83,12 @@ small body text.)
 
 | Token | Value | Usage |
 |-------|-------|-------|
-| `--color-success` | `#22c55e` | Success states, confirmations |
+| `--color-success` | `#22c55e` | Success states, confirmations (non-text: icons/fills only, see §9.1) |
 | `--color-success-light` | `#dcfce7` | Success backgrounds |
-| `--color-warning` | `#f59e0b` | Warning states, time alerts |
+| `--color-success-dark` | `#166534` | Text/icon-safe success (7.1:1 on white, §9.1) — use for BARS success chips |
+| `--color-warning` | `#f59e0b` | Warning states, time alerts (non-text: icons/fills only, see §9.1) |
 | `--color-warning-light` | `#fef3c7` | Warning backgrounds |
+| `--color-warning-dark` | `#92400e` | Text/icon-safe warning (7.1:1 on white, §9.1) — use for BARS warning chips |
 | `--color-error` | `#ef4444` | Error states, validation failures |
 | `--color-error-light` | `#fee2e2` | Error backgrounds |
 | `--color-info` | `#3b82f6` | Informational states |
@@ -522,10 +524,14 @@ All text against its background MUST achieve:
 | white | `--color-accent-dark` (`#b8431e`) | 5.4:1 | ✓ AA (valid text-sized accent alternative) |
 | white | `--color-primary-light` (`#c222d3`) | 4.7:1 | ≈ AA marginal (verify per use-case before body text) |
 | white | `--color-error` (`#ef4444`) | 3.8:1 | ✗ (use `#b91c1c` for text on white) |
+| `--color-success-dark` (`#166534`) | white | 7.1:1 | ✓ AA (verified for BARS `ScoreChip`/`CompetencyMean` text+icon, C11 PR B3) |
+| `--color-warning-dark` (`#92400e`) | white | 7.1:1 | ✓ AA (verified for BARS `ScoreChip`/`CompetencyMean` text+icon, C11 PR B3) |
 
 > ⚠️ Do NOT use `--color-accent` (`#e45526`) for small text on white — it fails the 4.5:1 AA threshold for normal text (3.7:1). Use `--color-accent-dark` (`#b8431e`, 5.4:1) for text-sized accent elements.
 
 > ⚠️ Do NOT use `--color-error` (#ef4444) as text on white. Use `#b91c1c` for error text.
+
+> ⚠️ Do NOT use `--color-success` (`#22c55e`) or `--color-warning` (`#f59e0b`) as text/icon color on white or on their own `-light` background — both measure well under 3:1 (a real @axe-core WCAG failure caught this exact pattern for `--color-success` during C11 PR B2's status badges, see `sdd/admin-dashboards/apply-progress`). Use `--color-success-dark`/`--color-warning-dark` for any text-sized or icon-sized success/warning element (BARS `ScoreChip`, `CompetencyMean`).
 
 ### 9.2 Focus Management
 

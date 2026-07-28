@@ -493,40 +493,48 @@ B1 keeps B1 reviewable.
 
 ### Phase 19: Report Viewer Atoms/Molecules (PR B3, D8)
 
-- [ ] 19.1 RED `backoffice/app/components/atoms/ScoreChip.spec.ts`: one case per
+- [x] 19.1 RED `backoffice/app/components/atoms/ScoreChip.spec.ts`: one case per
       `{1,3,5,-1}` — assert the visible numeral/`–` text and the visually-hidden i18n
       label (`report.chip.low/mid/high/unassessable`), never assert on color class.
-- [ ] 19.2 GREEN — `ScoreChip.vue`: numeral/`–` + `aria-hidden` Heroicons glyph +
+- [x] 19.2 GREEN — `ScoreChip.vue`: numeral/`–` + `aria-hidden` Heroicons glyph +
       semantic color (color is the 3rd signal, never the only one, WCAG 2.1 AA 1.4.1);
       `-1` renders `–`, never printed as `-1`, never on the error/warning/success scale.
-- [ ] 19.3 Create `CompetencyMean.vue` (nullable mean or `–`, never `0`),
+- [x] 19.3 Create `CompetencyMean.vue` (nullable mean or `–`, never `0`),
       `ReliabilityBadge.vue` (pre-rendered percent string **only** — no High/Medium/Low
       band, per task 0.1/ruling #6), `StatusBadge.vue` (i18n-labelled lifecycle status)
       — each with a Vitest test.
-- [ ] 19.4 Create `CompetencyRow.vue` (code+name+mean+reliability+chip strip as a
+- [x] 19.4 Create `CompetencyRow.vue` (code+name+mean+reliability+chip strip as a
       `<ul>` with `aria-label` naming the competency) and `ExcerptList.vue`
       (`--font-mono`, verbatim excerpts) molecules, each with a Vitest test.
 
 ### Phase 20: Report Organism + Downloads (PR B3)
 
-- [ ] 20.1 RED `EvaluationReport.spec.ts`: the `SLF` fixture (`5,3,-1` → mean `4.0`,
+- [x] 20.1 RED `EvaluationReport.spec.ts`: the `SLF` fixture (`5,3,-1` → mean `4.0`,
       reliability `67%`) renders correctly; an all-`-1` competency renders `–` never `0`.
-- [ ] 20.2 GREEN — `EvaluationReport.vue` (`<table>` + `<caption>` + per-competency
+- [x] 20.2 GREEN — `EvaluationReport.vue` (`<table>` + `<caption>` + per-competency
       `CompetencyRow`s + `ExcerptList`).
-- [ ] 20.3 Download buttons (transcript `text/plain`, evaluation JSON): fetch +
+- [x] 20.3 Download buttons (transcript `text/plain`, evaluation JSON): fetch +
       inspect status + trigger blob — never blind `window.open` (D9); disabled/absent
       when the corresponding read scope is gated (409).
 
 ### Phase 21: i18n + E2E + Gate (PR B3)
 
-- [ ] 21.1 Full `it`/`en` key set in `backoffice/i18n/locales/{it,en}.json` for every
+- [x] 21.1 Full `it`/`en` key set in `backoffice/i18n/locales/{it,en}.json` for every
       new string; `Intl.DateTimeFormat`/`Intl.NumberFormat` for dates/scores/percentages
       — never manual formatting.
-- [ ] 21.2 `backoffice/tests/e2e/admin-flow.spec.ts` extension: full login → list →
+- [x] 21.2 `backoffice/tests/e2e/admin-flow.spec.ts` extension: full login → list →
       detail → report → download flow, chromium+webkit; `toHaveScreenshot` on the
       report grid (2% tolerance already configured); axe clean.
-- [ ] 21.3 Run `task openapi:sync` + `bun run codegen:check` green (final endpoint
-      consumption pass).
-- [ ] 21.4 `bun run typecheck` clean; `bun run test:unit` + `test:e2e` (all 3
-      projects) green; confirm 85% overall backoffice coverage.
-- [ ] 21.5 Open PR B3 → PR B2 branch.
+- [x] 21.3 Run `task openapi:sync` + `bun run codegen:check` green (final endpoint
+      consumption pass). **Note**: `api/openapi.json` was already semantically
+      identical to the committed `backoffice/openapi.json` (verified via a
+      structural JSON diff, not just the drift-check script) — no re-sync was
+      needed since B2 already synced it and `api` hadn't changed since.
+- [x] 21.4 `bun run typecheck` clean; `bun run test:unit` + `test:e2e` (all 3
+      projects) green; confirm 85% overall backoffice coverage. **Result**:
+      typecheck exit 0; 157/157 unit tests, 99.05% line coverage; 47/47 E2E
+      (chromium+webkit+mobile).
+- [ ] 21.5 Open PR B3 → PR B2 branch. **SKIPPED per explicit orchestrator
+      instruction: "DO NOT push. DO NOT open a PR."** Branch
+      `feat/c11-b3-report-viewer` committed locally on top of
+      `feat/c11-b2-participant-views`, ready for a human to push/open.
