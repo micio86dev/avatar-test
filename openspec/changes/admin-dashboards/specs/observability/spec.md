@@ -32,11 +32,28 @@ in the internal Admin Dashboard (implemented in C11):
 - Completion rate (completed / started)
 - Average assessment duration
 
-**AI cost metrics**
+**AI usage metrics (delivered in C11)**
+
+- AI credits consumed (token usage per model)
+
+**AI metrics deferred — NOT in C11 scope**
 
 - AI reports generated (count by period)
-- AI credits consumed (token usage per provider and model)
 - Estimated AI cost (USD, based on logged pricing at request time)
+- Token usage broken down **per provider**
+
+These three require columns the `ai_requests` table does not have. Verified
+against `api/database/migrations/*_create_ai_requests_table.php`: the shipped
+schema carries `model`, `prompt_version`, `input_tokens`, `output_tokens`,
+`finish_reason` and `latency_ms`, but **no `provider`, no `estimated_cost_usd`,
+no per-period report counter**. Design D7 made the right engineering call by
+narrowing the dashboard to token usage and latency rather than fabricating a
+currency figure from pricing that is nowhere recorded — `DashboardController`
+emits no cost field, and `AdminDashboardMetricsTest` asserts its absence
+explicitly. This text was simply never updated to match that decision.
+Ownership of these three passes to the `nfr-hardening` slice (C13), which owns
+closing the `ai_requests` conformance gap; that slice MUST update this
+requirement when it lands.
 
 **Business metrics (deferred — NOT in C11 scope)**
 
