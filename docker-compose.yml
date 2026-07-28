@@ -167,6 +167,13 @@ services:
   backoffice:
     build:
       context: ./backoffice
+      args:
+        # Baked into the JS bundle at build time — the `environment:` entry below
+        # cannot change it, because this is a statically generated SPA. The `/api`
+        # suffix is mandatory: the composables append `/auth/login` to it, and
+        # Laravel's CORS middleware only covers `api/*`, so omitting it yields a
+        # 404 with no CORS headers that the browser reports as a CORS error.
+        NUXT_PUBLIC_API_BASE: "${BACKOFFICE_API_BASE:-http://localhost:8000/api}"
       dockerfile: Dockerfile
     image: beai-backoffice:local
     container_name: beai_backoffice
