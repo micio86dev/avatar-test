@@ -313,6 +313,15 @@ components/
 - Organisms may call composables and emit domain-level events.
 - No component may import directly from another repo's code.
 - Every component must have a matching Vitest unit test.
+- **Every clickable element MUST show `cursor: pointer`** — always, in both apps,
+  with no exceptions. Tailwind v4's Preflight no longer sets it on `<button>`, so
+  each app declares it globally in `app/assets/css/main.css` (`@layer base`) for
+  `button`, `[role="button"]`, `a[href]`, `label[for]`, `summary`, `select` and
+  `[tabindex]:not([tabindex="-1"])`. Disabled and `aria-disabled` states use
+  `cursor: not-allowed` so the distinction stays visible. This applies to vendored
+  shadcn-vue source as well — vendored components are not exempt. The cursor is an
+  affordance signal, not decoration: without it interactive elements read as static
+  text, which is also an accessibility regression for pointer users.
 
 ---
 
