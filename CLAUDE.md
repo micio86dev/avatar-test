@@ -51,7 +51,7 @@ and a reference for the port, not the final architecture.
 | Layer | Choice |
 |---|---|
 | **API backend** | **Laravel 13 + PHP 8.5 + Eloquent + PostgreSQL 17 (pgvector)**, **API-only** (no Blade UI). **Scramble** (`dedoc/scramble`) generates the OpenAPI spec. Stateless, horizontally scalable. |
-| Cache / Queue / Session | **Redis 8** (+ Laravel Horizon) for async scoring / notifications / webhooks |
+| Cache / Queue / Session | **Redis 8** for async scoring / notifications / webhooks. Workers run Laravel's native `queue:work` + `schedule:work`. **Laravel Horizon is deferred, NOT installed** — ratified 2026-07-28; it may be adopted later as an additive change. Do not assume it exists. |
 | **Frontend** (candidate) | **Nuxt 4 (Vue 3) — SSR**, `@nuxtjs/i18n`. Public interview app; ports the avatar/proctoring TS logic from the demo |
 | **Backoffice** (admin) | **Nuxt 4 (Vue 3) — SPA** (`ssr: false`), `@nuxtjs/i18n`. Separate app, always multilingual |
 | Object storage | S3-compatible (audio, snapshots, transcripts) |

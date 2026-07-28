@@ -37,7 +37,8 @@ services:
   # ---------------------------------------------------------------------------
   # Redis 8
   # Image: redis:8.0-alpine (D25)
-  # Used for: queue, cache, session, JWT denylist (C2+), Horizon (C2+).
+  # Used for: queue, cache, session, JWT denylist (C2+). Horizon is NOT installed
+  # (ratified 2026-07-28) — workers run Laravel's native queue:work.
   # ---------------------------------------------------------------------------
   redis:
     image: redis:8.0-alpine
@@ -142,7 +143,10 @@ services:
       - path: ./frontend/.env
         required: false
     environment:
-      NUXT_PUBLIC_API_BASE: http://api:9000/api
+      # SSR fetches run INSIDE the network, so this must be the api service's real
+      # listening port. It said 9000 — an fpm convention the image does not follow —
+      # so every server-side fetch pointed at a port nothing listens on.
+      NUXT_PUBLIC_API_BASE: http://api:8000/api
       NUXT_PUBLIC_APP_ENV: local
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
@@ -182,7 +186,10 @@ services:
       - path: ./backoffice/.env
         required: false
     environment:
-      NUXT_PUBLIC_API_BASE: http://api:9000/api
+      # Inert for this service: the SPA is statically generated and bakes its API
+      # base at build time (see build.args above). Kept correct anyway so it cannot
+      # be copied elsewhere as if it were authoritative.
+      NUXT_PUBLIC_API_BASE: http://api:8000/api
     ports:
       - "${BACKOFFICE_PORT:-3001}:80"
     depends_on:
