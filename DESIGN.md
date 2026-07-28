@@ -459,10 +459,10 @@ The evaluation report is the most complex view:
 ├────────────────────────────────────────────────────────────┤
 │  Competency          │ Score │ Reliability │ Indicators     │
 │  ───────────────────────────────────────────────────────   │
-│  COL (Collaboration) │ 3.67  │ High        │ [5] [3] [3]   │
-│  COM (Communication) │ 5.00  │ High        │ [5] [5] [5]   │
-│  STG (Strategy)      │ 2.33  │ Medium      │ [3] [3] [1]   │
-│  INN (Innovation)    │ 3.00  │ Low         │ [3] [–] [3]   │
+│  COL (Collaboration) │ 3.67  │ 100%        │ [5] [3] [3]   │
+│  COM (Communication) │ 5.00  │ 100%        │ [5] [5] [5]   │
+│  STG (Strategy)      │ 2.33  │ 83%         │ [3] [3] [1]   │
+│  INN (Innovation)    │ 3.00  │ 67%         │ [3] [–] [3]   │
 │  ...                 │  ...  │  ...        │ ...            │
 ├────────────────────────────────────────────────────────────┤
 │  Excerpts (verbatim from transcript)                        │
@@ -483,7 +483,12 @@ The evaluation report is the most complex view:
   only). Colored by threshold: `< 2.5 = error`, `2.5–3.5 = warning`, `> 3.5 = success`.
 - A competency whose indicators are ALL unassessable has no mean. Render `–` with the same
   neutral treatment, never `0`.
-- Reliability: text badge.
+- **Reliability: render the value the API returns, verbatim** (a percent string, e.g. `100%`).
+  Do NOT map it to `High` / `Medium` / `Low` word bands — **no band thresholds exist**.
+  The `reliability` formula and the "valid competency" threshold are **open product
+  decision #1** (see `openspec/ROADMAP.md`), still unratified. Inventing bands here would
+  bake an unapproved business rule into the UI, where it would read as authoritative.
+  Once decision #1 is ratified, revisit this line before adding any banding.
 - Excerpts: monospace font (`--font-mono`), verbatim from transcript (validated by substring match).
 
 ---
