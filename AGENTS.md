@@ -168,15 +168,28 @@ owning slices (C2+), **not C1**. Do not install or wire any of them during C1.
 
 ---
 
-## Open product decisions (close with client before the related change)
+## Product decisions — mostly RATIFIED 2026-07-28
 
-1. `reliability` formula + "valid competency" threshold feeding the 90% gate (blocks C9).
-2. GDPR retention for audio/video/snapshots/transcripts (blocks production media storage).
-3. Framework versioning vs live projects (pin `framework_version` at project creation).
-4. Retry semantics (re-ask all vs invalid-only; token single-use vs retry reuse).
-5. Time limits / deadline behavior.
-6. Non-English BARS anchors need expert-authored translations (blocks non-EN scoring).
-7. Provider concurrency/cost at scale (HeyGen/Tavus limits; keep provider abstraction clean).
+Full rationale in `openspec/ROADMAP.md`. Summary:
+
+1. **RATIFIED** — `reliability` = `assessed / total` indicators (`-1` excluded from the
+   numerator), already implemented in `AssessableFractionReliability`. Validity threshold
+   **T = 0.5**, env-overridable. **No High/Medium/Low bands** — render the percentage verbatim.
+2. **DEFAULTS SET, LEGAL SIGN-OFF PENDING** — GDPR retention. The purge mechanism is
+   parametric; the durations are a data controller decision. Sign-off MUST also cover
+   `webhook_deliveries.payload` and `participants.display_name`, which postdate the original framing.
+3. **RATIFIED** — `framework_version` pinned at project creation; live projects are never
+   retargeted by a later catalogue revision.
+4. **OPEN** — retry semantics. Gates only the C9 chain-PR 4 (RT-B).
+5. **RATIFIED — out of scope** — the calling system owns candidate scheduling and reminders.
+   BEAI enforces only its short-lived token expiry and has no deadline concept of its own.
+6. **OPEN** — non-English BARS anchors need expert-authored translations (data, not code).
+7. **OPEN** — provider concurrency/cost at scale; revisit under real load.
+8. **RATIFIED** — BEAI holds **no candidate contact data**. `participants` has no contact
+   column by design and that stays; candidate invitations/reminders belong to the calling
+   system. C12 is operator-facing only.
+9. **PARKED** — white-label and the FR-006 multi-test portal are underspecified (two lines of
+   brief, FR-006 marked "Optional"). Removed from C13 scope until a written requirement exists.
 
 ---
 
