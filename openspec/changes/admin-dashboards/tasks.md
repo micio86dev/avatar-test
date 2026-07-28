@@ -229,55 +229,104 @@ B1 keeps B1 reviewable.
 
 ### Phase 8: Build (PR A3)
 
-- [ ] 8.1 Create `api/app/Http/Controllers/Api/ParticipantController.php`:
+- [x] 8.1 Create `api/app/Http/Controllers/Api/ParticipantController.php`:
       `index`/`show`/`transcript`/`evaluation`, all via `AdminParticipantReader::read()`
       — never a direct `Participant::` call (defense in depth, arch-tested). List
       endpoint: `paginate()`, filters `project_id`/`status`/`q`, `per_page` 1–100
       default 20, sort fixed `created_at desc, id desc` (D5 — no client-specified sort).
-- [ ] 8.2 Create `api/app/Http/Controllers/Api/ParticipantDownloadController.php`
+      **Deviation, flagged honestly**: `index` cannot literally call
+      `AdminParticipantReader::read()` (that method takes a mandatory single id +
+      scope, D1) while also satisfying the arch guard that forbids a bare
+      `Participant::` static call anywhere under `app/Http/Controllers/Api`
+      (`AdminTenancySafetyArchTest`, task 2.3b — the check is a literal substring
+      match, so it also catches `Participant::class`). Added
+      `AdminParticipantReader::listQuery(): Builder` (RBAC + org filter, no
+      lifecycle threshold — Summary scope has none), so the controller still never
+      references `Participant::` in any form. Covered by 2 new unit tests in
+      `AdminParticipantReaderTest.php`.
+- [x] 8.2 Create `api/app/Http/Controllers/Api/ParticipantDownloadController.php`
       (D9): transcript `text/plain; charset=utf-8`, evaluation `application/json`,
       buffered; filename `beai-{type}-{candidate_ref}-{YYYYMMDD}.{ext}` — `candidate_ref`
       is externally supplied (`Participant.php:46`), MUST be `Str::slug()`-ed with
       RFC 5987 `filename*=UTF-8''…` + an ASCII `filename=` fallback (header-injection
-      guard — never interpolate raw).
-- [ ] 8.3 Create `api/app/Http/Controllers/Api/DashboardController.php` (D7): org-scoped
+      guard — never interpolate raw). Also wired `ParticipantDetailResource`'s `files`
+      open map (deferred from A2) now that these named routes exist.
+- [x] 8.3 Create `api/app/Http/Controllers/Api/DashboardController.php` (D7): org-scoped
       participants-by-status, evaluations-by-status, completion rate; from
       `ai_requests` (`2026_07_22_000004_create_ai_requests_table.php:54-61` —
       `input_tokens`/`output_tokens`/`latency_ms` only, **no cost/currency column,
       none added**): summed token usage + p50/p95 latency. No MRR/trial/subscription
-      widget (observability delta, ruling #5).
-- [ ] 8.4 Append the new admin route group to `api/routes/api.php` after `:68`, under
+      widget (observability delta, ruling #5). p50/p95 computed in PHP over a
+      pre-sorted collection (nearest-rank) — bounded org-scoped dataset, same
+      "revisit at scale" posture as D9's buffered-download decision; no DB-specific
+      percentile function used.
+- [x] 8.4 Append the new admin route group to `api/routes/api.php` after `:68`, under
       `['auth:api', TenantContext::class]`, resolving IDs manually (never route-model
-      binding, per `ProjectController.php:23-28`'s documented reason).
+      binding, per `ProjectController.php:23-28`'s documented reason). Imported as
+      `ParticipantController as AdminParticipantController` to avoid a namespace
+      collision with the existing `M2m\ParticipantController`.
 
 ### Phase 9: RED — Feature Tests (PR A3, TDD)
 
-- [ ] 9.1 RED cross-org 404 across **all 7 endpoints** (spec scenario): participant
+- [x] 9.1 RED cross-org 404 across **all 7 endpoints** (spec scenario): participant
       P in org B, requester org A → every endpoint 404, zero fields from P leaked.
-- [ ] 9.2 RED lifecycle gate matrix (spec table, corrected to `409` per task 0.2):
+      `tests/Feature/C11/AdminCrossTenantIsolationTest.php` — 5 id-based endpoints via
+      a Pest dataset + dedicated index/dashboard leak-check tests. Mutation-tested
+      (see Phase 10 gate note).
+- [x] 9.2 RED lifecycle gate matrix (spec table, corrected to `409` per task 0.2):
       5 statuses × {transcript read+download, evaluation read+download} → `403` never
       appears; `409` with `error: lifecycle_not_ready` before threshold, `200` after.
-- [ ] 9.3 RED fail-closed: participant with an unrecognized status string → `409`,
-      never `200`, on both gated scopes.
-- [ ] 9.4 RED RBAC: viewer/operator/admin all read successfully (spec "List and
-      detail return only RBAC-gated data").
-- [ ] 9.5 RED download header safety: a `candidate_ref` containing
+      `tests/Feature/C11/AdminLifecycleGateMatrixTest.php`.
+- [x] 9.3 RED fail-closed: participant with an unrecognized status string → `409`,
+      never `200`, on both gated scopes. Same file, direct-DB-write test (bypasses
+      the model's transition guard to force a truly unrecognized status).
+- [x] 9.4 RED RBAC: viewer/operator/admin all read successfully (spec "List and
+      detail return only RBAC-gated data"). `tests/Feature/C11/AdminRbacReadTest.php`
+      (+ a no-role-at-all 403 case).
+- [x] 9.5 RED download header safety: a `candidate_ref` containing
       `"` / CRLF / non-ASCII → response `Content-Disposition` is safe (slugged +
-      RFC 5987), never raw-interpolated.
-- [ ] 9.6 RED negative test: no route serves per-question audio or snapshot binary
+      RFC 5987), never raw-interpolated. `tests/Feature/C11/AdminDownloadTest.php`
+      (+ an empty-slug-fallback triangulation case for 100% controller coverage).
+- [x] 9.6 RED negative test: no route serves per-question audio or snapshot binary
       content (spec "No audio download endpoint exists") — assert via
-      `Route::getRoutes()` enumeration.
+      `Route::getRoutes()` enumeration. `tests/Feature/C11/AdminReadRouteSurfaceTest.php`
+      — also asserts the route surface is exactly the 7 spec'd endpoints, no more.
 
 ### Phase 10: GREEN + Full-Suite Gate (PR A3)
 
-- [ ] 10.1 Make Phase 9 GREEN against the Phase 8 controllers/routes.
-- [ ] 10.2 Run `php artisan scramble:export`; confirm all 7 admin endpoints present
-      with typed request/response schemas.
-- [ ] 10.3 `./vendor/bin/pest` full suite; `phpstan` 0 new errors; `pint` scoped to
-      touched files.
-- [ ] 10.4 Confirm 85% overall on the API slice; ~95% maintained on the tenancy/gate
-      paths reachable through the new controllers.
-- [ ] 10.5 Open PR A3 → PR A2 branch.
+- [x] 10.1 Make Phase 9 GREEN against the Phase 8 controllers/routes. Along the way,
+      found and fixed a real bug: `json_encode()` silently drops the fractional part
+      of a whole-number float (`json_encode(4.0) === "4"`), and Laravel's
+      `JsonResponse` default encoding options don't set `JSON_PRESERVE_ZERO_FRACTION`
+      either — `EvaluationResource`/`DashboardMetricsResource` now override
+      `jsonOptions()` (not `withResponse()` — too late, the value already
+      round-tripped through a lossy encode/decode by then) so `score`/
+      `completion_rate` never lose their `.0` on the wire.
+- [x] 10.2 Run `php artisan scramble:export`; confirm all 7 admin endpoints present
+      with typed request/response schemas. Confirmed — all 7 present, each
+      referencing a named component schema. `ParticipantResource`/
+      `ParticipantDetailResource`/`TranscriptResource` infer rich per-field types;
+      `EvaluationResource`/`DashboardMetricsResource` show as a generic
+      `additionalProperties: {}` object (Scramble can't trace the shape through a
+      `toArray()` that just returns a passthrough constructor array) — pre-existing
+      for `EvaluationResource` since A2, not a regression, not fixed here (out of
+      this PR's scope).
+- [x] 10.3 `./vendor/bin/pest` full suite; `phpstan` 0 new errors; `pint` scoped to
+      touched files. All green — see apply-progress for exact command output.
+- [x] 10.4 Confirm 85% overall on the API slice; ~95% maintained on the tenancy/gate
+      paths reachable through the new controllers. Full-suite coverage: 94.1%
+      overall. New/touched files: `ParticipantController` 100%,
+      `ParticipantDownloadController` 100%, `DashboardController` 100%,
+      `AdminParticipantReader` 100%, `LifecycleReadGate` 100%, all
+      `Http/Resources/Admin/*` 100%. Finding flagged (not fixed, out of scope):
+      `EvaluationPolicy` is registered (`AppServiceProvider`) but never invoked by
+      any code path in A1–A3 — `AdminParticipantReader::read()` only ever
+      authorizes against `Participant`, never against an `Evaluation` model
+      instance directly. Dead/defensive code from A1, pre-existing.
+- [ ] 10.5 Open PR A3 → PR A2 branch. **SKIPPED per explicit orchestrator
+      instruction: "DO NOT push. DO NOT open any PR."** Branch
+      `feat/c11-a3-controllers` committed locally on top of
+      `feat/c11-a2-serializers`, ready for a human to push/open.
 
 ---
 
