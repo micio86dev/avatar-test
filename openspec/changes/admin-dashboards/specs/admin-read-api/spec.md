@@ -61,33 +61,41 @@ controllers MUST resolve it via `Participant::where('organization_id', $orgId)->
 ### Requirement: Lifecycle Read-Gate (Fail-Closed)
 
 Transcript access requires lifecycle ≥ `in_valutazione`; evaluation access
-requires lifecycle `completato`. Enforced by a policy (`ParticipantPolicy::viewTranscript`
-/ `viewEvaluation`) backed by a shared value object stating each threshold once.
-An unrecognized status MUST deny. Denial is `403` with a non-localized,
-machine-readable `reason` code (consistent with `ParticipantStatusGuard.php:59-64`
-and the CLAUDE.md machine-facing-responses rule); this is distinct from the `404`
-cross-tenant case.
+requires lifecycle `completato`. Enforced by `App\Support\Admin\LifecycleReadGate`
+(a shared value object stating each threshold once), invoked from the mandatory
+`AdminParticipantReader::read()` (D1) after the org filter and RBAC. An
+unrecognized status MUST deny. Denial is `409 Conflict` with a non-localized,
+machine-readable body `{error: "lifecycle_not_ready", resource, current_status,
+required_status}` (D4 — reversing this delta's earlier tentative `403`: the
+caller is an authorized admin of the owning organization and the resource
+exists; the denial is temporal and self-resolving, which `403` cannot express
+and which the `ParticipantStatusGuard.php:59-64` precedent does not actually
+support, since that guard blocks *terminal* statuses, the exact inverse of
+this gate's *pre-terminal* blocking); this is distinct from the `404`
+cross-tenant case and the `403` RBAC case.
 
 | Status | Transcript (read + download) | Evaluation (read + download) |
 |---|---|---|
-| `in_attesa` | 403 | 403 |
-| `in_corso` | 403 | 403 |
-| `in_valutazione` | 200 | 403 |
+| `in_attesa` | 409 | 409 |
+| `in_corso` | 409 | 409 |
+| `in_valutazione` | 200 | 409 |
 | `completato` | 200 | 200 |
-| `errore` | 403 | 403 |
-| unrecognized/unknown | 403 | 403 |
+| `errore` | 409 | 409 |
+| unrecognized/unknown | 409 | 409 |
 
 #### Scenario: Transcript denied before in_valutazione
 
 - GIVEN participant P has status `in_corso` in org A
 - WHEN org A calls `GET /api/participants/{P}/transcript`
-- THEN the response is `403` with a machine-readable `reason` code
+- THEN the response is `409` with body `{error: "lifecycle_not_ready", resource:
+  "transcript", current_status: "in_corso", required_status: "in_valutazione"}`
 
 #### Scenario: Evaluation denied at in_valutazione (not yet completato)
 
 - GIVEN participant P has status `in_valutazione`
 - WHEN org A calls `GET /api/participants/{P}/evaluation`
-- THEN the response is `403`
+- THEN the response is `409` with body `{error: "lifecycle_not_ready", resource:
+  "evaluation", current_status: "in_valutazione", required_status: "completato"}`
 
 #### Scenario: Both readable at completato
 
@@ -99,7 +107,7 @@ cross-tenant case.
 
 - GIVEN participant P has a status value not in the known lifecycle enum
 - WHEN org A calls transcript or evaluation
-- THEN the response is `403`, never `200`
+- THEN the response is `409` with `error: "lifecycle_not_ready"`, never `200`
 
 ### Requirement: Evaluation Serializer Is Scoped, Not Copied From the Webhook Assembler
 

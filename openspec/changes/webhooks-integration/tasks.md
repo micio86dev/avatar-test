@@ -100,12 +100,15 @@ phpstan, pint) below are **mandatory manual substitutes for missing CI**, not op
 - [x] 0.2 Branch `feature/webhooks-integration` (C10 tracker) OFF
       `feat/qjt-pr2-retrofit` — **NOT off `api/develop`** — so
       every C10 task can reference `TenantContextScope` from day one.
-- [ ] 0.3 Before any C10 PR merges to `develop`: merge the tenancy chain (PR1→PR2→PR3) to
-      `develop` first, then rebase `feature/webhooks-integration` onto `develop`, then
-      re-run the full suite before opening the real chained PRs against it.
-- [ ] 0.4 If the tenancy chain lands on `develop` before C10 work starts, skip 0.2 and
-      branch normally off `develop` — but do not start any `TenantContextScope`-dependent
-      task (PR 4 onward) until the class is confirmed present in the working tree.
+- [x] 0.3/0.4 **RESOLVED BY TOPOLOGY (coordinator ruling, PR4 kickoff) — no rebase
+      needed.** The `queued-job-tenancy` chain merged to `develop` via PR #22 (tip
+      `5a18d59`) WHILE the C10 chain was already branched off `feat/qjt-pr2-retrofit`.
+      Because `feat/qjt-pr2-retrofit`'s 5 commits are now IN `develop`'s history, a
+      future `feature/webhooks-integration` → `develop` PR will show only the C10-added
+      commits — the tenancy commits are already common ancestors, not extra diff. No
+      rebase of any `feat/c10-pr*` branch was performed or is required; confirmed via
+      `git log` that `TenantContextScope`/the throwing `TenantScoped::creating` are
+      present in the working tree used for PR 4 (first PR that writes through them).
 
 ---
 
@@ -220,38 +223,42 @@ phpstan, pint) below are **mandatory manual substitutes for missing CI**, not op
 
 ### Phase 6: RED — signer, redactor, assemblers
 
-- [ ] 6.1 RED `api/tests/Unit/C10/WebhookSignerTest.php`: fixed `(timestamp, body,
+- [x] 6.1 RED `api/tests/Unit/C10/WebhookSignerTest.php`: fixed `(timestamp, body,
       secret)` vector → constant expected hex; header format `v1={hex}` (spec "Signature
       verifies against a fixed test vector").
-- [ ] 6.2 RED `api/tests/Unit/C10/SecretRedactorTest.php`: secret substring → `[redacted]`;
+- [x] 6.2 RED `api/tests/Unit/C10/SecretRedactorTest.php`: secret substring → `[redacted]`;
       truncation at `config('webhooks.errors.max_last_error_chars')` applied AFTER
       redaction, never before.
-- [ ] 6.3 RED `api/tests/Unit/C10/EvaluationPayloadAssemblerTest.php`: `text` block
+- [x] 6.3 RED `api/tests/Unit/C10/EvaluationPayloadAssemblerTest.php`: `text` block
       matches `esempio-report-valutazione.json`; `reliability` delegates to
       `App\Services\Scoring\ReliabilityRenderer::render()` (assert delegation, never
       re-derive the formula); `files` has exactly `transcript`+`evaluation_raw`, no
       `audio`; unscorable competency → `score:null` + additive `unscorable_reason`;
       deterministic ordering (competency `position`, behavior `position`).
-- [ ] 6.4 RED `api/tests/Unit/C10/ProgressPayloadAssemblerTest.php`: new-candidate case —
+- [x] 6.4 RED `api/tests/Unit/C10/ProgressPayloadAssemblerTest.php`: new-candidate case —
       all project competencies present with empty `answers`; advancement case —
       cumulative state across competencies (both spec scenarios).
 
 ### Phase 7: GREEN + Full-suite gate (PR 3)
 
-- [ ] 7.1 Create `api/app/Services/Webhooks/WebhookSigner.php` — HMAC-SHA256 over
+- [x] 7.1 Create `api/app/Services/Webhooks/WebhookSigner.php` — HMAC-SHA256 over
       `"{ts}.{raw_body}"`, `hash_equals`-based verify helper.
-- [ ] 7.2 Create `api/app/Services/Webhooks/SecretRedactor.php`.
-- [ ] 7.3 Create `api/app/Services/Webhooks/EvaluationPayloadAssembler.php` — common
+- [x] 7.2 Create `api/app/Services/Webhooks/SecretRedactor.php`.
+- [x] 7.3 Create `api/app/Services/Webhooks/EvaluationPayloadAssembler.php` — common
       envelope (`version`,`event`,`delivery_id`,`occurred_at`,`candidate_ref` verbatim,
       `project{id,slug}`,`data`).
-- [ ] 7.4 Create `api/app/Services/Webhooks/ProgressPayloadAssembler.php` — LEFT JOIN
+- [x] 7.4 Create `api/app/Services/Webhooks/ProgressPayloadAssembler.php` — LEFT JOIN
       `project_competencies` × `interview_sessions` on `(participant_id, competency_code)`.
-- [ ] 7.5 Run Phase 6 tests to GREEN.
-- [ ] 7.6 `./vendor/bin/pest` full suite; `phpstan` 0 errors; `pint` scoped to PR 3 files.
-- [ ] 7.7 If the diff exceeds ~450 lines, split into PR 3a (evaluation assembler + signer)
-      / PR 3b (progress assembler + redactor) before opening — do not force one oversized
-      PR to protect the budget.
-- [ ] 7.8 Open PR 3 → PR 2 branch.
+- [x] 7.5 Run Phase 6 tests to GREEN.
+- [x] 7.6 `./vendor/bin/pest` full suite; `phpstan` 0 errors; `pint` scoped to PR 3 files.
+- [x] 7.7 Diff is 963 lines (4 impl files 388 + 4 test files 575), over the ~450
+      guideline. **Not split — coordinator standing ruling** (same session, PR2 review):
+      "do NOT split further on line count alone when the excess is test coverage rather
+      than logic," and here ~60% of the overage is test coverage (security-critical
+      signing/redaction + fixture-heavy assembler tests), not additional logic surface.
+      Flagged in the apply-progress report per the ruling's "keep flagging it" directive.
+- [ ] 7.8 Open PR 3 → PR 2 branch. **SKIPPED per orchestrator instruction** — no push,
+      no PR opened. Branch `feat/c10-pr3-payload-signing` is committed locally.
 
 ---
 
@@ -261,37 +268,54 @@ phpstan, pint) below are **mandatory manual substitutes for missing CI**, not op
 
 ### Phase 8: RED — delivery decision gate + dedupe + tenancy
 
-- [ ] 8.1 RED `api/tests/Feature/C10/WebhookDeliveryGateTest.php`: 4 scenarios post-Δ1 —
+- [x] 8.1 RED `api/tests/Feature/C10/WebhookDeliveryGateTest.php`: 4 scenarios post-Δ1 —
       null url → `skipped/no_webhook_url`; url set + secret null →
       `skipped/no_webhook_secret`; event type disabled → `skipped/event_type_disabled`;
-      configured+enabled → `pending` + job dispatched. Every `skipped` variant asserts
-      `Http::assertNothingSent()` and `Queue::assertNotPushed(DeliverWebhookJob::class)`.
-- [ ] 8.2 RED: dedupe test — two emissions with identical
+      configured+enabled → `pending`. Every variant asserts `Http::assertNothingSent()`
+      (the recorder itself never makes an HTTP call in ANY branch — including
+      `pending` — signing/sending is `DeliverWebhookJob`'s job, PR5).
+      **Deviation, scope-disciplined**: `Queue::assertNotPushed(DeliverWebhookJob::class)`
+      is NOT asserted — `DeliverWebhookJob` does not exist yet (Phase 10+, out of this
+      PR). Per design.md's own File Changes table and PR5 tasks 11.1-11.2, dispatching
+      `DeliverWebhookJob::dispatch($deliveryId)->afterCommit()` is explicitly the
+      LISTENER's job (`SendEvaluationWebhook`/`SendProgressWebhook`, PR5), not the
+      recorder's — task 9.1's own description never mentions dispatch either. Deferred
+      to PR5 rather than creating a stub job class to satisfy this PR's test file.
+- [x] 8.2 RED: dedupe test — two emissions with identical
       `(organization_id, project_id, event_type, dedupe_key)` → exactly one row (the
       23505 unique-violation is caught, not propagated — `ScoreEvaluationJob.php:171-189`
       pattern).
-- [ ] 8.3 RED: frozen-payload test — a delivery row's `payload` is unchanged by a later
+- [x] 8.3 RED: frozen-payload test — a delivery row's `payload` is unchanged by a later
       re-score of the same Evaluation.
-- [ ] 8.4 RED — **the D4 regression test C9 never wrote**: invoke the recorder with a
+- [x] 8.4 RED — **the D4 regression test C9 never wrote**: invoke the recorder with a
       **null ambient `TenantResolver`** (simulating the queue-context S7 finding) → the
       written row still carries the correct `organization_id`, re-derived from
       `Project::withoutGlobalScopes()->find($projectId)->organization_id`, via
       `TenantContextScope::runFor()` (Δ3 — not the design's invented `TenantScope::run()`).
-- [ ] 8.5 RED — cross-tenant test (95% zone): org A trigger never resolves org B's
-      `webhook_url`/`webhook_secret`.
+- [x] 8.5 RED — cross-tenant test (95% zone): org A trigger never resolves org B's
+      `webhook_url`/`webhook_secret`. Also added: `webhook_secret` absent from the
+      persisted row's raw attributes, and absent from a project-not-found exception
+      message (coordinator's explicit "row/log/response/exception" 4-surface directive).
 
 ### Phase 9: GREEN + Full-suite gate (PR 4)
 
-- [ ] 9.1 Create `api/app/Services/Webhooks/WebhookDeliveryRecorder.php`: 4-step ordered
+- [x] 9.1 Create `api/app/Services/Webhooks/WebhookDeliveryRecorder.php`: 4-step ordered
       gate (Δ1 order: null_url → secret_null → event_type_disabled → pending); one
       org-scoped `Project::withoutGlobalScopes()->find($projectId)` read; wraps the INSERT
       in `TenantContextScope::runFor($project->organization_id, fn () => ...)`; catches
-      the unique-violation and returns the existing row.
-- [ ] 9.2 Run Phase 8 tests to GREEN.
-- [ ] 9.3 `./vendor/bin/pest` full suite; `phpstan` 0 errors; `pint` scoped to PR 4 files.
-- [ ] 9.4 Confirm ≥95% coverage on `WebhookDeliveryRecorder.php` (gate + dedupe + tenant
-      scoping — correctness-critical zone).
-- [ ] 9.5 Open PR 4 → PR 3 branch.
+      the unique-violation and returns the existing row. **Real gotcha found and fixed**:
+      the create-attempt runs inside its own `DB::transaction()` (Laravel savepoint) —
+      without it, a caught `UniqueConstraintViolationException` still leaves the
+      enclosing transaction aborted at the Postgres level (SQLSTATE 25P02 on the very
+      next statement) whenever the recorder runs inside an outer transaction (every
+      `RefreshDatabase`-wrapped test, and potentially a future caller's own
+      transaction).
+- [x] 9.2 Run Phase 8 tests to GREEN.
+- [x] 9.3 `./vendor/bin/pest` full suite; `phpstan` 0 errors; `pint` scoped to PR 4 files.
+- [x] 9.4 Confirm ≥95% coverage on `WebhookDeliveryRecorder.php` — measured 100.0%
+      (PCOV, `pest --coverage --coverage-filter=app/Services/Webhooks/WebhookDeliveryRecorder.php`).
+- [ ] 9.5 Open PR 4 → PR 3 branch. **SKIPPED per orchestrator instruction** — no push,
+      no PR opened. Branch `feat/c10-pr4-recorder` is committed locally.
 
 ---
 
@@ -301,54 +325,97 @@ phpstan, pint) below are **mandatory manual substitutes for missing CI**, not op
 
 ### Phase 10: RED — delivery state machine + evaluation listeners
 
-- [ ] 10.1 RED `api/tests/Unit/C10/RetryClassifierTest.php`: table-driven — 2xx→delivered;
+- [x] 10.0 **(added mid-flight, orchestrator-directed)** Hardened
+      `api/tests/Arch/Tenancy/QueuedJobTenantContextArchTest.php`: discovery was
+      `glob('app/Jobs/*.php')` — non-recursive AND scoped to one directory, silently
+      missing a `ShouldQueue` class in a subdirectory or anywhere outside `app/Jobs/`.
+      Discovery is now a `RecursiveDirectoryIterator` walk of the whole `app/` tree,
+      extracted into `c10DiscoverShouldQueueViolations()` and proven against a
+      controlled fixture tree under `tests/Fixtures/ArchGuardFixtures/` (not the real
+      `app/`). Found and fixed a self-defeating bug in the first fixture attempt: its
+      own docblock explaining the class does NOT reference the guarded string
+      literally contained that exact substring, satisfying the guard's bare
+      `str_contains()` check and silently invalidating the proof until reworded.
+- [x] 10.1 RED `api/tests/Unit/C10/RetryClassifierTest.php`: table-driven — 2xx→delivered;
       408/429/5xx/timeout/connection-error→retryable; any other 4xx→failed_permanent.
-- [ ] 10.2 RED `api/tests/Feature/C10/DeliverWebhookJobTest.php`: non-retryable 4xx →
+      Boundary cases (407 vs 408, 429 vs 430, 499 vs 500, 199/300 vs 2xx) asserted
+      explicitly.
+- [x] 10.2 RED `api/tests/Feature/C10/DeliverWebhookJobTest.php`: non-retryable 4xx →
       `failed_permanent` after `attempt_count=1`, no further attempt; retryable 503
-      exhausts to `dead` at `attempt_count=6` (`Queue::fake()` + persisted-row
-      assertions ONLY — never wall-clock, per `QUEUE_CONNECTION=sync` in CI); success
-      after one retryable failure → `delivered`, `attempt_count=2`.
-- [ ] 10.3 RED: `delivery_id` byte-identical across every attempt of one delivery;
-      `X-BEAI-Timestamp`/signature differ per attempt.
-- [ ] 10.4 RED: sync-release no-op regression — under `sync`, a retryable failure leaves
-      the row `pending` with `next_attempt_at` set and **does not throw** past the job
-      (asserts `SyncJob::release()` behavior directly, not assumed).
-- [ ] 10.5 RED: terminal-row idempotency guard — a re-executed already-terminal row is a
-      no-op (job's first action returns immediately).
-- [ ] 10.6 RED: secret non-leak — receiver echoes the secret in a 500 body → assert
+      exhausts to `dead` at `attempt_count=6` (persisted-row assertions ONLY — never
+      wall-clock). **Method note**: `attempts()` under the `sync` driver used by this
+      repo (`phpunit.xml:51`, `ci.yml:45`) is hardcoded to 1 forever
+      (`SyncJob.php:56-59`) and never auto-redelivers — a real 6-attempt sequence is
+      simulated by constructing 6 fresh job instances with a Mockery double of
+      `Illuminate\Contracts\Queue\Job` injected via `setJob()`, `attempts()` stubbed
+      to 1..6, exercising the exact code path a `database`-driver worker takes on
+      each real redelivery.
+- [x] 10.3 RED: `delivery_id` byte-identical across every attempt of one delivery;
+      `X-BEAI-Timestamp`/signature differ per attempt. Plus an HTTP-boundary
+      independent-recomputation test (coordinator-requested): the exact transmitted
+      raw body + timestamp reproduce the signature via bare `hash_hmac` (bypassing
+      `WebhookSigner` entirely), and re-encoding the SAME payload with default
+      `json_encode()` flags produces a DIFFERENT signature that fails verification —
+      the PR3 guarantee now proven to hold at the real HTTP boundary, not just inside
+      `WebhookSigner`'s own unit tests.
+- [x] 10.4 RED: sync-release no-op regression — a REAL `DeliverWebhookJob::dispatch()`
+      under the ambient `sync` connection (no mocking) leaves the row `pending` with
+      `next_attempt_at` set and does not throw — exercises the actual
+      `Illuminate\Queue\Jobs\SyncJob::release()` no-op, not an assumption about it.
+- [x] 10.5 RED: terminal-row idempotency guard — a re-executed already-terminal row is a
+      no-op (job's first action returns immediately; `Http::assertNothingSent()`).
+- [x] 10.6 RED: secret non-leak — receiver echoes the secret in a 500 body → assert
       absent from the row, every log line (`Log::listen`, `ProviderSecretTest.php:137-177`
-      pattern), and any API response.
-- [ ] 10.7 RED: confirm the existing `api/tests/Arch/Tenancy/QueuedJobTenantContextArchTest.php`
-      (from `queued-job-tenancy`) fails for `DeliverWebhookJob` until it references
-      `TenantContextScope::` in source — do not add a second arch test; this job must
-      satisfy the existing glob over `app/Jobs/*.php`.
-- [ ] 10.8 RED `api/tests/Feature/C10/SendEvaluationWebhookTest.php`: `EvaluationCompleted`
+      pattern). Also covers redaction-before-truncation surviving into `last_error`.
+- [x] 10.7 RED: confirmed the (now-hardened, task 10.0) existing
+      `api/tests/Arch/Tenancy/QueuedJobTenantContextArchTest.php` passes for
+      `DeliverWebhookJob` once it references `TenantContextScope::` in source — no
+      second arch test added; the job satisfies the existing recursive `app/` scan.
+- [x] 10.8 RED `api/tests/Feature/C10/SendEvaluationWebhookTest.php`: `EvaluationCompleted`
       / `EvaluationFailed` → listener runs synchronously; a forced exception inside the
       recorder is caught and never propagates into `ScoreEvaluationJob`; a `pending`
-      Evaluation still produces a delivered webhook (spec scenario).
+      Evaluation still produces a delivered (dispatch-ready) webhook (spec scenario);
+      plus a skipped-gate-outcome case dispatching nothing.
 
 ### Phase 11: GREEN + Full-suite gate (PR 5)
 
-- [ ] 11.1 Create `api/app/Jobs/DeliverWebhookJob.php`: scalar `int $deliveryId` payload
+- [x] 11.1 Create `api/app/Jobs/DeliverWebhookJob.php`: scalar `int $deliveryId` payload
       (never a model — S1-S7 pattern); `tries()`/`backoff()` read
       `config('webhooks.delivery.*')`; wraps the row update in
       `TenantContextScope::runFor($delivery->organization_id, ...)`; `release($delay)`
       never `throw`; `failed()` safety net sets `dead` if the row is still non-terminal.
-- [ ] 11.2 Create `api/app/Listeners/SendEvaluationWebhook.php`: plain (NOT
+      Placed at `app/Jobs/` root (not nested), per the orchestrator's 10.0 finding.
+- [x] 11.2 Create `api/app/Listeners/SendEvaluationWebhook.php`: plain (NOT
       `ShouldQueue`), `try/catch(\Throwable)` → log + return; calls
       `EvaluationPayloadAssembler` + `WebhookDeliveryRecorder`, dispatches
       `DeliverWebhookJob::dispatch($deliveryId)->afterCommit()`.
-- [ ] 11.3 Confirm auto-discovery registers `SendEvaluationWebhook` for both events (no
-      `EventServiceProvider::$listen` edit — `:16-20` stays empty).
-- [ ] 11.4 Run Phase 10 tests to GREEN.
-- [ ] 11.5 `./vendor/bin/pest` FULL suite (touches C9's `EvaluationCompleted`/
-      `EvaluationFailed` consumers — the C9 suite must stay green).
-- [ ] 11.6 `phpstan` 0 errors; `pint` scoped to PR 5 files.
-- [ ] 11.7 Confirm ≥95% coverage: `DeliverWebhookJob`, `WebhookSigner`, `SecretRedactor`,
-      retry classification.
-- [ ] 11.8 If the diff exceeds ~450 lines, split job-state-machine tests from
-      listener/dispatch tests into PR 5a/5b before opening.
-- [ ] 11.9 Open PR 5 → PR 4 branch.
+- [x] 11.3 Confirmed auto-discovery registers `SendEvaluationWebhook` for both events via
+      a single UNION-typed `handle(EvaluationCompleted|EvaluationFailed $event)` —
+      verified `Illuminate\Reflection\Reflector::getParameterClassNames()` explicitly
+      walks `ReflectionUnionType` before relying on it. No
+      `EventServiceProvider::$listen` edit — stays empty, per the C9 precedent.
+- [x] 11.4 Run Phase 10 tests to GREEN.
+- [x] 11.5 `./vendor/bin/pest` FULL suite — C9's `EvaluationCompleted`/`EvaluationFailed`
+      consumers (`tests/Unit/C9`, `tests/Feature/Jobs`, `tests/Feature/Models`) stay
+      green.
+- [x] 11.6 `phpstan` 0 errors (2 real errors found and fixed — see Issues below); `pint`
+      scoped to PR 5 files.
+- [x] 11.7 Confirmed ≥95% coverage: `DeliverWebhookJob` 100.0%, `WebhookSigner` 100.0%,
+      `SecretRedactor` 100.0%, `RetryClassifier` 100.0%, `WebhookDeliveryRecorder`
+      100.0% (PCOV). Initial coverage run found `DeliverWebhookJob` at only 67.5% —
+      added tests for the not-found guard, the fail-closed defensive branch, the
+      `ConnectionException` catch path, and the entire `failed()` safety net (none
+      previously exercised); spot-checked discriminating power on the fail-closed
+      branch by temporarily neutralizing the guard and confirming the test fails hard.
+- [x] 11.8 Diff is 1241 lines across the arch-hardening + 3 feature commits (measured:
+      `git diff --stat feat/c10-pr4-recorder feat/c10-pr5-delivery-job`) — well over
+      ~450. **Not split — coordinator standing ruling** (established during PR2/PR3
+      review): do not split further on line count alone when the excess is test
+      coverage/infrastructure hardening rather than logic, which is the case here
+      (arch-guard fixtures + a large, deliberately thorough state-machine test suite
+      for the correctness-critical zone). Flagged per the ruling's "keep flagging it."
+- [ ] 11.9 Open PR 5 → PR 4 branch. **SKIPPED per orchestrator instruction** — no push,
+      no PR opened. Branch `feat/c10-pr5-delivery-job` is committed locally.
 
 ---
 
@@ -358,50 +425,130 @@ phpstan, pint) below are **mandatory manual substitutes for missing CI**, not op
 
 ### Phase 12: RED — seam invariants + progress listener
 
-- [ ] 12.1 RED — SSO seam (participant-sso delta, 4 scenarios): first exchange for a new
+- [x] 12.1 RED — SSO seam (participant-sso delta, 4 scenarios): first exchange for a new
       candidate dispatches `ParticipantCreated`; idempotent re-exchange (status still
       `in_attesa`) dispatches nothing; concurrent-creation race collapses into one
       `webhook_deliveries` row via dedupe; a pre-flight-gate failure (401/403 before the
       reload+null-check) dispatches nothing.
-- [ ] 12.2 RED — `/end` seam (interview-session delta, 4 scenarios): non-last-competency
+      **Real bug found and fixed via genuine RED→GREEN diagnosis** (not weakened): the
+      first implementation left `Queue::fake()`/`Http::fake()` out of this test file.
+      Under `sync` with no active DB transaction (this seam is raw autocommit SQL —
+      no transaction to attach to), `DeliverWebhookJob::dispatch(...)->afterCommit()`
+      executes IMMEDIATELY and synchronously inside the listener, making a REAL
+      outbound HTTP call. That cascade left the ambient `TenantResolver` reset to
+      `null` by the time the test's own assertion ran, so every count query saw zero
+      rows even though `WebhookDelivery::withoutGlobalScopes()->count()` showed the
+      row existed correctly. Traced via targeted `fwrite(STDERR, ...)` debug output
+      (temporary, removed before commit) proving the row existed but was invisible
+      under the wrong tenant scope; fixed by adding `Queue::fake()` + `Http::fake()`
+      to a `beforeEach()`, matching every other C10 listener test file's pattern.
+- [x] 12.2 RED — `/end` seam (interview-session delta, 4 scenarios): non-last-competency
       commit dispatches exactly one `CompetencySessionEnded`; last-competency commit
       dispatches it alongside the existing `FinalizeInterview::dispatch(...)->afterCommit()`;
       `abort(409)` idempotency-guard rollback dispatches nothing; `abort(404)` unowned-
-      session dispatches nothing.
-- [ ] 12.3 RED `api/tests/Feature/C10/SendProgressWebhookTest.php`: new-candidate payload
+      session dispatches nothing. Genuinely discriminating commit-vs-rollback pair:
+      commit → exactly 1 row; rollback → exactly 0 rows (both asserted with exact
+      counts, not `not->toBeNull()`).
+- [x] 12.3 RED `api/tests/Feature/C10/SendProgressWebhookTest.php`: new-candidate payload
       — full project-competency list with empty `answers`; advancement payload —
       cumulative state (spec scenarios).
 
 ### Phase 13: GREEN + Full-suite gate + close-out (PR 6)
 
-- [ ] 13.1 Create `api/app/Events/{ParticipantCreated,CompetencySessionEnded}.php` —
+- [x] 13.1 Create `api/app/Events/{ParticipantCreated,CompetencySessionEnded}.php` —
       scalar-only payloads (`participant_id`, `project_id`, and for the latter
       `competency_code`); never an Eloquent model.
-- [ ] 13.2 Modify `api/app/Http/Controllers/Sso/SsoExchangeController.php`:
+- [x] 13.2 Modify `api/app/Http/Controllers/Sso/SsoExchangeController.php`:
       `event(new ParticipantCreated(...))` after the reload+null-check (`:161-167`),
       before the token mint (`:170`) — **zero changes to the `:137-158` SQL string,
-      bindings, or `WHERE status='in_attesa'` clause**; diff must prove this line-for-line.
-- [ ] 13.3 Modify `api/app/Http/Controllers/Candidate/InterviewController.php`: declare
+      bindings, or `WHERE status='in_attesa'` clause**; diff proves this line-for-line
+      (verified via `git diff` — 2 additive hunks only, no line inside the
+      `DB::statement()` block touched).
+- [x] 13.3 Modify `api/app/Http/Controllers/Candidate/InterviewController.php`: declare
       `$progress = null` before the `DB::transaction` closure (`:219`), capture by
       reference inside, set only on the success path, `event(new
       CompetencySessionEnded($progress))` after the closure returns (mirrors the
       `FinalizeInterview` `:264` precedent) — **zero changes inside the closure's
-      existing statements**.
-- [ ] 13.4 Create `api/app/Listeners/SendProgressWebhook.php`: plain, try/catch, mirrors
+      existing statements** (verified via `git diff` — only the `use(...)` clause
+      gained `&$progress` and 2 new statement blocks were appended).
+- [x] 13.4 Create `api/app/Listeners/SendProgressWebhook.php`: plain, try/catch, mirrors
       `SendEvaluationWebhook`; registered for `ParticipantCreated` and
       `CompetencySessionEnded`.
-- [ ] 13.5 Run Phase 12 tests to GREEN.
-- [ ] 13.6 `./vendor/bin/pest` FULL suite — zero regressions on the existing
-      `SsoExchangeController`/`InterviewController::end` test files (upsert atomicity,
-      CAS, `FinalizeInterview` precedent all untouched).
-- [ ] 13.7 `phpstan` 0 errors; `pint` scoped to PR 6 files.
-- [ ] 13.8 Confirm ≥95% coverage on the two seams + `SendProgressWebhook`.
-- [ ] 13.9 Register `Feature/C10` and `Unit/C10` in `api/tests/Pest.php` if not already
-      done in an earlier PR (S18 — Pest requires explicit per-directory registration).
-- [ ] 13.10 Walk every checkbox in `proposal.md`'s Success Criteria against test
-      evidence; record which test proves each one.
-- [ ] 13.11 Open PR 6 → PR 5 branch — closes the `api` chain. Tracker
-      `feature/webhooks-integration` merges to `develop` only after PR1-PR6 are reviewed.
+- [x] 13.5 Run Phase 12 tests to GREEN.
+- [x] 13.6 `./vendor/bin/pest` FULL suite — zero regressions on the existing
+      `SsoExchangeController`/`InterviewController::end` test files (`tests/Feature/C6`
+      + `tests/Feature/C7a`: 226/226) — upsert atomicity, CAS, `FinalizeInterview`
+      precedent all untouched.
+- [x] 13.7 `phpstan` 0 errors; `pint` scoped to PR 6 files (clean, no reformats needed).
+- [x] 13.8 Confirmed ≥95% coverage on the two seams' NEW code + `SendProgressWebhook`.
+      `SendProgressWebhook` + both new `Events` classes: 100.0%. The two controller
+      files show lower FILE-WIDE percentages (`InterviewController` 83.4%,
+      `SsoExchangeController` 98.6%) because they're large pre-existing files with
+      much unrelated code (`/start`, private helpers) — cross-checked the uncovered
+      line numbers against `git diff` and confirmed EVERY line C10 added in this PR
+      is covered; the only uncovered lines are pre-existing rare defensive branches
+      (`InterviewController.php:231` "session disappeared under us", generously
+      documented as "very rare" in the existing code; `SsoExchangeController.php:172`
+      the analogous reload-failed guard) that C10 did not introduce and are out of
+      this PR's scope.
+- [x] 13.9 Confirmed `Feature/C10` and `Unit/C10` are already registered in
+      `api/tests/Pest.php` (done in PR1, S18) — no edit needed.
+- [x] 13.10 Walked every `proposal.md` Success Criteria checkbox against test evidence —
+      see the PR6 apply-progress record (Engram `sdd/webhooks-integration/apply-progress`)
+      for the full per-criterion table. All are proven by PR1-PR6 test evidence except
+      the `exit_redirect_url` frontend criterion (PR7, not yet done) and the aggregate
+      repo-wide ≥85%-overall-coverage figure (individually-measured correctness-critical
+      zones all exceed 95%; a single aggregate number was not run this session —
+      recommended at `sdd-verify` time).
+- [ ] 13.11 Open PR 6 → PR 5 branch — closes the `api` chain. **SKIPPED per orchestrator
+      instruction** — no push, no PR opened. Branch `feat/c10-pr6-progress-seams` is
+      committed locally. Tracker `feature/webhooks-integration` merges to `develop`
+      only after PR1-PR6 are reviewed.
+
+---
+
+## PR 8 — sdd-verify Fix Batch (1 CRITICAL, 2 WARNING)
+
+> Base: PR 6 branch (`feat/c10-pr6-progress-seams`). Not a new feature — closes gaps
+> found by independent `sdd-verify`.
+
+- [x] W1 (WARNING) — the signature/body guarantee was not enforced at the WIRING level.
+      Coordinator mutated `DeliverWebhookJob.php`'s `->withBody($rawBody,
+      'application/json')->post($url)` to the forbidden `->post($url,
+      $delivery->payload)` and the entire `tests/Feature/C10` suite stayed green
+      (67 passed, 0 failed) — the fixture payload in `c10PendingDelivery()`
+      (`DeliverWebhookJobTest.php`) had zero slashes and zero non-ASCII bytes, so
+      `json_encode()` with and without `JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE`
+      produced byte-identical output, making the divergence test's "reverse" negative
+      control unable to discriminate. Fixed by making the fixture payload realistic
+      (a `files.evaluation_raw.ref` URL with slashes; a verbatim Italian `excerpts`
+      string with non-ASCII, matching what `EvaluationPayloadAssembler` actually
+      produces). Re-ran the EXACT SAME mutation myself: `tests/Feature/C10` now goes
+      66/67 with the one genuinely-expected failure at "the exact transmitted body is
+      what was signed", restored the production file, byte-diffed to confirm exact
+      restoration, re-ran to 67/67 (68/68 including the W2 addition below).
+- [x] C1 (CRITICAL) — `specs/webhooks-integration/spec.md`'s "Advancement progress
+      payload reflects cumulative state" scenario required a competency to show 2
+      `answers` entries (`INN` with question 0 and 1), which is structurally
+      impossible: one `interview_sessions` row = one competency (not one question),
+      `question_index` is a static competency-position ordinal, and
+      `ProgressPayloadAssembler` appends AT MOST ONE `answers` entry per competency.
+      **Fixed the SPEC, not the code** — rewrote the requirement text and both
+      scenarios to describe competency-level granularity (0 or exactly 1 `answers`
+      entry per competency), with an explicit "per-question granularity is OUT OF
+      SCOPE, would require a domain-model extension" note. Confirmed the EXISTING
+      PR3 `ProgressPayloadAssemblerTest.php` "advancement case" test already asserts
+      exactly this (line 117: `toHaveCount(1)`) — the implementation and its tests
+      were correct all along; only the spec prose was wrong.
+- [x] W2 (minor) — dead-letter terminal idempotency was only tested from `Delivered`,
+      not from `Dead` specifically. Added the `Dead`-status variant to
+      `DeliverWebhookJobTest.php`; spot-checked discriminating power by narrowing the
+      guard to `if ($status === Delivered)` — the new test failed with a genuine
+      `SQLSTATE[23514]` CHECK-constraint violation (proving the row was actually
+      re-processed as if still pending, not just a soft assertion mismatch), restored
+      and byte-diffed clean, re-ran to green.
+- [x] Full suite + PHPStan + pint gates re-run after all three fixes (see apply-progress
+      record for verbatim output).
 
 ---
 
@@ -413,35 +560,69 @@ phpstan, pint) below are **mandatory manual substitutes for missing CI**, not op
 
 ### Phase 14: RED — frontend exit redirect
 
-- [ ] 14.1 RED `frontend/tests/unit/composables/useExitRedirect.spec.ts`: null/empty URL
+- [x] 14.1 RED `frontend/tests/unit/use-exit-redirect.spec.ts`: null/empty URL
       → no navigation; `https://` URL → `navigateTo(url, {external:true, replace:true})`;
       `http://` URL → refused, falls back to the static done branch + console warning
       (open-redirect hardening).
-- [ ] 14.2 RED `frontend/tests/e2e/interview-exit-redirect.spec.ts` (Playwright,
+      **Path deviation (orchestrator-directed at apply time):** the task named
+      `frontend/tests/unit/composables/useExitRedirect.spec.ts`, but every existing
+      composable spec in this repo is flat kebab-case directly under `tests/unit/`
+      (`use-device-check.spec.ts`, `use-interview-session.spec.ts`,
+      `use-integrity-flush.spec.ts`, `use-proctor.spec.ts` — no `composables/`
+      subdirectory exists anywhere in `tests/unit/`). Followed the established
+      project convention instead of introducing a new one-off subdirectory.
+- [x] 14.2 RED `frontend/tests/e2e/interview-exit-redirect.spec.ts` (Playwright,
       role-based locators): completion redirects when `exit_redirect_url` configured;
       static done branch shown unchanged when not configured; redirect fires identically
       for a candidate whose evaluation will resolve `pending` (no status check/poll
       precedes it).
+      **Blocker found and fixed to make this task deliverable (not scope creep — see
+      Deviations in the apply-progress record for full detail):** reaching `done` via a
+      real browser requires the W3 mock-provider injection point
+      (`NUXT_PUBLIC_INTERVIEW_PROVIDER_MOCK`), but (a) `playwright.config.ts`'s
+      `webServer.env` never actually set that variable — confirmed via `rg`, a
+      pre-existing gap that silently no-ops EVERY happy-path E2E scenario in this repo,
+      not just this one — and (b) even with the flag set, `useInterviewSession.ts`'s
+      `isMock()` did a strict `=== 'true'` string comparison against a value Nuxt/Nitro
+      actually coerces to the real boolean `true` via `destr` at runtime (proved via a
+      throwaway server run: the SSR payload literally contains
+      `interviewProviderMock:true`, unquoted) — so the mock path had *never* actually
+      activated outside of Vitest's string-stubbed `useRuntimeConfig`. Fixed both,
+      minimally: added the env var to `webServer.env`, and widened `isMock()`'s
+      comparison to `value === true || value === 'true'` (RED→GREEN regression test
+      added to `use-interview-session.spec.ts`, see 15.6). Also added a small,
+      test-gated `window.__mockInterviewProvider` exposure hook in
+      `app/providers/factory.ts` (only reachable on the already-mock-gated branch) so
+      Playwright has a handle to call `emitFinalPhrase()` from the browser context —
+      the only way to reach `done` without a real HeyGen/Tavus SDK connection.
 
 ### Phase 15: GREEN + Full-suite gate (PR 7)
 
-- [ ] 15.1 Create `frontend/app/composables/useExitRedirect.ts`: fetches
+- [x] 15.1 Create `frontend/app/composables/useExitRedirect.ts`: fetches
       `GET /api/candidate/session` once on page mount (not at `done`), caches
       `project.exit_redirect_url`; a fetch failure degrades to the static done branch.
-- [ ] 15.2 Modify `frontend/app/pages/interview/[token].vue`: wire `useExitRedirect` into
+- [x] 15.2 Modify `frontend/app/pages/interview/[token].vue`: wire `useExitRedirect` into
       the existing inline `done` branch (`:120-131`); navigate only after
       `session.teardown()`/provider stop/pending-integrity flush complete (precedent:
       `useInterviewSession.ts:130-158`); add a `no-referrer` meta alongside the existing
       `noindex`.
-- [ ] 15.3 Leave `frontend/app/pages/interview/done.vue` untouched (confirmed dead code,
-      not attributed to C10 — design D10 point 6).
-- [ ] 15.4 Run Phase 14 tests to GREEN.
-- [ ] 15.5 `bunx nuxi prepare` then `bun run typecheck` (never bare `vue-tsc --noEmit` —
-      it uses a different tsconfig and reports false-clean).
-- [ ] 15.6 Full Vitest unit suite for `frontend/`.
-- [ ] 15.7 Playwright E2E — Chromium + WebKit projects; confirm no regression to the
-      existing unsupported-browser/mobile-gate suite.
-- [ ] 15.8 Open PR 7 → `frontend/develop`.
+- [x] 15.3 Leave `frontend/app/pages/interview/done.vue` untouched (confirmed dead code,
+      not attributed to C10 — design D10 point 6). Confirmed untouched — not in the
+      diff.
+- [x] 15.4 Run Phase 14 tests to GREEN. Unit: 10/10. E2E: 3/3 × 2 browser projects (6/6).
+- [x] 15.5 `bunx nuxi prepare` then `bun run typecheck` — exit 0, 0 errors (never bare
+      `vue-tsc --noEmit`).
+- [x] 15.6 Full Vitest unit suite for `frontend/`: 339/339 pass (338 pre-existing + 10
+      new `useExitRedirect` tests + 1 new `isMock()` regression test, minus 0 — the
+      net is +11 from the 328 baseline once the 14.2-blocker regression test is
+      counted). Coverage: 96.87% lines overall (≥85% gate), `useExitRedirect.ts`
+      100% lines/branches/funcs.
+- [x] 15.7 Playwright E2E — Chromium + WebKit projects: 69/69 pass across all 3
+      projects (chromium/webkit/mobile), zero regression to the existing
+      unsupported-browser/mobile-gate suite or `interview-flow.spec.ts`.
+- [ ] 15.8 Open PR 7 → `frontend/develop`. **SKIPPED per orchestrator instruction** — no
+      push, no PR opened. Branch `feat/c10-pr7-exit-redirect` is committed locally,
+      ready for the human/coordinator to push and open PR 7 when authorized.
 
 ---
 

@@ -90,10 +90,13 @@ B1 keeps B1 reviewable.
       and "Reliability: text badge" line with "Reliability: pre-rendered percent string
       (e.g. `67%`); no High/Medium/Low band — the threshold formula is open product
       decision #1 and MUST NOT be invented."
-- [ ] 0.2 Edit `openspec/changes/admin-dashboards/specs/admin-read-api/spec.md`:
+- [x] 0.2 Edit `openspec/changes/admin-dashboards/specs/admin-read-api/spec.md`:
       replace every `403` gate-denial reference (status table + 3 scenarios) with
       `409` and the machine-readable body `{error: lifecycle_not_ready, resource,
-      current_status, required_status}`, per design D4 / ruling #1.
+      current_status, required_status}`, per design D4 / ruling #1. **Done ahead of
+      Phase 0's own owner**, per explicit orchestrator instruction during PR A1 apply
+      (Phase 1-4 in `api`) — the delta was blocking accurate reference during A1
+      implementation.
 
 ---
 
@@ -101,7 +104,7 @@ B1 keeps B1 reviewable.
 
 ### Task: Branching prerequisite
 
-- [ ] A0.1 Confirm `api` working tree is clean; create `feature/admin-dashboards` off
+- [x] A0.1 Confirm `api` working tree is clean; create `feature/admin-dashboards` off
       `develop` (NOT off `feat/c10-pr4-recorder` or `feature/webhooks-integration` —
       C10 is unrelated to A1–A3). Do not check out or modify any C10 branch/file.
 
@@ -109,54 +112,57 @@ B1 keeps B1 reviewable.
 
 ### Phase 1: Foundation (PR A1)
 
-- [ ] 1.1 Create `api/app/Support/Admin/ParticipantReadScope.php`: `enum
+- [x] 1.1 Create `api/app/Support/Admin/ParticipantReadScope.php`: `enum
       ParticipantReadScope { case Summary; case Transcript; case Evaluation; }`.
-- [ ] 1.2 Create `api/app/Support/Admin/LifecycleReadGate.php`: `final class`; ordered
+- [x] 1.2 Create `api/app/Support/Admin/LifecycleReadGate.php`: `final class`; ordered
       list `['in_attesa','in_corso','in_valutazione','completato']` (`errore`
       deliberately absent); per-scope threshold map; `assert(string $status,
       ParticipantReadScope $scope): void` throws on anything not an explicit match
       (fail-closed, no `?? true`).
-- [ ] 1.3 Create `api/app/Exceptions/Admin/LifecycleNotReadyException.php`: carries
+- [x] 1.3 Create `api/app/Exceptions/Admin/LifecycleNotReadyException.php`: carries
       `resource`, `current_status`, `required_status`; register a `409` render in
       `api/bootstrap/app.php` beside the existing `:51-64` block.
 
 ### Phase 2: RED (PR A1, TDD)
 
-- [ ] 2.1 RED `api/tests/Unit/Support/Admin/LifecycleReadGateTest.php`: matrix of the
+- [x] 2.1 RED `api/tests/Unit/Support/Admin/LifecycleReadGateTest.php`: matrix of the
       5 lifecycle statuses × `{Summary,Transcript,Evaluation}` (Summary always passes)
       **plus** a synthetic unknown status asserting deny for every scope.
-- [ ] 2.2 RED `api/tests/Unit/Support/Admin/AdminParticipantReaderTest.php`: (a)
+- [x] 2.2 RED `api/tests/Unit/Support/Admin/AdminParticipantReaderTest.php`: (a)
       cross-org id → `ModelNotFoundException`; (b) same-org, RBAC-denying user → policy
       denial; (c) same-org, authorized, gate-blocked status →
       `LifecycleNotReadyException`; (d) same-org, authorized, ready status → returns
       the `Participant`.
-- [ ] 2.3 RED `api/tests/Arch/C11/AdminTenancySafetyArchTest.php`: (a) no
+- [x] 2.3 RED `api/tests/Arch/C11/AdminTenancySafetyArchTest.php`: (a) no
       `withoutGlobalScopes(` under `app/Http/`; (b) no bare `Participant::` static
       call under `app/Http/Controllers/Api` (mirrors `api/tests/Arch/C2/TenantModelArchTest.php`).
 
 ### Phase 3: GREEN (PR A1)
 
-- [ ] 3.1 Implement `LifecycleReadGate::assert()` per Phase 1. Run 2.1 to GREEN.
-- [ ] 3.2 Create `api/app/Support/Admin/AdminParticipantReader.php`: `final class`;
+- [x] 3.1 Implement `LifecycleReadGate::assert()` per Phase 1. Run 2.1 to GREEN.
+- [x] 3.2 Create `api/app/Support/Admin/AdminParticipantReader.php`: `final class`;
       `public function read(int $id, ParticipantReadScope $scope): Participant` — no
       zero-arg overload; injects `TenantResolver` (`api/app/Support/Tenancy/TenantResolver.php`,
       already exists); `Participant::where('organization_id', $resolver->getOrgId())
       ->findOrFail($id)` (the `M2m/ParticipantController.php:90,110` pattern), then
       `Gate::authorize('view', $participant)`, then `LifecycleReadGate::assert()`.
       Run 2.2 to GREEN.
-- [ ] 3.3 Create `api/app/Policies/ParticipantPolicy.php` (`viewAny`, `view`) mirroring
+- [x] 3.3 Create `api/app/Policies/ParticipantPolicy.php` (`viewAny`, `view`) mirroring
       `ProjectPolicy.php:30-41` — all 3 roles read, no owner filter.
-- [ ] 3.4 Create `api/app/Policies/EvaluationPolicy.php` (`view`), same pattern.
+- [x] 3.4 Create `api/app/Policies/EvaluationPolicy.php` (`view`), same pattern.
       Run 2.3 to GREEN.
 
 ### Phase 4: Full-Suite Gate + REFACTOR (PR A1)
 
-- [ ] 4.1 Run `./vendor/bin/pest` — full suite, zero regressions.
-- [ ] 4.2 Run `php -d memory_limit=2G ./vendor/bin/phpstan analyse --memory-limit=2G`
+- [x] 4.1 Run `./vendor/bin/pest` — full suite, zero regressions.
+- [x] 4.2 Run `php -d memory_limit=2G ./vendor/bin/phpstan analyse --memory-limit=2G`
       — 0 errors on new files; do not attribute pre-existing errors to this change.
-- [ ] 4.3 Run `./vendor/bin/pint` scoped to the 6 new files + `bootstrap/app.php`.
-- [ ] 4.4 Confirm ~95% coverage on `AdminParticipantReader` + `LifecycleReadGate`.
+- [x] 4.3 Run `./vendor/bin/pint` scoped to the 6 new files + `bootstrap/app.php`.
+- [x] 4.4 Confirm ~95% coverage on `AdminParticipantReader` + `LifecycleReadGate`.
 - [ ] 4.5 Open PR A1 → tracker `feature/admin-dashboards` (human authorizes push/PR).
+      **SKIPPED per explicit orchestrator instruction: "DO NOT push. DO NOT open any
+      PR."** Branch `feat/c11-a1-reader-gate` committed locally on top of
+      `feature/admin-dashboards`, ready for a human to push/open.
 
 ---
 
@@ -283,7 +289,7 @@ B1 keeps B1 reviewable.
 
 ### Task: Branching prerequisite
 
-- [ ] B0.0 Confirm `backoffice` working tree is clean; create `feature/admin-dashboards`
+- [x] B0.0 Confirm `backoffice` working tree is clean; create `feature/admin-dashboards`
       off `develop`. Independent of the API tracker except B2/B3 need A3 merged
       (real endpoints) before their feature work starts.
 
@@ -291,20 +297,22 @@ B1 keeps B1 reviewable.
 
 ### Phase 12: Vendor (PR B0)
 
-- [ ] 12.1 Add deps to `backoffice/package.json`: `shadcn-vue`, `reka-ui`,
+- [x] 12.1 Add deps to `backoffice/package.json`: `shadcn-vue`, `reka-ui`,
       `class-variance-authority`, `clsx`, `tailwind-merge`, `tw-animate-css`,
       `@heroicons/vue`, `@fontsource/open-sans`, `@vueuse/core` — pinned to the exact
       resolutions already proven in `frontend/package.json:23-41`. A blocked
       resolution is an open question (D37) — stop, report, do not downgrade/substitute.
-- [ ] 12.2 Run `bunx --bun shadcn-vue@latest init` then `add` for the components
+- [x] 12.2 Run `bunx --bun shadcn-vue@latest init` then `add` for the components
       listed in design D8 (`Button`, `Table`, `Card`, `Badge`, `Sidebar`, `Avatar`,
       etc. per usage) — Bun only, never npm/pnpm/yarn/npx. Icon set: swap any
       registry default icon imports to `@heroicons/vue` (design D3 — replaces
       shadcn's default set).
-- [ ] 12.3 Flag to reviewer: this PR is >90% vendored source; request `size:exception`
+- [x] 12.3 Flag to reviewer: this PR is >90% vendored source; request `size:exception`
       per the chained-pr skill's generated/vendor-diff gate rather than splitting
       component-by-component.
-- [ ] 12.4 Open PR B0 → tracker `feature/admin-dashboards`.
+- [ ] 12.4 Open PR B0 → tracker `feature/admin-dashboards`. **SKIPPED per explicit
+      orchestrator instruction: "DO NOT push. DO NOT open any PR."** Branch
+      `feat/c11-b0-shadcn-init` committed locally, ready for a human to push/open.
 
 ---
 
@@ -314,10 +322,10 @@ B1 keeps B1 reviewable.
 
 ### Phase 13: Theme Reconciliation (PR B1, D10)
 
-- [ ] 13.1 RED `backoffice/tests/unit/theme.spec.ts`: mount a `bg-primary` element,
+- [x] 13.1 RED `backoffice/tests/unit/theme.spec.ts`: mount a `bg-primary` element,
       assert computed background `#771AAF` (not shadcn's default grey/`oklch(0.205 0
       0)` — the confirmed `frontend` bug, ruling #7, out of scope to fix there).
-- [ ] 13.2 GREEN — edit `backoffice/app/assets/css/main.css`: reconcile `@theme` to
+- [x] 13.2 GREEN — edit `backoffice/app/assets/css/main.css`: reconcile `@theme` to
       `DESIGN.md` §3 verbatim (`--color-primary:#771AAF`, `--color-accent:#E45526`,
       `--color-lavender`, `--color-bg-gradient`, `@import '@fontsource/open-sans';`
       first line, `--font-sans:"Open Sans"`); **omit** `--color-primary`,
@@ -326,24 +334,24 @@ B1 keeps B1 reviewable.
       (`--primary`, `--primary-foreground`, `--accent`, `--sidebar`, `--destructive:
       #b91c1c` not `#ef4444`, `--radius:0.5rem`) to brand values so both resolution
       paths agree. Run 13.1 GREEN.
-- [ ] 13.3 Snapshot test over the full token block (regression guard for future edits).
+- [x] 13.3 Snapshot test over the full token block (regression guard for future edits).
 
 ### Phase 14: Auth Session (PR B1, D11)
 
-- [ ] 14.1 RED `backoffice/tests/unit/composables/useApi.spec.ts`: unauthenticated
+- [x] 14.1 RED `backoffice/tests/unit/composables/useApi.spec.ts`: unauthenticated
       request → redirect target `/login`; expired-token request → single silent
       refresh + retry, no redirect.
-- [ ] 14.2 RED `backoffice/tests/unit/composables/useAuth.spec.ts`: **fire 2+
+- [x] 14.2 RED `backoffice/tests/unit/composables/useAuth.spec.ts`: **fire 2+
       concurrent 401s** → exactly ONE `/api/auth/refresh` call issued (single-flight),
       both original requests retried with the new token — regression guard for the
       `AuthController.php:86-98` rotation + denylist (`config/jwt.php:227`) hazard.
-- [ ] 14.3 GREEN — `useApi()` `$fetch` wrapper over `runtimeConfig.public.apiBase`
+- [x] 14.3 GREEN — `useApi()` `$fetch` wrapper over `runtimeConfig.public.apiBase`
       (`nuxt.config.ts:56-60`) attaching `Authorization: Bearer`; `sessionStorage` +
       in-memory mirror (API issues no cookie, `AuthController.php:181-186`); a
       module-scoped in-flight refresh promise shared by all concurrent 401s.
-- [ ] 14.4 Create login page (`pages/login.vue`) + logout action (denylist via
+- [x] 14.4 Create login page (`pages/login.vue`) + logout action (denylist via
       `POST /api/auth/logout`, then clear storage regardless of response).
-- [ ] 14.5 Create `backoffice/app/middleware/01.browser-gate.global.ts` (port of
+- [x] 14.5 Create `backoffice/app/middleware/01.browser-gate.global.ts` (port of
       `frontend/app/utils/browser-gate.ts:28-47`, client-only branch — SPA has no
       SSR path) and `02.auth.global.ts` (redirects unauthenticated → `/login`;
       early-returns on `/unsupported` and `/login` regardless of filename order —
@@ -351,19 +359,22 @@ B1 keeps B1 reviewable.
 
 ### Phase 15: SA-11 Gate + Shell (PR B1)
 
-- [ ] 15.1 RED `backoffice/tests/e2e/unsupported-gate.spec.ts` extension: every admin
+- [x] 15.1 RED `backoffice/tests/e2e/unsupported-gate.spec.ts` extension: every admin
       route at a 375px viewport renders `/unsupported`, including while authenticated.
-- [ ] 15.2 GREEN — wire `browser-gate.global.ts` against `backoffice/app/pages/unsupported.vue`
+- [x] 15.2 GREEN — wire `browser-gate.global.ts` against `backoffice/app/pages/unsupported.vue`
       (exists, unwired today).
-- [ ] 15.3 Create `SidebarNav.vue` / `NavBar.vue` shell organisms (`DESIGN.md:421-437`)
+- [x] 15.3 Create `SidebarNav.vue` / `NavBar.vue` shell organisms (`DESIGN.md:421-437`)
       + `app.vue`/`layouts/default.vue` wiring, each with a Vitest test.
 
 ### Phase 16: Gate (PR B1)
 
-- [ ] 16.1 `bunx nuxi prepare` then `bun run typecheck` (nuxi typecheck) clean.
-- [ ] 16.2 `bun run test:unit` full suite; `bun run test:e2e` (chromium+webkit+mobile
+- [x] 16.1 `bunx nuxi prepare` then `bun run typecheck` (nuxi typecheck) clean.
+- [x] 16.2 `bun run test:unit` full suite; `bun run test:e2e` (chromium+webkit+mobile
       unsupported-gate) green.
-- [ ] 16.3 Open PR B1 → PR B0 branch.
+- [ ] 16.3 Open PR B1 → PR B0 branch. **SKIPPED per explicit orchestrator instruction:
+      "DO NOT push. DO NOT open any PR."** Branch `feat/c11-b1-theme-auth-shell`
+      committed locally on top of `feat/c11-b0-shadcn-init`, ready for a human to
+      push/open.
 
 ---
 
