@@ -342,12 +342,15 @@ B1 keeps B1 reviewable.
 
 ### Phase 11: Build + Gate (PR A4)
 
-- [ ] 11.1 Add the additive `url` key to
+- [x] 11.1 Add the additive `url` key to
       `EvaluationPayloadAssembler::renderFiles()` (`:170-187`), absolute via
       `config('app.url')`, per `openspec/changes/webhooks-integration/design.md:309,460`.
-- [ ] 11.2 Update/extend the existing `EvaluationPayloadAssembler` tests to assert the
+- [x] 11.2 Update/extend the existing `EvaluationPayloadAssembler` tests to assert the
       new key without weakening any existing assertion.
-- [ ] 11.3 `./vendor/bin/pest` full suite; `phpstan`; `pint` scoped. Open PR A4 → tracker.
+- [x] 11.3 `./vendor/bin/pest` full suite; `phpstan`; `pint` scoped. **Open PR A4 →
+      tracker SKIPPED per explicit orchestrator instruction: "DO NOT push. DO NOT
+      open a PR."** Branch `feat/c11-a3-controllers` amended locally with the A4
+      commit, ready for a human to push/open.
 
 ---
 
