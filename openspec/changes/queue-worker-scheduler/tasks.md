@@ -81,30 +81,30 @@ Chain strategy: feature-branch-chain
 
 ### Phase 1: Foundation (PR1)
 
-- [ ] 1.1 **FIRST TASK OF THE CHANGE.** `api/Dockerfile:45-47` runtime stage: `install-php-extensions pdo_pgsql zip opcache pcntl posix redis` (builder stage `:13-14` untouched). Must land before anything switches the driver to `redis`.
-- [ ] 1.2 `api/config/queue.php:43,71`: raise `retry_after` `90 → 1500` on both `database` and `redis` connections (keep both consistent so a `database` rollback stays coherent). Add a new `queue.runtime` block: `worker_timeout=1260`, `worker_max_time=3600`, `worker_memory_mb=512`, `worker_queues=['default']`, `stall_threshold_seconds`.
-- [ ] 1.3 `api/app/Jobs/ScoreEvaluationJob.php:52,94`: delete the two stale "Runs on Horizon" / "mirrors the Horizon configuration" comments (confirmed present, verbatim, by direct read this phase).
+- [x] 1.1 **FIRST TASK OF THE CHANGE.** `api/Dockerfile:45-47` runtime stage: `install-php-extensions pdo_pgsql zip opcache pcntl posix redis` (builder stage `:13-14` untouched). Must land before anything switches the driver to `redis`.
+- [x] 1.2 `api/config/queue.php:43,71`: raise `retry_after` `90 → 1500` on both `database` and `redis` connections (keep both consistent so a `database` rollback stays coherent). Add a new `queue.runtime` block: `worker_timeout=1260`, `worker_max_time=3600`, `worker_memory_mb=512`, `worker_queues=['default']`, `stall_threshold_seconds`.
+- [x] 1.3 `api/app/Jobs/ScoreEvaluationJob.php:52,94`: delete the two stale "Runs on Horizon" / "mirrors the Horizon configuration" comments (confirmed present, verbatim, by direct read this phase).
 
 ### Phase 2: RED — Reliability Tests (PR1, TDD)
 
-- [ ] 2.1 RED `api/tests/Unit/QueueRuntimeConfigTest.php` (model: `tests/Unit/C10/WebhooksConfigTest.php:16-26`). Assertion A: `max(declared job $timeout) < queue.runtime.worker_timeout < connections.{redis,database}.retry_after`. Assertion B: `ScoreEvaluationJob::$timeout >= 18 × config('scoring.anthropic.timeout_seconds') × 1.1`. Assertion C: `ScoreEvaluationJob::$timeout > 600` (literal, config-independent). Must be RED today — no job declares `$timeout`.
-- [ ] 2.2 RED `api/tests/Arch/Queue/QueuedJobRetryOwnershipArchTest.php`: clone the recursive-walk + allowlist shape from `tests/Arch/Tenancy/QueuedJobTenantContextArchTest.php:44-95`; assert every `ShouldQueue` implementor under `app/` declares its own `$tries`/`tries()` **and** `$timeout`/`timeout()`. Must fail today naming `FinalizeInterview` (confirmed via `rg 'tries|timeout' api/app/Jobs/FinalizeInterview.php` → zero hits).
-- [ ] 2.3 RED: port the fixture-tree proof test for the recursive walk (mirrors `QueuedJobTenantContextArchTest.php:114+`) so the discovery mechanism itself is proven, not just the production tree.
+- [x] 2.1 RED `api/tests/Unit/QueueRuntimeConfigTest.php` (model: `tests/Unit/C10/WebhooksConfigTest.php:16-26`). Assertion A: `max(declared job $timeout) < queue.runtime.worker_timeout < connections.{redis,database}.retry_after`. Assertion B: `ScoreEvaluationJob::$timeout >= 18 × config('scoring.anthropic.timeout_seconds') × 1.1`. Assertion C: `ScoreEvaluationJob::$timeout > 600` (literal, config-independent). Must be RED today — no job declares `$timeout`.
+- [x] 2.2 RED `api/tests/Arch/Queue/QueuedJobRetryOwnershipArchTest.php`: clone the recursive-walk + allowlist shape from `tests/Arch/Tenancy/QueuedJobTenantContextArchTest.php:44-95`; assert every `ShouldQueue` implementor under `app/` declares its own `$tries`/`tries()` **and** `$timeout`/`timeout()`. Must fail today naming `FinalizeInterview` (confirmed via `rg 'tries|timeout' api/app/Jobs/FinalizeInterview.php` → zero hits).
+- [x] 2.3 RED: port the fixture-tree proof test for the recursive walk (mirrors `QueuedJobTenantContextArchTest.php:114+`) so the discovery mechanism itself is proven, not just the production tree.
 
 ### Phase 3: GREEN (PR1)
 
-- [ ] 3.1 `ScoreEvaluationJob.php`: declare `public int $timeout = 1200;`.
-- [ ] 3.2 `DeliverWebhookJob.php`: declare `public int $timeout = 60;` (per-attempt HTTP budget already 15s at `config/webhooks.php:79-80`; 60s is the job-level envelope).
-- [ ] 3.3 `FinalizeInterview.php:47`: declare `public int $timeout = 60;` and `public int $tries = 3;` — it currently declares neither (confirmed), so it silently inherits `--tries=1`.
-- [ ] 3.4 Run Phase 2 tests to GREEN.
+- [x] 3.1 `ScoreEvaluationJob.php`: declare `public int $timeout = 1200;`.
+- [x] 3.2 `DeliverWebhookJob.php`: declare `public int $timeout = 60;` (per-attempt HTTP budget already 15s at `config/webhooks.php:79-80`; 60s is the job-level envelope).
+- [x] 3.3 `FinalizeInterview.php:47`: declare `public int $timeout = 60;` and `public int $tries = 3;` — it currently declares neither (confirmed), so it silently inherits `--tries=1`.
+- [x] 3.4 Run Phase 2 tests to GREEN.
 
 ### Phase 4: Full-Suite Gate + REFACTOR (PR1)
 
-- [ ] 4.1 Run `./vendor/bin/pest` — full suite, zero regressions expected (no behavior change, only declarations + comment deletions).
-- [ ] 4.2 Run `php artisan test --parallel` — the CI-equivalent run; catches ParaTest-worker helper issues the sequential run cannot.
-- [ ] 4.3 Run `php -d memory_limit=2G ./vendor/bin/phpstan analyse --memory-limit=2G` — 0 new errors on new files.
-- [ ] 4.4 Run `./vendor/bin/pint` scoped to touched files only (never bare).
-- [ ] 4.5 Open api PR1 → tracker `feature/queue-worker-scheduler`.
+- [x] 4.1 Run `./vendor/bin/pest` — full suite, zero regressions expected (no behavior change, only declarations + comment deletions).
+- [x] 4.2 Run `php artisan test --parallel` — the CI-equivalent run; catches ParaTest-worker helper issues the sequential run cannot.
+- [x] 4.3 Run `php -d memory_limit=2G ./vendor/bin/phpstan analyse --memory-limit=2G` — 0 new errors on new files.
+- [x] 4.4 Run `./vendor/bin/pint` scoped to touched files only (never bare).
+- [ ] 4.5 Open api PR1 → tracker `feature/queue-worker-scheduler`. **NOT DONE** — apply-phase instructions explicitly prohibit pushing or opening a PR; skipped and reported back.
 
 ---
 
