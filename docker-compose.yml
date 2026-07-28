@@ -93,7 +93,12 @@ services:
       - path: ./api/.env
         required: false
     environment:
-      # Override DB/Redis to use compose service names (not localhost)
+      # Override DB/Redis to use compose service names (not localhost).
+      # DB_CONNECTION is pinned here on purpose: without it the container inherits
+      # whatever the developer's api/.env happens to say, and a stray
+      # DB_CONNECTION=sqlite silently ignores every other override below — the
+      # app then tries to open a SQLite file literally named "beai" and dies.
+      DB_CONNECTION: pgsql
       DB_HOST: postgres
       DB_PORT: 5432
       DB_DATABASE: ${POSTGRES_DB:-beai}
@@ -104,14 +109,21 @@ services:
       MAIL_HOST: mailpit
       MAIL_PORT: 1025
     ports:
-      - "${API_PORT:-8000}:9000"
+      # The image CMD is `php artisan serve --host=0.0.0.0 --port=8000`, so the
+      # container listens on 8000. This previously published container port 9000
+      # (an fpm convention the image does not follow), which left the API
+      # unreachable from the host while the container still reported healthy.
+      - "${API_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "php-fpm -t 2>/dev/null && echo ok"]
+      # Probe the real HTTP surface. The previous check ran `php-fpm -t`, which
+      # only validates an fpm config file — it returned success even when nothing
+      # was serving, making "healthy" meaningless for this container.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/health >/dev/null || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -140,7 +152,11 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:3000/health | grep -q ok || exit 1"]
+      # The SSR runtime image (node:24-slim) ships NEITHER curl NOR wget, so the
+      # previous curl-based probe could never succeed — the container reported
+      # unhealthy forever while actually serving correctly. Node's global fetch
+      # is always present, so use the runtime we already depend on.
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -168,7 +184,11 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:80/health 2>&1 | grep -q '200 OK' || wget -qO- http://localhost:80/health | grep -q ok || exit 1"]
+      # nginx answers /health with a 301 to /health/ (directory-style route from
+      # the generated SPA). The previous probe used `wget --spider`, which does
+      # not follow redirects, so it read the 301 as a failure and the container
+      # reported unhealthy while serving correctly. `-L` follows the redirect.
+      test: ["CMD-SHELL", "curl -fsSL http://localhost:80/health >/dev/null || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
