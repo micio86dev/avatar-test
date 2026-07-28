@@ -1,4 +1,12 @@
-# BEAI — Business Evaluation AI
+# BEAI — Behavioral Event AI
+
+> **Name origin (do not get this wrong).** BEAI is **not** "Business Evaluation AI".
+> It derives from **BEI — Behavioral Event Interview**, the established HR method of
+> probing *actual past behaviour* through concrete episodes rather than hypothetical
+> questions. The inserted **A** is deliberate wordplay: the trailing letters read as
+> **AI**, so a BEI conducted by *human assessors* becomes a **BEAI** conducted by an
+> *AI assessor*. This is why the product scores against **BARS** anchors — behaviourally
+> anchored descriptors are the natural scoring instrument for a BEI.
 
 Multi-tenant platform for **soft-skill assessment via automated AI voice interview**.
 Candidates enter through SSO/magic-link, take an adaptive spoken interview with a

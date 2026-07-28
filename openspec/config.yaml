@@ -5,7 +5,7 @@ persistence: hybrid
 strict_tdd: true
 
 context: |
-  Project: BEAI — Business Evaluation AI (multi-tenant AI voice-interview assessment)
+  Project: BEAI — Behavioral Event AI (multi-tenant AI voice-interview assessment)
   Backend: Laravel 13 + PHP 8.5 + Eloquent + PostgreSQL 17 (pgvector) + Redis 8 (Horizon) — target dir: api/
   Frontend (candidate, SSR): Nuxt 4 (Vue 3) + @nuxtjs/i18n — target dir: frontend/
   Backoffice (admin, SPA ssr:false): Nuxt 4 (Vue 3) + @nuxtjs/i18n — target dir: backoffice/
