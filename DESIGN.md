@@ -459,9 +459,10 @@ The evaluation report is the most complex view:
 ├────────────────────────────────────────────────────────────┤
 │  Competency          │ Score │ Reliability │ Indicators     │
 │  ───────────────────────────────────────────────────────   │
-│  COL (Collaboration) │ 3.67  │ High        │ [4] [3] [4]   │
-│  COM (Communication) │ 4.00  │ High        │ [4] [4] [4]   │
-│  STG (Strategy)      │ 2.33  │ Medium      │ [2] [3] [2]   │
+│  COL (Collaboration) │ 3.67  │ High        │ [5] [3] [3]   │
+│  COM (Communication) │ 5.00  │ High        │ [5] [5] [5]   │
+│  STG (Strategy)      │ 2.33  │ Medium      │ [3] [3] [1]   │
+│  INN (Innovation)    │ 3.00  │ Low         │ [3] [–] [3]   │
 │  ...                 │  ...  │  ...        │ ...            │
 ├────────────────────────────────────────────────────────────┤
 │  Excerpts (verbatim from transcript)                        │
@@ -469,8 +470,19 @@ The evaluation report is the most complex view:
 └────────────────────────────────────────────────────────────┘
 ```
 
-- Indicator scores: colored chips (1–2 = error, 3 = warning, 4–5 = success scale).
-- Competency mean: bold, colored by threshold (< 2 = error, 2–3 = warning, > 3 = success).
+- **Indicator scores are the discrete set `{1, 3, 5}` — never 2, never 4, never a
+  decimal.** The LLM matches an answer against the BARS anchors `{5, 3, 1}` and picks the
+  single closest one. A chip rendering `2` or `4` is a bug, not a styling choice.
+  Colored chips map one-to-one: `1 = error`, `3 = warning`, `5 = success`.
+- **`-1` means UNASSESSABLE** (no assessable evidence in the transcript). It is NOT a score.
+  Render it as a neutral/muted chip showing `–` (en dash) with an accessible label such as
+  "not assessable", never as the number `-1` and never on the error/warning/success scale.
+  Unassessable indicators are **excluded from the competency mean** — see the `INN` row above,
+  whose mean is 3.00 from two assessed indicators, not 1.67 from three.
+- Competency mean: bold, a real decimal in `[1, 5]` (the mean of the **assessed** indicators
+  only). Colored by threshold: `< 2.5 = error`, `2.5–3.5 = warning`, `> 3.5 = success`.
+- A competency whose indicators are ALL unassessable has no mean. Render `–` with the same
+  neutral treatment, never `0`.
 - Reliability: text badge.
 - Excerpts: monospace font (`--font-mono`), verbatim from transcript (validated by substring match).
 
