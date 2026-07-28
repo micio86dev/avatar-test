@@ -172,41 +172,54 @@ B1 keeps B1 reviewable.
 
 ### Phase 5: RED — Serializer Fixtures (PR A2, TDD)
 
-- [ ] 5.1 RED `api/tests/Unit/Services/Admin/AdminEvaluationSerializerTest.php`: the
+- [x] 5.1 RED `api/tests/Unit/Services/Admin/AdminEvaluationSerializerTest.php`: the
       `SLF` fixture from `esempio-report-valutazione.json:374-392` (`5,3,-1` → mean
       `4.0`, `reliability "67%"`) plus an all-`-1` competency → `score: null`
       (`CompetencyResult.php:39,67`), never `0`.
-- [ ] 5.2 RED `api/tests/Unit/Services/Admin/AdminTranscriptSerializerTest.php`: a
+- [x] 5.2 RED `api/tests/Unit/Services/Admin/AdminTranscriptSerializerTest.php`: a
       participant with 2+ `InterviewSession`s (one per competency,
       `InterviewSession.php:48-49`) → utterances grouped and ordered by
       `question_index` then session `id`, each session's utterances by `ts` then `id`.
-- [ ] 5.3 RED — extend the Phase 2 arch test (2.3) to also assert
+- [x] 5.3 RED — extend the Phase 2 arch test (2.3) to also assert
       `AdminEvaluationSerializer`/`AdminTranscriptSerializer` contain no
       `withoutGlobalScopes()` call (spec scenario "Serializer never bypasses the
       tenant scope").
 
 ### Phase 6: GREEN (PR A2)
 
-- [ ] 6.1 Create `api/app/Services/Admin/AdminEvaluationSerializer.php`: scoped
+- [x] 6.1 Create `api/app/Services/Admin/AdminEvaluationSerializer.php`: scoped
       queries only (`Evaluation`/`CompetencyResult`/`IndicatorScore` all extend
       `TenantModel`); eager-load `competencyResults.indicatorScores` (no N+1); reuse
-      `ReliabilityRenderer` (`EvaluationPayloadAssembler.php:146`) and the
-      `project_competencies.position` ordering (`:119-123`) as pure collaborators
-      only — do not extend or copy `EvaluationPayloadAssembler` itself. Run 5.1 GREEN.
-- [ ] 6.2 Create `api/app/Services/Admin/AdminTranscriptSerializer.php`: iterate the
+      `ReliabilityRenderer` and the `project_competencies.position` ordering
+      (`Project::competencies()`, `Project.php:183-188`) as pure collaborators only —
+      do not extend or copy `EvaluationPayloadAssembler` itself (confirmed this
+      session: that class does not exist on `develop`/this branch yet — it lands with
+      C10's unmerged tracker — so `ReliabilityRenderer` was located instead at its
+      real home, `app/Services/Scoring/ReliabilityRenderer.php`, a standalone class,
+      not embedded in the assembler). `CompetencyResult.score` is read verbatim (it is
+      already the C9-computed mean, nullable by design — this serializer does not
+      recompute it). Run 5.1 GREEN.
+- [x] 6.2 Create `api/app/Services/Admin/AdminTranscriptSerializer.php`: iterate the
       participant's sessions (never `TranscriptAssembler::assemble()`'s single-session
       signature, `TranscriptAssembler.php:34` — this is new assembly logic, not
       reuse); dual `orderBy` per session per `TranscriptAssembler.php:11-14`'s
       discipline. Run 5.2 GREEN.
-- [ ] 6.3 Create `api/app/Http/Resources/Admin/{ParticipantResource,
+- [x] 6.3 Create `api/app/Http/Resources/Admin/{ParticipantResource,
       ParticipantDetailResource,TranscriptResource,EvaluationResource}.php` with
-      Scramble annotations sufficient for a resolvable `openapi.json` schema.
+      Scramble annotations sufficient for a resolvable `openapi.json` schema. Deferred
+      from this PR, flagged honestly: D5/D9's `files` open map is NOT included on
+      `ParticipantDetailResource` — building it now would need either invented
+      untested `ref`/`url` values or `route()` calls against download routes that
+      don't exist until PR A3 (Phase 8). Documented in the resource's own docblock;
+      lands in A3 once `ParticipantDownloadController` exists to generate real values.
 
 ### Phase 7: Full-Suite Gate (PR A2)
 
-- [ ] 7.1 `./vendor/bin/pest` full suite; `phpstan` 0 new errors; `pint` scoped to the
-      6 new files.
-- [ ] 7.2 Open PR A2 → PR A1 branch.
+- [x] 7.1 `./vendor/bin/pest` full suite; `phpstan` 0 new errors; `pint` scoped to the
+      touched files.
+- [ ] 7.2 Open PR A2 → PR A1 branch. **SKIPPED per explicit orchestrator instruction:
+      "DO NOT push. DO NOT open any PR."** Branch `feat/c11-a2-serializers` committed
+      locally on top of `feat/c11-a1-reader-gate`, ready for a human to push/open.
 
 ---
 
