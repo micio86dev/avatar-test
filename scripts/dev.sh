@@ -251,7 +251,16 @@ if [[ $WORKER -eq 1 ]]; then
   # worker service. See the infra backlog.
   if dc exec -T api sh -lc 'pgrep -f "artisan queue:work" >/dev/null 2>&1'; then
     ok "Worker already running"
-  elif dc exec -d api sh -lc 'php artisan queue:work --tries=3 --timeout=120 >> storage/logs/worker.log 2>&1'; then
+  # --timeout MUST stay below the connection's retry_after (90s, api/config/queue.php:43).
+  # With --timeout=120 the store re-reserves a job while the first worker is still
+  # running it, so ScoreEvaluationJob executes TWICE and writes duplicate Evaluation /
+  # CompetencyResult / IndicatorScore rows.
+  #
+  # --tries is deliberately NOT passed: a worker-level cap would override each job's own
+  # retry policy. DeliverWebhookJob owns a 6-attempt state machine with its own
+  # pending -> dead transition, and a framework-level cap would dead-letter it early,
+  # silently rewriting C10's design.
+  elif dc exec -d api sh -lc 'php artisan queue:work --timeout=60 >> storage/logs/worker.log 2>&1'; then
     sleep 2
     if dc exec -T api sh -lc 'pgrep -f "artisan queue:work" >/dev/null 2>&1'; then
       ok "Worker started (log: storage/logs/worker.log inside the api container)"
