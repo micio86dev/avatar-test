@@ -109,6 +109,24 @@ tasks:
       - bash "{{.ROOT_DIR}}/scripts/e2e-container.sh" frontend --update-snapshots
       - bash "{{.ROOT_DIR}}/scripts/e2e-container.sh" backoffice --update-snapshots
 
+  # ---------------------------------------------------------------------------
+  # OpenAPI client sync (C11 D13)
+  #
+  # `backoffice/scripts/check-client-drift.sh` only re-derives `types/api.ts`
+  # from the COMMITTED `backoffice/openapi.json` snapshot — nothing copies the
+  # freshly-exported `api/openapi.json` into `backoffice/`, so a green drift
+  # check can still hide a stale snapshot against the live API. This task
+  # closes that gap: export -> copy -> regenerate the typed client.
+  # ---------------------------------------------------------------------------
+
+  openapi:sync:
+    desc: "Export the API's OpenAPI spec, sync it into backoffice, and regenerate the typed client"
+    dir: api
+    cmds:
+      - php artisan scramble:export
+      - cp "{{.ROOT_DIR}}/api/openapi.json" "{{.ROOT_DIR}}/backoffice/openapi.json"
+      - (cd "{{.ROOT_DIR}}/backoffice" && bun run codegen)
+
   test:load:
     desc: "Run K6 load tests against local docker-compose stack (never Railway). Prereq: task up"
     dir: api

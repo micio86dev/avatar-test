@@ -86,10 +86,14 @@ B1 keeps B1 reviewable.
 
 ## Phase 0: Wrapper Docs (Unit 0 — no submodule touch)
 
-- [ ] 0.1 Edit `DESIGN.md:462-465,486`: replace the `High`/`Medium`/`Low` mockup column
+- [x] 0.1 Edit `DESIGN.md:462-465,486`: replace the `High`/`Medium`/`Low` mockup column
       and "Reliability: text badge" line with "Reliability: pre-rendered percent string
       (e.g. `67%`); no High/Medium/Low band — the threshold formula is open product
       decision #1 and MUST NOT be invented."
+      DONE by the orchestrator in commit `fc32175` — the mockup column now shows percent
+      values and the bullet is now at `DESIGN.md:495-496`, stating the value is rendered
+      verbatim with an explicit pointer to open product decision #1. This checkbox was
+      left stale, which made B2 report B3 as blocked when it was not.
 - [x] 0.2 Edit `openspec/changes/admin-dashboards/specs/admin-read-api/spec.md`:
       replace every `403` gate-denial reference (status table + 3 scenarios) with
       `409` and the machine-readable body `{error: lifecycle_not_ready, resource,
@@ -447,29 +451,38 @@ B1 keeps B1 reviewable.
 
 ### Phase 17: Client Sync + Build (PR B2)
 
-- [ ] 17.1 Add `openapi:sync` task to wrapper `Taskfile.yml` (D13): `php artisan
+- [x] 17.1 Add `openapi:sync` task to wrapper `Taskfile.yml` (D13): `php artisan
       scramble:export` in `api` → copy `api/openapi.json` → `backoffice/openapi.json`
       → `bun run codegen`. Closes the gap where `check-client-drift.sh:13` only
       re-derives from the committed snapshot and nothing syncs it from the API.
-- [ ] 17.2 Run `task openapi:sync`; run `bun run codegen:check` — green.
-- [ ] 17.3 Create `CandidateTable.vue` organism (D4/D5): server-paginated, filters
+      **Deviation, flagged honestly**: the Taskfile task itself invokes `php artisan
+      scramble:export` inside `api/`, but this session's scope forbids writing to
+      the `api` submodule. `api/openapi.json` on `feat/c11-a3-controllers` was
+      already fresh (confirmed: all 7 admin endpoints present, A3 done), so the
+      sync/codegen steps were run manually (copy + `bun run codegen`) without
+      invoking the export step, leaving `api`'s git state untouched.
+- [x] 17.2 Run `task openapi:sync`; run `bun run codegen:check` — green.
+- [x] 17.3 Create `CandidateTable.vue` organism (D4/D5): server-paginated, filters
       `project_id`/`status`/`q`, a **fresh authorized query per page** — no
       client-side fetch-all filtering.
-- [ ] 17.4 Create participant list page (`pages/participants/index.vue`) + detail
+- [x] 17.4 Create participant list page (`pages/participants/index.vue`) + detail
       page (`pages/participants/[id].vue`) with lifecycle timeline.
-- [ ] 17.5 Create dashboard page (`pages/index.vue` or `pages/dashboard.vue`): usage
+- [x] 17.5 Create dashboard page (`pages/index.vue` or `pages/dashboard.vue`): usage
       + AI-cost KPI cards only (`GET /api/dashboard/metrics`) — no MRR/trial/billing
       widget, not even disabled/placeholder (observability delta scenario).
 
 ### Phase 18: Tests + Gate (PR B2)
 
-- [ ] 18.1 Vitest per new component (`CandidateTable`, list/detail pages as
+- [x] 18.1 Vitest per new component (`CandidateTable`, list/detail pages as
       composable-backed components, dashboard KPI cards).
-- [ ] 18.2 `backoffice/tests/e2e/admin-flow.spec.ts` (chromium+webkit): login → list
+- [x] 18.2 `backoffice/tests/e2e/admin-flow.spec.ts` (chromium+webkit): login → list
       → open detail; role-based locators only (`getByRole`/`getByLabel`), zero
       CSS class/id selectors; `@axe-core/playwright` clean.
-- [ ] 18.3 `bun run typecheck` clean; `bun run test:unit` + `test:e2e` green; open
-      PR B2 → PR B1 branch.
+- [x] 18.3 `bun run typecheck` clean; `bun run test:unit` + `test:e2e` green.
+      **SKIPPED per explicit orchestrator instruction: "DO NOT push. DO NOT open
+      any PR."** Branch `feat/c11-b2-participant-views` committed locally on top
+      of `chore/cursor-pointer-affordance` (which stacks on
+      `feat/c11-b1-theme-auth-shell`), ready for a human to push/open.
 
 ---
 
