@@ -229,7 +229,9 @@ Ratified 2026-07-30. Laravel 13.20 ships the transport first-party; the
 key, does not fail at boot. It throws inside the queued notification job, so it
 surfaces as a `failed` row in `notification_logs` — visible on the operator
 dashboard, but only if someone looks. The default `MAIL_FROM_ADDRESS` is
-`hello@example.com`, which Resend rejects; changing it is not optional.
+`hello@beai.test` in `api/.env.example`, and `hello@example.com` is Laravel's own
+fallback in `config/mail.php`. Neither is a real domain, so Resend rejects both —
+changing it is not optional.
 
 Tests never touch either transport: `api/phpunit.xml` pins `MAIL_MAILER=array`,
 and a test asserts that pin still holds.
