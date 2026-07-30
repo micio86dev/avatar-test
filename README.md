@@ -1,4 +1,4 @@
-# BEAI — Business Evaluation AI
+# BEAI — Behavioral Event AI
 
 **BEAI** is a multi-tenant platform for **soft-skill assessment via automated AI voice
 interview**. A candidate enters through SSO/magic-link, takes an adaptive spoken interview

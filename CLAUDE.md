@@ -1,4 +1,12 @@
-# BEAI — Business Evaluation AI
+# BEAI — Behavioral Event AI
+
+> **Name origin (do not get this wrong).** BEAI is **not** "Business Evaluation AI".
+> It derives from **BEI — Behavioral Event Interview**, the established HR method of
+> probing *actual past behaviour* through concrete episodes rather than hypothetical
+> questions. The inserted **A** is deliberate wordplay: the trailing letters read as
+> **AI**, so a BEI conducted by *human assessors* becomes a **BEAI** conducted by an
+> *AI assessor*. This is why the product scores against **BARS** anchors — behaviourally
+> anchored descriptors are the natural scoring instrument for a BEI.
 
 Multi-tenant platform for **soft-skill assessment via automated AI voice interview**.
 Candidates enter through SSO/magic-link, take an adaptive spoken interview with a
@@ -43,7 +51,7 @@ and a reference for the port, not the final architecture.
 | Layer | Choice |
 |---|---|
 | **API backend** | **Laravel 13 + PHP 8.5 + Eloquent + PostgreSQL 17 (pgvector)**, **API-only** (no Blade UI). **Scramble** (`dedoc/scramble`) generates the OpenAPI spec. Stateless, horizontally scalable. |
-| Cache / Queue / Session | **Redis 8** (+ Laravel Horizon) for async scoring / notifications / webhooks |
+| Cache / Queue / Session | **Redis 8** for async scoring / notifications / webhooks. Workers run Laravel's native `queue:work` + `schedule:work`. **Laravel Horizon is deferred, NOT installed** — ratified 2026-07-28; it may be adopted later as an additive change. Do not assume it exists. |
 | **Frontend** (candidate) | **Nuxt 4 (Vue 3) — SSR**, `@nuxtjs/i18n`. Public interview app; ports the avatar/proctoring TS logic from the demo |
 | **Backoffice** (admin) | **Nuxt 4 (Vue 3) — SPA** (`ssr: false`), `@nuxtjs/i18n`. Separate app, always multilingual |
 | Object storage | S3-compatible (audio, snapshots, transcripts) |
@@ -168,15 +176,28 @@ owning slices (C2+), **not C1**. Do not install or wire any of them during C1.
 
 ---
 
-## Open product decisions (close with client before the related change)
+## Product decisions — mostly RATIFIED 2026-07-28
 
-1. `reliability` formula + "valid competency" threshold feeding the 90% gate (blocks C9).
-2. GDPR retention for audio/video/snapshots/transcripts (blocks production media storage).
-3. Framework versioning vs live projects (pin `framework_version` at project creation).
-4. Retry semantics (re-ask all vs invalid-only; token single-use vs retry reuse).
-5. Time limits / deadline behavior.
-6. Non-English BARS anchors need expert-authored translations (blocks non-EN scoring).
-7. Provider concurrency/cost at scale (HeyGen/Tavus limits; keep provider abstraction clean).
+Full rationale in `openspec/ROADMAP.md`. Summary:
+
+1. **RATIFIED** — `reliability` = `assessed / total` indicators (`-1` excluded from the
+   numerator), already implemented in `AssessableFractionReliability`. Validity threshold
+   **T = 0.5**, env-overridable. **No High/Medium/Low bands** — render the percentage verbatim.
+2. **DEFAULTS SET, LEGAL SIGN-OFF PENDING** — GDPR retention. The purge mechanism is
+   parametric; the durations are a data controller decision. Sign-off MUST also cover
+   `webhook_deliveries.payload` and `participants.display_name`, which postdate the original framing.
+3. **RATIFIED** — `framework_version` pinned at project creation; live projects are never
+   retargeted by a later catalogue revision.
+4. **OPEN** — retry semantics. Gates only the C9 chain-PR 4 (RT-B).
+5. **RATIFIED — out of scope** — the calling system owns candidate scheduling and reminders.
+   BEAI enforces only its short-lived token expiry and has no deadline concept of its own.
+6. **OPEN** — non-English BARS anchors need expert-authored translations (data, not code).
+7. **OPEN** — provider concurrency/cost at scale; revisit under real load.
+8. **RATIFIED** — BEAI holds **no candidate contact data**. `participants` has no contact
+   column by design and that stays; candidate invitations/reminders belong to the calling
+   system. C12 is operator-facing only.
+9. **PARKED** — white-label and the FR-006 multi-test portal are underspecified (two lines of
+   brief, FR-006 marked "Optional"). Removed from C13 scope until a written requirement exists.
 
 ---
 

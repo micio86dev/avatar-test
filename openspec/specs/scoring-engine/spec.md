@@ -25,7 +25,7 @@ the RT-B retry block are DELIVERED and in force.
 ### Requirement: Job Dispatch and Lifecycle
 
 `ScoreEvaluationJob` MUST be dispatched from `FinalizeInterview` at the `TODO(C9)` hook,
-with the `participant_id` as the only payload. The job runs on the Horizon queue; p95
+with the `participant_id` as the only payload. The job runs on the Redis queue; p95
 latency MUST be < 10 min. On job completion, the participant MUST transition from
 `in_valutazione → completato` regardless of whether the Evaluation is `completed` or
 `pending` (both are terminal sub-states of the evaluation).
@@ -78,7 +78,7 @@ dispatch and exits no-op immediately. The `Evaluation` row is preserved for audi
 
 - GIVEN participant P is in state `in_valutazione` and the `TODO(C9)` hook is reached
 - WHEN `FinalizeInterview` executes
-- THEN `ScoreEvaluationJob::dispatch(P.id)` is enqueued exactly once on the Horizon queue
+- THEN `ScoreEvaluationJob::dispatch(P.id)` is enqueued exactly once on the Redis queue
 
 #### Scenario: Start-of-job guard — existing terminal Evaluation → no-op
 
@@ -142,7 +142,7 @@ dispatch and exits no-op immediately. The `Evaluation` row is preserved for audi
 
 - GIVEN `ScoreEvaluationJob` exhausts all queue retries without completing
 - AND `participant.status == 'in_valutazione'`
-- WHEN Horizon calls `ScoreEvaluationJob::failed()`
+- WHEN the queue worker calls `ScoreEvaluationJob::failed()`
 - THEN `participant.status` transitions from `in_valutazione` to `errore`
 - AND an `EvaluationFailed` lifecycle event is emitted for C10
 
@@ -150,7 +150,7 @@ dispatch and exits no-op immediately. The `Evaluation` row is preserved for audi
 
 - GIVEN `ScoreEvaluationJob` exhausts all queue retries
 - AND `participant.status` is already `errore` (e.g. from a prior failure cycle)
-- WHEN Horizon calls `ScoreEvaluationJob::failed()`
+- WHEN the queue worker calls `ScoreEvaluationJob::failed()`
 - THEN the `in_valutazione → errore` transition is SKIPPED (participant is already `errore`)
 - AND an `EvaluationFailed` lifecycle event is STILL emitted for C10
 
@@ -547,6 +547,25 @@ rows belonging to org B.
 - GIVEN participant P_A in org A and participant P_B in org B exist
 - WHEN `ScoreEvaluationJob` runs for P_A
 - THEN all DB reads and writes are scoped to org A; org B data is never accessed
+
+Write-side scoping MUST use tenant context re-derived from `P_A`'s own
+`organization_id` at job execution time — never from the ambient
+`TenantResolver` state left over from a prior request or job (see `tenancy`
+capability). This applies to every tenant-scoped write the job performs:
+the `Evaluation`, `AiRequest`, `CompetencyResult`, and `IndicatorScore` rows.
+(Previously: stated the isolation goal without specifying how write-side org
+context is established for a queued job; this closes the ambient-state gap
+that let the job stamp a null or foreign org.)
+
+#### Scenario: All four scoring writes stamped under the participant's org
+
+- GIVEN `ScoreEvaluationJob` runs for participant P_A (org A)
+- AND the ambient `TenantResolver` holds no org (post `Queue::before` reset)
+  or a foreign org
+- WHEN the job creates the `Evaluation`, `AiRequest`, `CompetencyResult`,
+  and `IndicatorScore` rows
+- THEN every created row's `organization_id` equals org A
+- AND no row is created with a null or foreign `organization_id`
 
 ---
 

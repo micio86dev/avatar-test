@@ -5,13 +5,13 @@ persistence: hybrid
 strict_tdd: true
 
 context: |
-  Project: BEAI — Business Evaluation AI (multi-tenant AI voice-interview assessment)
-  Backend: Laravel 13 + PHP 8.5 + Eloquent + PostgreSQL 17 (pgvector) + Redis 8 (Horizon) — target dir: api/
+  Project: BEAI — Behavioral Event AI (multi-tenant AI voice-interview assessment)
+  Backend: Laravel 13 + PHP 8.5 + Eloquent + PostgreSQL 17 (pgvector) + Redis 8 — target dir: api/
   Frontend (candidate, SSR): Nuxt 4 (Vue 3) + @nuxtjs/i18n — target dir: frontend/
   Backoffice (admin, SPA ssr:false): Nuxt 4 (Vue 3) + @nuxtjs/i18n — target dir: backoffice/
   Package manager (both Nuxt apps): Bun (install/dev/build); Node runs the SSR runtime + Vitest/Playwright
   Auth: JWT (tymon/jwt-auth) — bearer access+refresh + Redis denylist; short-lived JWT magic-link; RBAC via spatie/laravel-permission (teams mode); NOT Sanctum. Built in C2.
-  Queue: Redis 8 + Laravel Horizon (async scoring, webhooks)
+  Queue: Redis 8 with Laravel's native queue:work + schedule:work (async scoring, webhooks). Horizon deferred, NOT installed (ratified 2026-07-28).
   Deploy: Railway — Git Flow (main/develop + feature/release/hotfix branches)
   Domain: BARS soft-skill assessment; 5 roles; 18 standard competencies + MTG/LAT
   Multi-tenancy: shared DB, row-level scoping by organization_id

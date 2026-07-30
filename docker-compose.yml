@@ -5,6 +5,77 @@
 # Stop: docker compose down
 # Full teardown (remove volumes): docker compose down -v
 
+# ---------------------------------------------------------------------------
+# Shared runtime environment for every service built from ./api — `api`,
+# `worker` and `scheduler` run the SAME image and must agree on where Postgres,
+# Redis and Mailpit live. Defined once on purpose: three copies of this block
+# is three chances for a change to land on one service and silently miss the
+# others, and a worker pointed at the wrong database fails asynchronously,
+# where nobody is watching.
+# ---------------------------------------------------------------------------
+x-api-environment: &api-environment
+  # DB_CONNECTION is pinned here on purpose: without it the container inherits
+  # whatever the developer's api/.env happens to say, and a stray
+  # DB_CONNECTION=sqlite silently ignores every other override below — the
+  # app then tries to open a SQLite file literally named "beai" and dies.
+  DB_CONNECTION: pgsql
+  # Pinned for the same reason as DB_CONNECTION, and it is not hypothetical:
+  # api/.env currently says QUEUE_CONNECTION=database, and an env value beats
+  # the config default this stack ships. Left alone, the worker would consume
+  # the DATABASE queue while the health probe inspects REDIS — the probe would
+  # then find an empty Redis queue and report healthy forever, no matter what
+  # the worker was or was not doing. Two subsystems, two different queues, and
+  # a green light over the top of it.
+  QUEUE_CONNECTION: redis
+  # Pinned to `redis` because CLAUDE.md's stack table binds cache AND session to
+  # Redis 8, and that table is authoritative ("This stack table and D25 MUST
+  # never diverge"). `config/cache.php:18` still defaults to `database` — a
+  # Laravel scaffold default nobody revisited, already flagged as a real
+  # divergence in this change's own design.md:369. Pinning `database` here
+  # would not have preserved the status quo; it would have promoted an
+  # unratified drift into an explicit, load-bearing deployment decision, which
+  # is precisely the kind of thing that belongs in SDD rather than in a compose
+  # comment.
+  #
+  # Safe for the scheduler lock: `onOneServer()` needs a `LockProvider`, and
+  # `Illuminate\Cache\RedisStore` implements it just as `DatabaseStore` does
+  # (verified — `RedisStore extends TaggableStore implements CanFlushLocks,
+  # LockProvider`). `api/bootstrap/app.php:32` was updated alongside this pin
+  # and now deliberately names no store at all, which is the durable shape:
+  # what the lock requires is that the store be SHARED across processes, and
+  # `CACHE_STORE=file` is the setting that quietly turns it into no lock.
+  CACHE_STORE: redis
+  # Same table, same reasoning. Left unpinned, this was the third load-bearing
+  # driver taking its value from api/.env by accident rather than by decision.
+  SESSION_DRIVER: redis
+  DB_HOST: postgres
+  DB_PORT: 5432
+  DB_DATABASE: ${POSTGRES_DB:-beai}
+  DB_USERNAME: ${POSTGRES_USER:-postgres}
+  DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  MAIL_HOST: mailpit
+  MAIL_PORT: 1025
+  # ⚠️ COORDINATION SEAM — notifications-reminders (C12), design.md D7.
+  #
+  # MAIL_MAILER is deliberately NOT set here, so it resolves to config/mail.php's
+  # default of `log`. That is fine today, because nothing sends mail yet — and it
+  # is a silent failure the moment C12 lands: the process that actually sends
+  # operator alerts is the `worker` service below, and a worker on the `log`
+  # driver writes every alert into a container filesystem nobody reads. Mailpit
+  # is already running and MAIL_HOST/MAIL_PORT already point at it, so C12 needs
+  # exactly one line — `MAIL_MAILER: smtp` — added to THIS anchor, and it reaches
+  # api, worker and scheduler at once. That choice is C12's to make, not this
+  # change's, which is why the seam is documented rather than pre-empted.
+
+# Postgres and Redis must both be healthy before anything that runs jobs starts.
+x-api-depends-on: &api-depends-on
+  postgres:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+
 services:
 
   # ---------------------------------------------------------------------------
@@ -37,7 +108,8 @@ services:
   # ---------------------------------------------------------------------------
   # Redis 8
   # Image: redis:8.0-alpine (D25)
-  # Used for: queue, cache, session, JWT denylist (C2+), Horizon (C2+).
+  # Used for: queue, cache, session, JWT denylist (C2+). Horizon is NOT installed
+  # (ratified 2026-07-28) — workers run Laravel's native queue:work.
   # ---------------------------------------------------------------------------
   redis:
     image: redis:8.0-alpine
@@ -74,7 +146,9 @@ services:
   # ---------------------------------------------------------------------------
   # App services — enabled once the Dockerfiles exist in each app directory.
   # Each app requires postgres + redis healthy before starting.
-  # PHP-FPM api: served on port 9000 internally; expose via a web server in C2+.
+  # api: `php artisan serve` on port 8000 (NOT php-fpm on 9000 — the image has
+  # never run fpm, and that myth already cost this file two wrong port numbers
+  # and a healthcheck that validated an fpm config nobody loaded).
   # frontend SSR: Nitro node-server on port 3000.
   # backoffice SPA: nginx static serve on port 3001 (mapped from container 80).
   #
@@ -92,30 +166,182 @@ services:
     env_file:
       - path: ./api/.env
         required: false
-    environment:
-      # Override DB/Redis to use compose service names (not localhost)
-      DB_HOST: postgres
-      DB_PORT: 5432
-      DB_DATABASE: ${POSTGRES_DB:-beai}
-      DB_USERNAME: ${POSTGRES_USER:-postgres}
-      DB_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      MAIL_HOST: mailpit
-      MAIL_PORT: 1025
+    # Override DB/Redis to use compose service names (not localhost).
+    environment: *api-environment
     ports:
-      - "${API_PORT:-8000}:9000"
+      # The image CMD is `php artisan serve --host=0.0.0.0 --port=8000`, so the
+      # container listens on 8000. This previously published container port 9000
+      # (an fpm convention the image does not follow), which left the API
+      # unreachable from the host while the container still reported healthy.
+      - "${API_PORT:-8000}:8000"
+    depends_on: *api-depends-on
+    healthcheck:
+      # Probe the real HTTP surface. The previous check ran `php-fpm -t`, which
+      # only validates an fpm config file — it returned success even when nothing
+      # was serving, making "healthy" meaningless for this container.
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - beai_network
+
+  # ---------------------------------------------------------------------------
+  # Queue worker — consumes the Redis queue (async scoring, webhook delivery).
+  #
+  # Same image as `api`, different command. `beai:queue-work` is the ONLY
+  # supported way to start a worker: it validates the runtime invariant before
+  # the loop opens and structurally refuses `--tries`, because retry policy
+  # belongs to each job, not to the worker.
+  #
+  # No `container_name`: a fixed name makes the service unscalable, and this is
+  # precisely the service you scale — `--scale worker=0` to silence it locally,
+  # or up when scoring throughput demands it.
+  # ---------------------------------------------------------------------------
+  worker:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    image: beai-api:local
+    restart: unless-stopped
+    env_file:
+      - path: ./api/.env
+        required: false
+    environment: *api-environment
+    # Exec form on purpose: php runs as PID 1 and receives SIGTERM directly, so
+    # the worker finishes its current job and exits cleanly instead of being
+    # killed mid-job by a shell that never forwards the signal.
+    command: ["php", "artisan", "beai:queue-work"]
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      # The healthcheck below probes the `api` service, so the dependency is
+      # declared rather than assumed. Without it the worker starts probing a
+      # host that may not be listening yet and burns its retries on startup
+      # ordering instead of on real failures.
+      api:
+        condition: service_healthy
+    # 1290s = the worker's 1260s job timeout + 30s of headroom.
+    #
+    # Read this before "fixing" it: worst case, `docker compose down` can take
+    # up to ~21 minutes while a scoring job is mid-flight. That is the accepted
+    # cost of never force-killing a legitimate 20-minute job — not a bug, and
+    # not a number to shrink because a teardown once felt slow. Shrinking it
+    # means SIGKILL on a job that was working correctly, and a half-written
+    # evaluation is far more expensive than a slow `down`.
+    stop_grace_period: 1290s
     healthcheck:
-      test: ["CMD-SHELL", "php-fpm -t 2>/dev/null && echo ok"]
+      # The probe reads the BODY, not just the status code, and this is the
+      # whole point rather than a stylistic preference.
+      #
+      # `GET /api/health/queue` returns **HTTP 200 for `degraded`**
+      # (`QueueHealthController.php:79-98`), and `reservationStalled` — a worker
+      # that is up but wedged on a stuck reserved job — is one of the three
+      # inputs to `degraded`. A plain `curl -fsS` fails only on >= 400, so it
+      # would have reported that container **healthy**: the exact failure this
+      # check exists for, waved through. The only 503 the endpoint emits is
+      # heartbeat staleness, i.e. "is the process looping" — which is precisely
+      # the signal a bare `pgrep` already gives, over the network, for more
+      # money.
+      #
+      # It keys on `queue.reservation_stalled` and NOT on `status`, because
+      # `status` also goes `degraded` when `failed.count > 0` — a single
+      # historical failed job would then pin this container unhealthy forever.
+      #
+      # Fails closed: curl error, unparseable body or a missing key all exit 1.
+      #
+      # Two known limits, stated rather than papered over. Both have the same
+      # root cause — this probe asks the API about the SHARED queue, not this
+      # container about itself:
+      #   1. Under `--scale worker=3` all three replicas return byte-identical
+      #      answers, so one wedged replica among healthy ones is invisible.
+      #   2. Stop or break `api` and every worker flips unhealthy while it is
+      #      consuming jobs perfectly well — and `dev.sh:wait_healthy` will fail
+      #      the whole boot on it. `depends_on: api` below narrows the startup
+      #      window; it does nothing for an API that dies later.
+      # The real fix for both is a per-container heartbeat the worker does not
+      # write today — worth building when replicas become real, not before.
+      test:
+        - CMD-SHELL
+        - |
+          body=$$(curl -fsS http://api:8000/api/health/queue) || exit 1
+          printf '%s' "$$body" | php -r 'exit((json_decode(stream_get_contents(STDIN), true)["queue"]["reservation_stalled"] ?? true) ? 1 : 0);'
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      # 60s, and deliberately NOT the 300s heartbeat TTL. An earlier revision
+      # used 300s by analogy with `HEARTBEAT_TTL_SECONDS`, which was wrong twice
+      # over: this probe keys on `queue.reservation_stalled`, not on the
+      # heartbeat, and a freshly booted worker with nothing reserved answers
+      # correctly straight away. Worse, 300s exceeded `wait_healthy`'s own 180s
+      # budget in scripts/dev.sh — the container would still be reporting
+      # `starting` when the script gave up on it.
+      start_period: 60s
+    networks:
+      - beai_network
+
+  # ---------------------------------------------------------------------------
+  # Scheduler — runs Laravel's scheduled tasks (queue pruning, maintenance).
+  #
+  # `onOneServer()` is the guarantee; `replicas: 1` is only the default.
+  #
+  # Stated in that order on purpose. `deploy.replicas: 1` below is NOT a pin —
+  # `docker compose up --scale scheduler=3` overrides it with no error and no
+  # warning. What actually prevents a scheduled task from running twice is the
+  # `->onOneServer()` chained on every scheduled task (`api/bootstrap/app.php`
+  # lines 46 and 50), backed by a lock in whichever cache store is configured —
+  # a Redis key under this stack's `CACHE_STORE: redis`, not a `cache_locks`
+  # row. The store is not named here on purpose; see the anchor's note.
+  # An earlier revision of this comment claimed the replica count was the
+  # guarantee, which directly contradicted `api/bootstrap/app.php:28-31` — two
+  # files asserting opposite things about the same line is how a safety property
+  # gets deleted by someone who read only the reassuring one.
+  # ---------------------------------------------------------------------------
+  scheduler:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    image: beai-api:local
+    restart: unless-stopped
+    env_file:
+      - path: ./api/.env
+        required: false
+    environment: *api-environment
+    command: ["php", "artisan", "schedule:work"]
+    depends_on: *api-depends-on
+    deploy:
+      replicas: 1
+    # Deliberately NO healthcheck, and the reasoning is worth keeping because
+    # the obvious one is a trap.
+    #
+    # A `pgrep -f 'artisan schedule:work'` probe CANNOT FAIL. Docker runs
+    # CMD-SHELL probes through `sh -c`, so that shell's own command line
+    # contains the pattern and pgrep always matches at least itself. It would
+    # report healthy with the scheduler long dead — worse than no probe, because
+    # it looks like supervision.
+    #
+    # The bracket trick (`[a]rtisan`) dodges the self-match, but the check would
+    # still be pointless here: `command:` is exec form, so php is PID 1, and
+    # when PID 1 exits the CONTAINER exits. There is no "process died but the
+    # container lives" state to detect — `restart: unless-stopped` above is the
+    # actual supervision. `schedule:work` exposes no endpoint and writes no
+    # heartbeat, so there is nothing else to interrogate.
+    #
+    # If real scheduler observability is wanted, the answer is a heartbeat
+    # written by a scheduled task and read back, not a process probe.
+    #
+    # `disable: true` is required, and omitting the key is NOT equivalent —
+    # verified by watching this container go unhealthy at t=75s on a real cold
+    # start. This service runs the `api` image, whose Dockerfile declares its
+    # own HEALTHCHECK (`curl -f http://localhost:8000/api/health`). With no
+    # compose-level override the container inherits it and probes an HTTP
+    # server that this command never starts, so it fails forever. `dev.sh`
+    # waits on this service, so the whole boot would have failed on it.
+    healthcheck:
+      disable: true
     networks:
       - beai_network
 
@@ -130,17 +356,28 @@ services:
       - path: ./frontend/.env
         required: false
     environment:
-      NUXT_PUBLIC_API_BASE: http://api:9000/api
+      # SSR fetches run INSIDE the network, so this must be the api service's real
+      # listening port. It said 9000 — an fpm convention the image does not follow —
+      # so every server-side fetch pointed at a port nothing listens on.
+      NUXT_PUBLIC_API_BASE: http://api:8000/api
       NUXT_PUBLIC_APP_ENV: local
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
+    # Depends on `api`, not on postgres/redis. It previously gated on both
+    # databases and on neither the API — but it holds no DB or Redis credential
+    # and cannot be talking to either, while its SSR fetches go straight to
+    # `api:8000` (see NUXT_PUBLIC_API_BASE above). The graph waited on what it
+    # does not use and not on what it does, so SSR could render against an API
+    # that was not listening yet.
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
+      api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:3000/health | grep -q ok || exit 1"]
+      # The SSR runtime image (node:24-slim) ships NEITHER curl NOR wget, so the
+      # previous curl-based probe could never succeed — the container reported
+      # unhealthy forever while actually serving correctly. Node's global fetch
+      # is always present, so use the runtime we already depend on.
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -151,6 +388,13 @@ services:
   backoffice:
     build:
       context: ./backoffice
+      args:
+        # Baked into the JS bundle at build time — the `environment:` entry below
+        # cannot change it, because this is a statically generated SPA. The `/api`
+        # suffix is mandatory: the composables append `/auth/login` to it, and
+        # Laravel's CORS middleware only covers `api/*`, so omitting it yields a
+        # 404 with no CORS headers that the browser reports as a CORS error.
+        NUXT_PUBLIC_API_BASE: "${BACKOFFICE_API_BASE:-http://localhost:8000/api}"
       dockerfile: Dockerfile
     image: beai-backoffice:local
     container_name: beai_backoffice
@@ -159,16 +403,26 @@ services:
       - path: ./backoffice/.env
         required: false
     environment:
-      NUXT_PUBLIC_API_BASE: http://api:9000/api
+      # Inert for this service: the SPA is statically generated and bakes its API
+      # base at build time (see build.args above). Kept correct anyway so it cannot
+      # be copied elsewhere as if it were authoritative.
+      NUXT_PUBLIC_API_BASE: http://api:8000/api
     ports:
       - "${BACKOFFICE_PORT:-3001}:80"
+    # Same correction as `frontend`: it held no DB or Redis credential and was
+    # gating on both. Strictly, nginx can serve the generated SPA with nothing
+    # else running — but every screen it serves is useless until the API answers,
+    # and the browser, not this container, is what calls it. Waiting on `api`
+    # keeps `dev.sh` honest: when it says the stack is up, the stack works.
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
+      api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:80/health 2>&1 | grep -q '200 OK' || wget -qO- http://localhost:80/health | grep -q ok || exit 1"]
+      # nginx answers /health with a 301 to /health/ (directory-style route from
+      # the generated SPA). The previous probe used `wget --spider`, which does
+      # not follow redirects, so it read the 301 as a failure and the container
+      # reported unhealthy while serving correctly. `-L` follows the redirect.
+      test: ["CMD-SHELL", "curl -fsSL http://localhost:80/health >/dev/null || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5

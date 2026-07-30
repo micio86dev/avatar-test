@@ -35,3 +35,4 @@ data/
 .vscode/
 *.swp
 *.swo
+.gga-sweep/

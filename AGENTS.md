@@ -1,4 +1,4 @@
-# BEAI — Business Evaluation AI
+# BEAI — Behavioral Event AI
 
 Multi-tenant platform for **soft-skill assessment via automated AI voice interview**.
 Candidates enter through SSO/magic-link, take an adaptive spoken interview with a
@@ -43,7 +43,7 @@ and a reference for the port, not the final architecture.
 | Layer | Choice |
 |---|---|
 | **API backend** | **Laravel 13 + PHP 8.5 + Eloquent + PostgreSQL 17 (pgvector)**, **API-only** (no Blade UI). **Scramble** (`dedoc/scramble`) generates the OpenAPI spec. Stateless, horizontally scalable. |
-| Cache / Queue / Session | **Redis 8** (+ Laravel Horizon) for async scoring / notifications / webhooks |
+| Cache / Queue / Session | **Redis 8** for async scoring / notifications / webhooks. Workers run Laravel native `queue:work` + `schedule:work`. **Horizon is deferred, NOT installed** (ratified 2026-07-28). |
 | **Frontend** (candidate) | **Nuxt 4 (Vue 3) — SSR**, `@nuxtjs/i18n`. Public interview app; ports the avatar/proctoring TS logic from the demo |
 | **Backoffice** (admin) | **Nuxt 4 (Vue 3) — SPA** (`ssr: false`), `@nuxtjs/i18n`. Separate app, always multilingual |
 | Object storage | S3-compatible (audio, snapshots, transcripts) |
@@ -168,15 +168,28 @@ owning slices (C2+), **not C1**. Do not install or wire any of them during C1.
 
 ---
 
-## Open product decisions (close with client before the related change)
+## Product decisions — mostly RATIFIED 2026-07-28
 
-1. `reliability` formula + "valid competency" threshold feeding the 90% gate (blocks C9).
-2. GDPR retention for audio/video/snapshots/transcripts (blocks production media storage).
-3. Framework versioning vs live projects (pin `framework_version` at project creation).
-4. Retry semantics (re-ask all vs invalid-only; token single-use vs retry reuse).
-5. Time limits / deadline behavior.
-6. Non-English BARS anchors need expert-authored translations (blocks non-EN scoring).
-7. Provider concurrency/cost at scale (HeyGen/Tavus limits; keep provider abstraction clean).
+Full rationale in `openspec/ROADMAP.md`. Summary:
+
+1. **RATIFIED** — `reliability` = `assessed / total` indicators (`-1` excluded from the
+   numerator), already implemented in `AssessableFractionReliability`. Validity threshold
+   **T = 0.5**, env-overridable. **No High/Medium/Low bands** — render the percentage verbatim.
+2. **DEFAULTS SET, LEGAL SIGN-OFF PENDING** — GDPR retention. The purge mechanism is
+   parametric; the durations are a data controller decision. Sign-off MUST also cover
+   `webhook_deliveries.payload` and `participants.display_name`, which postdate the original framing.
+3. **RATIFIED** — `framework_version` pinned at project creation; live projects are never
+   retargeted by a later catalogue revision.
+4. **OPEN** — retry semantics. Gates only the C9 chain-PR 4 (RT-B).
+5. **RATIFIED — out of scope** — the calling system owns candidate scheduling and reminders.
+   BEAI enforces only its short-lived token expiry and has no deadline concept of its own.
+6. **OPEN** — non-English BARS anchors need expert-authored translations (data, not code).
+7. **OPEN** — provider concurrency/cost at scale; revisit under real load.
+8. **RATIFIED** — BEAI holds **no candidate contact data**. `participants` has no contact
+   column by design and that stays; candidate invitations/reminders belong to the calling
+   system. C12 is operator-facing only.
+9. **PARKED** — white-label and the FR-006 multi-test portal are underspecified (two lines of
+   brief, FR-006 marked "Optional"). Removed from C13 scope until a written requirement exists.
 
 ---
 
@@ -197,3 +210,30 @@ table and dependencies.
 - `docs/dev-setup.md` — required local toolchain + Dependency Resolution Policy (D37/D38). See this before any `composer install` / `bun install` in a new environment.
 - `docs/git-flow.md` — Git Flow ×4 + SemVer M.m.p release flow for all four repos.
 - `openspec/changes/project-skeleton-ci/design.md` — D25 Version Catalog (single source of truth for all pinned versions), D37 Dependency Resolution Policy.
+
+---
+
+## Ruling: POSIX tools are correct inside committed shell scripts
+
+**RATIFIED 2026-07-30.** `grep`, `sed`, `cat`, `find` and `ls` are **allowed and
+preferred** in shell scripts committed to these repositories. Do not flag them,
+and do not rewrite them to `rg` / `sd` / `bat` / `fd` / `eza`.
+
+The "use `rg`/`sd`/`bat`/`fd`/`eza` instead" rule is an **agent interactive
+preference** — it governs how an assistant explores a codebase in a session. It
+is not a runtime dependency policy, and applying it to committed scripts is a
+category error with a concrete cost:
+
+- `scripts/dev.sh` states its contract in its own header — *"Requires: Docker +
+  Docker Compose v2. Everything else runs inside containers."* It is the
+  bootstrap path for a fresh clone.
+- `docs/dev-setup.md` enumerates the required local toolchain (PHP 8.5, Composer,
+  Bun 1.3, Node 24, Docker, Playwright browsers, go-task, git, k6). **`rg`, `sd`,
+  `bat`, `fd` and `eza` are not in it**, and adding them is a D37 Dependency
+  Resolution Policy matter, not a style preference.
+- So rewriting `grep` to `rg` in a bootstrap script converts a script that runs
+  anywhere POSIX into one that fails on a machine which satisfies every
+  documented requirement. That is a portability regression bought with nothing.
+
+If a future change adds these tools to `docs/dev-setup.md` as required, revisit
+this ruling then — through SDD, and update this section with it.

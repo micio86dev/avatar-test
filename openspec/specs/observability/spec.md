@@ -257,7 +257,7 @@ NOT be exposed to any external stakeholder dashboard or public status page.
 
 #### Scenario: Pulse records queue depth and throughput
 
-- GIVEN the Laravel queue processing jobs via Redis + Horizon
+- GIVEN the Laravel queue processing jobs via Redis (native `queue:work`; Horizon is not installed)
 - WHEN Pulse collects application health data
 - THEN it records job throughput, failure rates, and current queue depth per queue
 

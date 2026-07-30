@@ -83,10 +83,12 @@ small body text.)
 
 | Token | Value | Usage |
 |-------|-------|-------|
-| `--color-success` | `#22c55e` | Success states, confirmations |
+| `--color-success` | `#22c55e` | Success states, confirmations (non-text: icons/fills only, see §9.1) |
 | `--color-success-light` | `#dcfce7` | Success backgrounds |
-| `--color-warning` | `#f59e0b` | Warning states, time alerts |
+| `--color-success-dark` | `#166534` | Text/icon-safe success (7.1:1 on white, §9.1) — use for BARS success chips |
+| `--color-warning` | `#f59e0b` | Warning states, time alerts (non-text: icons/fills only, see §9.1) |
 | `--color-warning-light` | `#fef3c7` | Warning backgrounds |
+| `--color-warning-dark` | `#92400e` | Text/icon-safe warning (7.1:1 on white, §9.1) — use for BARS warning chips |
 | `--color-error` | `#ef4444` | Error states, validation failures |
 | `--color-error-light` | `#fee2e2` | Error backgrounds |
 | `--color-info` | `#3b82f6` | Informational states |
@@ -313,6 +315,15 @@ components/
 - Organisms may call composables and emit domain-level events.
 - No component may import directly from another repo's code.
 - Every component must have a matching Vitest unit test.
+- **Every clickable element MUST show `cursor: pointer`** — always, in both apps,
+  with no exceptions. Tailwind v4's Preflight no longer sets it on `<button>`, so
+  each app declares it globally in `app/assets/css/main.css` (`@layer base`) for
+  `button`, `[role="button"]`, `a[href]`, `label[for]`, `summary`, `select` and
+  `[tabindex]:not([tabindex="-1"])`. Disabled and `aria-disabled` states use
+  `cursor: not-allowed` so the distinction stays visible. This applies to vendored
+  shadcn-vue source as well — vendored components are not exempt. The cursor is an
+  affordance signal, not decoration: without it interactive elements read as static
+  text, which is also an accessibility regression for pointer users.
 
 ---
 
@@ -459,9 +470,10 @@ The evaluation report is the most complex view:
 ├────────────────────────────────────────────────────────────┤
 │  Competency          │ Score │ Reliability │ Indicators     │
 │  ───────────────────────────────────────────────────────   │
-│  COL (Collaboration) │ 3.67  │ High        │ [4] [3] [4]   │
-│  COM (Communication) │ 4.00  │ High        │ [4] [4] [4]   │
-│  STG (Strategy)      │ 2.33  │ Medium      │ [2] [3] [2]   │
+│  COL (Collaboration) │ 3.67  │ 100%        │ [5] [3] [3]   │
+│  COM (Communication) │ 5.00  │ 100%        │ [5] [5] [5]   │
+│  STG (Strategy)      │ 2.33  │ 83%         │ [3] [3] [1]   │
+│  INN (Innovation)    │ 3.00  │ 67%         │ [3] [–] [3]   │
 │  ...                 │  ...  │  ...        │ ...            │
 ├────────────────────────────────────────────────────────────┤
 │  Excerpts (verbatim from transcript)                        │
@@ -469,9 +481,25 @@ The evaluation report is the most complex view:
 └────────────────────────────────────────────────────────────┘
 ```
 
-- Indicator scores: colored chips (1–2 = error, 3 = warning, 4–5 = success scale).
-- Competency mean: bold, colored by threshold (< 2 = error, 2–3 = warning, > 3 = success).
-- Reliability: text badge.
+- **Indicator scores are the discrete set `{1, 3, 5}` — never 2, never 4, never a
+  decimal.** The LLM matches an answer against the BARS anchors `{5, 3, 1}` and picks the
+  single closest one. A chip rendering `2` or `4` is a bug, not a styling choice.
+  Colored chips map one-to-one: `1 = error`, `3 = warning`, `5 = success`.
+- **`-1` means UNASSESSABLE** (no assessable evidence in the transcript). It is NOT a score.
+  Render it as a neutral/muted chip showing `–` (en dash) with an accessible label such as
+  "not assessable", never as the number `-1` and never on the error/warning/success scale.
+  Unassessable indicators are **excluded from the competency mean** — see the `INN` row above,
+  whose mean is 3.00 from two assessed indicators, not 1.67 from three.
+- Competency mean: bold, a real decimal in `[1, 5]` (the mean of the **assessed** indicators
+  only). Colored by threshold: `< 2.5 = error`, `2.5–3.5 = warning`, `> 3.5 = success`.
+- A competency whose indicators are ALL unassessable has no mean. Render `–` with the same
+  neutral treatment, never `0`.
+- **Reliability: render the value the API returns, verbatim** (a percent string, e.g. `100%`).
+  Do NOT map it to `High` / `Medium` / `Low` word bands — **no band thresholds exist**.
+  The `reliability` formula and the "valid competency" threshold are **open product
+  decision #1** (see `openspec/ROADMAP.md`), still unratified. Inventing bands here would
+  bake an unapproved business rule into the UI, where it would read as authoritative.
+  Once decision #1 is ratified, revisit this line before adding any banding.
 - Excerpts: monospace font (`--font-mono`), verbatim from transcript (validated by substring match).
 
 ---
@@ -496,10 +524,14 @@ All text against its background MUST achieve:
 | white | `--color-accent-dark` (`#b8431e`) | 5.4:1 | ✓ AA (valid text-sized accent alternative) |
 | white | `--color-primary-light` (`#c222d3`) | 4.7:1 | ≈ AA marginal (verify per use-case before body text) |
 | white | `--color-error` (`#ef4444`) | 3.8:1 | ✗ (use `#b91c1c` for text on white) |
+| `--color-success-dark` (`#166534`) | white | 7.1:1 | ✓ AA (verified for BARS `ScoreChip`/`CompetencyMean` text+icon, C11 PR B3) |
+| `--color-warning-dark` (`#92400e`) | white | 7.1:1 | ✓ AA (verified for BARS `ScoreChip`/`CompetencyMean` text+icon, C11 PR B3) |
 
 > ⚠️ Do NOT use `--color-accent` (`#e45526`) for small text on white — it fails the 4.5:1 AA threshold for normal text (3.7:1). Use `--color-accent-dark` (`#b8431e`, 5.4:1) for text-sized accent elements.
 
 > ⚠️ Do NOT use `--color-error` (#ef4444) as text on white. Use `#b91c1c` for error text.
+
+> ⚠️ Do NOT use `--color-success` (`#22c55e`) or `--color-warning` (`#f59e0b`) as text/icon color on white or on their own `-light` background — both measure well under 3:1 (a real @axe-core WCAG failure caught this exact pattern for `--color-success` during C11 PR B2's status badges, see `sdd/admin-dashboards/apply-progress`). Use `--color-success-dark`/`--color-warning-dark` for any text-sized or icon-sized success/warning element (BARS `ScoreChip`, `CompetencyMean`).
 
 ### 9.2 Focus Management
 
