@@ -143,7 +143,7 @@ Chain strategy: feature-branch-chain
 ### Phase 9: Foundation (PR3)
 
 - [x] 9.1 `api/config/queue.php:16`: `'default' => env('QUEUE_CONNECTION', 'database')` → `env('QUEUE_CONNECTION', 'redis')`.
-- [ ] 9.2 Verify/update `api/.env.example` documents `QUEUE_CONNECTION=redis` and `REDIS_CLIENT=phpredis`. **BLOCKED, not skipped** — `.env.example` is denied by this environment's permission settings (env-file access blocked for the agent, confirmed via both `rg` and the `Read` tool). A human must apply this edit.
+- [x] 9.2 Verify/update `api/.env.example` documents `QUEUE_CONNECTION=redis` and `REDIS_CLIENT=phpredis`. **CLOSED 2026-07-30 — NOTHING WAS BROKEN.** This task was carried as BLOCKED on the assumption that the file was wrong; the path was denied to tooling, so nobody could check. Once readable, the file already had `REDIS_CLIENT=phpredis` (line 23), `CACHE_STORE=redis` (39), `QUEUE_CONNECTION=redis` (40), `SESSION_DRIVER=redis` (41) and `MAIL_MAILER=smtp` (29). It had been correct all along. The compose pins remain justified on their own merits — the divergence they guard against is in a developer's local `.env`, not in this template.
 
 ### Phase 10: RED — Driver-Switch Regression Coverage (PR3, TDD)
 
