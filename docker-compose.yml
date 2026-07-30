@@ -40,10 +40,10 @@ x-api-environment: &api-environment
   # Safe for the scheduler lock: `onOneServer()` needs a `LockProvider`, and
   # `Illuminate\Cache\RedisStore` implements it just as `DatabaseStore` does
   # (verified — `RedisStore extends TaggableStore implements CanFlushLocks,
-  # LockProvider`). Follow-up for the api change: `bootstrap/app.php:29-33`
-  # still names `DatabaseStore` and the `cache_locks` table in its comment. That
-  # wording is now stale — the guarantee is unchanged, the store behind it is
-  # not.
+  # LockProvider`). `api/bootstrap/app.php:32` was updated alongside this pin
+  # and now deliberately names no store at all, which is the durable shape:
+  # what the lock requires is that the store be SHARED across processes, and
+  # `CACHE_STORE=file` is the setting that quietly turns it into no lock.
   CACHE_STORE: redis
   # Same table, same reasoning. Left unpinned, this was the third load-bearing
   # driver taking its value from api/.env by accident rather than by decision.
@@ -238,7 +238,7 @@ services:
       # whole point rather than a stylistic preference.
       #
       # `GET /api/health/queue` returns **HTTP 200 for `degraded`**
-      # (`QueueHealthController.php:79-97`), and `reservationStalled` — a worker
+      # (`QueueHealthController.php:79-98`), and `reservationStalled` — a worker
       # that is up but wedged on a stuck reserved job — is one of the three
       # inputs to `degraded`. A plain `curl -fsS` fails only on >= 400, so it
       # would have reported that container **healthy**: the exact failure this
@@ -291,10 +291,12 @@ services:
   # Stated in that order on purpose. `deploy.replicas: 1` below is NOT a pin —
   # `docker compose up --scale scheduler=3` overrides it with no error and no
   # warning. What actually prevents a scheduled task from running twice is the
-  # `->onOneServer()` chained on every task in `api/bootstrap/app.php:34-45`,
-  # backed by a real `cache_locks` row (see the CACHE_STORE note on the anchor).
+  # `->onOneServer()` chained on every scheduled task (`api/bootstrap/app.php`
+  # lines 46 and 50), backed by a lock in whichever cache store is configured —
+  # a Redis key under this stack's `CACHE_STORE: redis`, not a `cache_locks`
+  # row. The store is not named here on purpose; see the anchor's note.
   # An earlier revision of this comment claimed the replica count was the
-  # guarantee, which directly contradicted `api/bootstrap/app.php:29-31` — two
+  # guarantee, which directly contradicted `api/bootstrap/app.php:28-31` — two
   # files asserting opposite things about the same line is how a safety property
   # gets deleted by someone who read only the reassuring one.
   # ---------------------------------------------------------------------------
@@ -330,6 +332,16 @@ services:
     #
     # If real scheduler observability is wanted, the answer is a heartbeat
     # written by a scheduled task and read back, not a process probe.
+    #
+    # `disable: true` is required, and omitting the key is NOT equivalent —
+    # verified by watching this container go unhealthy at t=75s on a real cold
+    # start. This service runs the `api` image, whose Dockerfile declares its
+    # own HEALTHCHECK (`curl -f http://localhost:8000/api/health`). With no
+    # compose-level override the container inherits it and probes an HTTP
+    # server that this command never starts, so it fails forever. `dev.sh`
+    # waits on this service, so the whole boot would have failed on it.
+    healthcheck:
+      disable: true
     networks:
       - beai_network
 

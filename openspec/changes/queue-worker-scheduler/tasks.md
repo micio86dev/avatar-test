@@ -209,41 +209,39 @@ Chain strategy: feature-branch-chain
 
 ### Phase 18: End-to-End Verification (PR5, NOT unit-testable)
 
-> **BLOCKED 2026-07-30 — environment, not code. 18.1–18.6 have NOT been run, and
-> nothing in this phase may be reported as passing.**
+> **VERIFIED 2026-07-30 — the whole phase was run against a real stack.**
 >
-> `docker compose build` stalls indefinitely at
-> `#3 resolve image config for docker-image://docker.io/docker/dockerfile:1`
-> (the `# syntax=docker/dockerfile:1` frontend fetch). A first attempt sat for
-> 45 minutes at 0.0% CPU with no docker image events before being killed.
+> It was initially blocked: `docker compose build` stalled indefinitely at
+> `#3 resolve image config for docker-image://docker.io/docker/dockerfile:1`,
+> sitting 45 minutes at 0.0% CPU. Diagnosed rather than guessed — the registry
+> was reachable (`curl https://registry-1.docker.io/v2/` returned `401`, the
+> correct unauthenticated response), but `~/.docker/config.json` sets
+> `"credsStore": "desktop"` and `docker-credential-desktop get` **hangs**
+> (exit 124 on a 15s timeout). Restarting Docker Desktop did not clear it.
 >
-> Diagnosed, not guessed:
-> - The registry is reachable — `curl https://registry-1.docker.io/v2/` returns
->   `401`, which is the correct unauthenticated response. Not a network fault.
-> - `~/.docker/config.json` sets `"credsStore": "desktop"`, and
->   `docker-credential-desktop get` **hangs** (exit 124 on a 15s timeout).
->   `docker pull` fails with `error getting credentials`.
+> Resolved without touching the developer's Docker setup: the build was run
+> under a throwaway `DOCKER_CONFIG` directory containing `{}` plus a symlink to
+> the real `cli-plugins`. That bypasses the wedged credential helper for the
+> duration of one command and mutates nothing. Editing the real
+> `~/.docker/config.json` would have been an environment workaround dressed up
+> as a verification.
 >
-> So the build never gets past authentication. The fix is on the machine —
-> sign in to / restart Docker Desktop, or unlock the keychain — and it needs a
-> human. Editing `~/.docker/config.json` to drop the credential helper would
-> make the build pass while silently mutating the developer's Docker setup;
-> that is an environment workaround, not a verification.
->
-> **Consequence for review: wrapper PR5 opens as a DRAFT.** Every behavioural
-> claim in the compose healthcheck comments is derived from source (controller
-> status codes, heartbeat TTL, `LockProvider` implementations — each read and
-> cited), but no one has watched these containers reach healthy. `verify` is a
-> phase, not a formality.
+> **The phase earned its keep**: 18.2 caught a defect nothing static would have.
+> The `scheduler` service, having had its compose `healthcheck` removed
+> deliberately, went `unhealthy` at t=75s — because removing the key does not
+> disable the check, it falls back to the `api` image's own Dockerfile
+> `HEALTHCHECK`, which curls an HTTP server `schedule:work` never starts.
+> `dev.sh` waits on that service, so every boot would have failed on it.
+> Fixed with an explicit `healthcheck: disable: true`.
 
-- [ ] 18.1 `docker compose build` — confirm `api`, `worker`, `scheduler`, `frontend`, `backoffice` images build clean. **BLOCKED** — see the note above.
-- [ ] 18.2 `docker compose up -d` — confirm `postgres`, `redis`, `mailpit`, `api`, `worker`, `scheduler`, `frontend`, `backoffice` all reach healthy from cold start; `worker`/`scheduler` only start after `postgres`+`redis` report `service_healthy`. **BLOCKED** — Docker credential helper hangs; see the Phase 18 note.
-- [ ] 18.3 `docker compose logs worker` — confirm the `queue:work` loop started (via `beai:queue-work`) and no immediate crash-restart. **BLOCKED** — Docker credential helper hangs; see the Phase 18 note.
-- [ ] 18.4 Run `./scripts/dev.sh` end to end (migrate, optional seed, health-wait loop) and confirm `--no-worker` still suppresses both `worker` and `scheduler` via `--scale`. **BLOCKED** — Docker credential helper hangs; see the Phase 18 note.
-- [ ] 18.5 `curl http://localhost:8000/api/health/queue` — confirm 200 with the documented shape. **BLOCKED** — Docker credential helper hangs; see the Phase 18 note.
-- [ ] 18.6 `docker compose down` — confirm it returns promptly when the queue is empty (the ~21-minute worst case only applies mid-job, per 17.1's note). **BLOCKED** — Docker credential helper hangs; see the Phase 18 note.
-- [ ] 18.7 Confirm `openspec/config.yaml:14` and `AGENTS.md:46` need no edit (already correct, reverified this phase) — document as closed, not silently skipped.
-- [ ] 18.8 Open wrapper PR5 → `develop`.
+- [x] 18.1 `docker compose build` — confirm `api`, `worker`, `scheduler`, `frontend`, `backoffice` images build clean. **BLOCKED** — see the note above. **DONE** — `docker compose build`: api, worker, scheduler, frontend, backoffice all built clean.
+- [x] 18.2 `docker compose up -d` — confirm `postgres`, `redis`, `mailpit`, `api`, `worker`, `scheduler`, `frontend`, `backoffice` all reach healthy from cold start; `worker`/`scheduler` only start after `postgres`+`redis` report `service_healthy`. **DONE** — cold start: 7 healthy + scheduler running; `worker`/`scheduler` started only after postgres+redis reported `service_healthy`. Caught and fixed the inherited-HEALTHCHECK defect described above.
+- [x] 18.3 `docker compose logs worker` — confirm the `queue:work` loop started (via `beai:queue-work`) and no immediate crash-restart. **DONE** — `restarts=0`, state `running`, no crash-restart. Proven live rather than by log-reading: `/api/health/queue` reports `worker.alive: true` with `last_heartbeat_age_seconds: 1`, so the `beai:queue-work` loop is genuinely running and writing its heartbeat.
+- [x] 18.4 Run `./scripts/dev.sh` end to end (migrate, optional seed, health-wait loop) and confirm `--no-worker` still suppresses both `worker` and `scheduler` via `--scale`. **DONE** — `./scripts/dev.sh` exits 0 end to end; the split wait works (infra+api → migrations → app tier). `--no-worker` confirmed: `worker` and `scheduler` are absent from `docker compose ps` entirely.
+- [x] 18.5 `curl http://localhost:8000/api/health/queue` — confirm 200 with the documented shape. **DONE** — HTTP 200, documented shape exactly: `status: ok`, `worker.alive: true`, `queue.reservation_stalled: false`, `failed.count: 0`.
+- [x] 18.6 `docker compose down` — confirm it returns promptly when the queue is empty (the ~21-minute worst case only applies mid-job, per 17.1's note). **DONE** — returned in **1 second** on an empty queue, confirming the 1290s grace period only applies mid-job.
+- [x] 18.7 Confirm `openspec/config.yaml:14` and `AGENTS.md:46` need no edit (already correct, reverified this phase) — document as closed, not silently skipped. **DONE** — reverified this phase: `openspec/config.yaml:14` and `AGENTS.md:46` both already read "Horizon deferred, NOT installed". No edit needed; closed, not silently skipped.
+- [x] 18.8 Open wrapper PR5 → `develop`. **DONE** — opened as micio86dev/avatar-test#1.
 
 ## Documented, Not Scoped (carried into the spec, not implemented here)
 
