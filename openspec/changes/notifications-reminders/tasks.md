@@ -171,17 +171,17 @@ transport falls back to.
 - [x] 5.2 `config/services.php` — add `'resend' => ['key' => env('RESEND_API_KEY')]`. The transport reads `config('services.resend.key')` when the mailer config carries no explicit `key`. ALREADY PRESENT — Laravel 13 ships `services.resend.key` by default; verified, not assumed.
 - [x] 5.3 RED: assert the transport resolves — `Mail::mailer('resend')` builds without throwing when a key is configured, and that `config('mail.mailers.resend.transport') === 'resend'`. Do **not** hit the network in a test; `phpunit.xml:50` pins `MAIL_MAILER=array` and that stays.
 - [x] 5.4 **MOVED TO wrapper PR6** — `docs/dev-setup.md` lives in the wrapper repo. DONE there. Document the required production env vars (`MAIL_MAILER=resend`, `RESEND_API_KEY`, `MAIL_FROM_ADDRESS`) in `docs/dev-setup.md`. **`MAIL_FROM_ADDRESS` must be on a domain verified in the Resend dashboard** — Resend rejects unverified sender domains, and the failure surfaces as a transport exception inside the queued job, i.e. a `failed` notification row rather than an obvious boot error. The current default is `hello@example.com` (`config/mail.php:113-116`), which will not send.
-- [ ] 5.5 Confirm `RESEND_API_KEY` is a deployment secret on Railway and is **never** committed. It is a credential, so it belongs in the platform's variable store, not in `.env.example` beyond a name-only placeholder.
+- [ ] 5.5 **BLOCKED — there is nowhere to put it yet, verified 2026-07-30.** `RESEND_API_KEY` must be a deployment secret on Railway. Checked via the Railway API: the workspace's `avatar-test` project runs the **legacy Astro demo** — its variables are `DATABASE_PATH` (SQLite), `SNAPSHOTS_PATH`, `LIVEAVATAR_*` and `TAVUS_*`. There is **no BEAI service, no Postgres, no `DATABASE_URL`**: BEAI has never been deployed. So this task cannot be completed by anyone until a BEAI Railway project exists, and it needs a named owner for the Resend account and a **verified sender domain** regardless. `MAIL_FROM_ADDRESS` currently defaults to `hello@example.com`, which Resend rejects — and that failure surfaces inside the queued job as a `failed` row, not at boot.
 - [x] 5.6 Gates: pest, pint, phpstan.
 - [x] 5.7 Open api PR5 → PR4 branch. DONE — #35.
 
 ## wrapper PR6 — Mail Driver on the Shared Anchor
 
-- [ ] 6.1 Open `api/.env.example` and confirm whether `MAIL_MAILER` is set there. **This could not be done during design or this phase** — the `api/.env*` path is denied by the agent's tool permissions, which is a permission boundary, not a filesystem error. A human must read it.
+- [ ] 6.1 **BLOCKED — hard permission boundary, re-confirmed 2026-07-30 via two different tools.** Open `api/.env.example` and confirm whether `MAIL_MAILER` is set there, then add `QUEUE_CONNECTION=redis` / `REDIS_CLIENT=phpredis` (carried over from queue-worker-scheduler task 9.2). The `api/.env*` path is denied to the agent's tooling — `Read` returns "File is in a directory that is denied by your permission settings" and shell access to it is refused. This is a permission setting, not a missing file. It matters because `scripts/dev.sh:ensure_env` copies `.env.example` → `.env` on a fresh clone, so anyone running the API **outside** Docker inherits the wrong queue driver. Compose overrides it for the container path only.
 - [x] 6.2 Add `MAIL_MAILER: smtp` to the existing `x-api-environment` anchor in `docker-compose.yml` — **not** a new anchor (Reconciliation §1), and **`smtp`, not `resend`**: this anchor configures the local compose stack, where mail must reach Mailpit. Resend is production-only and is selected by the deployment environment (PR5). One line; it reaches `api`, `worker` and `scheduler` at once. Remove the `⚠️ COORDINATION SEAM` comment block that `queue-worker-scheduler` PR5 left on the anchor, since it will no longer describe reality.
 - [x] 6.3 Verify end to end: `docker compose up -d`, trigger a dead webhook delivery, confirm the mail lands in the Mailpit UI at `http://localhost:8025` — not in a container log file. DONE — probe mail sent through the running stack landed in the Mailpit inbox (total: 1).
-- [ ] 6.4 Bump the `api` submodule pointer to the merged tracker commit on `api/develop`.
-- [ ] 6.5 Open wrapper PR6 → `develop`.
+- [x] 6.4 Bump the `api` submodule pointer to the merged tracker commit on `api/develop`. **DONE 2026-07-30** — `api/develop` is at `6eb39a1` (tracker #36 carrying PR1–PR5).
+- [x] 6.5 Open wrapper PR6. **DONE** — micio86dev/avatar-test#4, based on `feature/assessment-engine` rather than `develop` for the same reason queue-worker-scheduler PR5 was: `docker-compose.yml` does not exist on the wrapper's `develop`.
 
 ## Documented, Not Scoped (carried into the spec, not implemented here)
 
@@ -193,6 +193,26 @@ transport falls back to.
 
 ## Open Questions (unchanged from design, still unratified)
 
-- [ ] Recipient roles default to `admin` + `operator`, `viewer` excluded. A proposal assumption, **not** client-ratified — config-driven, so confirmable without a code change.
-- [ ] Suppression window default 900 s, and whether "first alert, then a carried count on the next send" is acceptable in place of a true scheduled digest.
+- [x] **RATIFIED 2026-07-30 — recipient roles are `admin` + `operator`, `viewer` excluded.**
+      Ratified by the assistant under the standing "complete all development" directive, on the
+      2026-07-28 precedent where the product owner delegated the open decisions. Stated plainly so
+      it is not mistaken for a client decision: **this is a default, not a requirement gathered from
+      the client.**
+      Reasoning: `viewer` is a read-only dashboard role. Being able to look at results is not a
+      reason to be paged at 3am, and adding `viewer` would enlarge the blast radius of every storm
+      by exactly the people who cannot act on it. `admin` and `operator` are the roles that can fix
+      a broken endpoint or re-run a failed evaluation.
+      **Cost to change: one line in `config/notifications.php`.** No migration, no code, no redeploy
+      of anything but config — which is precisely why it was built config-driven.
+- [x] **RATIFIED 2026-07-30 — suppression window 900 s, carried-count model accepted.**
+      Same caveat as above: an assistant default under a standing directive, not a client decision.
+      Reasoning on the WINDOW: 15 minutes is long enough that a provider outage produces one email
+      rather than one per candidate, and short enough that a second, unrelated incident is not
+      hidden for a working day. It is env-overridable per deployment and has a per-type override map.
+      Reasoning on the MODEL: a true scheduled digest is better UX and was rejected on cost, not on
+      merit — it needs the SCHEDULER as a second infrastructure dependency, and C12 was deliberately
+      scoped to need only the worker. The carried count buys the property that actually matters
+      (the operator can distinguish 1 failure from 200) without that dependency. Revisit in C13,
+      where the scheduler is already in scope.
+      **Cost to change: one config value.**
 - [x] ~~Production mail transport owner.~~ **RATIFIED 2026-07-30 — Resend** (api PR5). Still needs a named owner for the account, the verified sender domain and the `RESEND_API_KEY` secret on Railway.
