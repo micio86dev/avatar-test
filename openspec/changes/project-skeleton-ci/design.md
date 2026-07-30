@@ -259,6 +259,7 @@ Authoritative reference for all pinned versions used in C1. Update this table wh
 | `dedoc/scramble` | `^0.13` | OpenAPI spec generation (bumped from `^0.12`: 0.12 supports Laravel ≤12 only; 0.13 adds Laravel 13) |
 | `tymon/jwt-auth` | `^2.2` | JWT auth (not wired in C1; wired in C2) |
 | `spatie/laravel-permission` | `^6.0` | RBAC — teams mode (not wired in C1) |
+| `resend/resend-php` | `^1.7` | Production mail transport (C12, ratified 2026-07-30). Laravel 13.20 ships `Illuminate\Mail\Transport\ResendTransport` first-party and `config/mail.php` already declares the `resend` mailer — this package is what the transport type-hints (`Resend\Contracts\Client`), so without it the mailer throws at build time rather than at boot. Local development stays on Mailpit; this is production only. |
 | `laravel/pint` | `^1.18` | PHP code formatter (CI lint + pre-commit) |
 | `captainhook/captainhook` | `^5.24` | PHP pre-commit hook runner |
 | `phpstan/phpstan` | `^2.0` | PHP static analysis (required CI step; see D28) |
