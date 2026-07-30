@@ -191,6 +191,51 @@ docker build -t beai-backoffice ./backoffice
 
 ---
 
+## Mail
+
+Two different transports, on purpose. They are not alternatives to choose
+between — they belong to different environments.
+
+### Local — Mailpit, nothing to configure
+
+`docker-compose.yml` pins `MAIL_MAILER: smtp` on the shared `x-api-environment`
+anchor, alongside `MAIL_HOST: mailpit` and `MAIL_PORT: 1025`. It reaches `api`,
+`worker` **and** `scheduler` together, which matters: the process that actually
+sends operator alerts is the worker, and a worker left on the `log` driver
+writes every alert into a container filesystem nobody reads.
+
+Read the caught mail at **http://localhost:8025**. Nothing ever leaves your
+machine.
+
+Verify the wiring after a change:
+
+```bash
+docker compose exec api php artisan tinker --execute="Mail::raw('probe', fn(\$m) => \$m->to('you@example.test')->subject('probe'));"
+curl -s http://localhost:8025/api/v1/messages | head
+```
+
+### Production — Resend
+
+Ratified 2026-07-30. Laravel 13.20 ships the transport first-party; the
+`resend/resend-php` package (D25) is what it type-hints.
+
+| Variable | Value | Notes |
+|---|---|---|
+| `MAIL_MAILER` | `resend` | Set per environment. **Never** in the compose stack — that is local. |
+| `RESEND_API_KEY` | *(secret)* | A credential: Railway's variable store, never committed. `.env.example` may carry the NAME only. |
+| `MAIL_FROM_ADDRESS` | a verified sender | Must be on a domain verified in the Resend dashboard. |
+
+**The failure mode to know about.** An unverified sender domain, or a missing
+key, does not fail at boot. It throws inside the queued notification job, so it
+surfaces as a `failed` row in `notification_logs` — visible on the operator
+dashboard, but only if someone looks. The default `MAIL_FROM_ADDRESS` is
+`hello@example.com`, which Resend rejects; changing it is not optional.
+
+Tests never touch either transport: `api/phpunit.xml` pins `MAIL_MAILER=array`,
+and a test asserts that pin still holds.
+
+---
+
 ## References
 
 - Version Catalog: `openspec/changes/project-skeleton-ci/design.md` — section D25

@@ -57,17 +57,17 @@ x-api-environment: &api-environment
   REDIS_PORT: 6379
   MAIL_HOST: mailpit
   MAIL_PORT: 1025
-  # ⚠️ COORDINATION SEAM — notifications-reminders (C12), design.md D7.
+  # `smtp`, so local mail reaches the Mailpit service above. Without this it
+  # resolves to config/mail.php's default of `log`, and the process that
+  # actually sends operator alerts is the `worker` service below — a worker on
+  # the `log` driver writes every alert into a container filesystem nobody
+  # reads. That is the failure C12 flagged as CRITICAL, and it closes here.
   #
-  # MAIL_MAILER is deliberately NOT set here, so it resolves to config/mail.php's
-  # default of `log`. That is fine today, because nothing sends mail yet — and it
-  # is a silent failure the moment C12 lands: the process that actually sends
-  # operator alerts is the `worker` service below, and a worker on the `log`
-  # driver writes every alert into a container filesystem nobody reads. Mailpit
-  # is already running and MAIL_HOST/MAIL_PORT already point at it, so C12 needs
-  # exactly one line — `MAIL_MAILER: smtp` — added to THIS anchor, and it reaches
-  # api, worker and scheduler at once. That choice is C12's to make, not this
-  # change's, which is why the seam is documented rather than pre-empted.
+  # `smtp`, NOT `resend`. Resend is the production transport (C12 api PR5) and
+  # is selected by the deployment environment, which has a real API key and a
+  # verified sender domain. Pointing local development at it would send real
+  # mail from a developer's machine on someone's account.
+  MAIL_MAILER: smtp
 
 # Postgres and Redis must both be healthy before anything that runs jobs starts.
 x-api-depends-on: &api-depends-on
