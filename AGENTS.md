@@ -210,3 +210,30 @@ table and dependencies.
 - `docs/dev-setup.md` — required local toolchain + Dependency Resolution Policy (D37/D38). See this before any `composer install` / `bun install` in a new environment.
 - `docs/git-flow.md` — Git Flow ×4 + SemVer M.m.p release flow for all four repos.
 - `openspec/changes/project-skeleton-ci/design.md` — D25 Version Catalog (single source of truth for all pinned versions), D37 Dependency Resolution Policy.
+
+---
+
+## Ruling: POSIX tools are correct inside committed shell scripts
+
+**RATIFIED 2026-07-30.** `grep`, `sed`, `cat`, `find` and `ls` are **allowed and
+preferred** in shell scripts committed to these repositories. Do not flag them,
+and do not rewrite them to `rg` / `sd` / `bat` / `fd` / `eza`.
+
+The "use `rg`/`sd`/`bat`/`fd`/`eza` instead" rule is an **agent interactive
+preference** — it governs how an assistant explores a codebase in a session. It
+is not a runtime dependency policy, and applying it to committed scripts is a
+category error with a concrete cost:
+
+- `scripts/dev.sh` states its contract in its own header — *"Requires: Docker +
+  Docker Compose v2. Everything else runs inside containers."* It is the
+  bootstrap path for a fresh clone.
+- `docs/dev-setup.md` enumerates the required local toolchain (PHP 8.5, Composer,
+  Bun 1.3, Node 24, Docker, Playwright browsers, go-task, git, k6). **`rg`, `sd`,
+  `bat`, `fd` and `eza` are not in it**, and adding them is a D37 Dependency
+  Resolution Policy matter, not a style preference.
+- So rewriting `grep` to `rg` in a bootstrap script converts a script that runs
+  anywhere POSIX into one that fails on a machine which satisfies every
+  documented requirement. That is a portability regression bought with nothing.
+
+If a future change adds these tools to `docs/dev-setup.md` as required, revisit
+this ruling then — through SDD, and update this section with it.

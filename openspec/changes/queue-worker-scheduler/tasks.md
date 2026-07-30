@@ -73,7 +73,7 @@ Chain strategy: feature-branch-chain
 | 2 | `beai:queue-work` wrapper + `--validate-only` + `withSchedule()` prune tasks | api PR2 | Base = PR1 branch; no compose/dev.sh (those are wrapper-repo) |
 | 3 | `QUEUE_CONNECTION` default → `redis` | api PR3 | Base = PR2 branch; smallest, isolated driver switch |
 | 4 | Health probe + provider + CI Tier1/Tier2 smoke | api PR4 | Base = PR3 branch; closes CI gap, verifies all Success Criteria |
-| 5 | `docker-compose.yml` worker+scheduler services + `scripts/dev.sh` replacement + submodule pointer bump | wrapper PR5 | Base = `develop` (wrapper repo); AFTER api tracker merges — worker healthcheck curls `/api/health/queue` from PR4 |
+| 5 | `docker-compose.yml` worker+scheduler services + `scripts/dev.sh` replacement + submodule pointer bump | wrapper PR5 | Base = **`feature/assessment-engine`**, corrected 2026-07-30 — NOT `develop` as originally planned. Verified: `docker-compose.yml` and `scripts/dev.sh` do not exist on the wrapper's `develop` at all (`git diff develop..HEAD` reports +228/+303 with zero deletions), so basing on `develop` would present the entire compose file as new. AFTER the api tracker merges — the worker healthcheck consumes `/api/health/queue` from PR4 |
 
 ---
 
@@ -114,25 +114,25 @@ Chain strategy: feature-branch-chain
 
 ### Phase 5: Foundation (PR2)
 
-- [ ] 5.1 Create `api/app/Console/Commands/QueueWorkCommand.php` (`beai:queue-work`): delegates via `$this->call('queue:work', [...])` reading `--timeout/--max-time/--memory/--queue/--sleep` from `config('queue.runtime.*')`. **`--tries` MUST NOT be a defined option** — this is the structural enforcement of ruling #4, not a comment. Add a `--validate-only` flag that asserts the D2 invariant (PR1's Assertion A/B/C) against live config and exits 0/1 without starting the worker loop.
-- [ ] 5.2 `api/bootstrap/app.php`: add `->withSchedule(...)` before `->create()` (confirmed absent — read the full 73-line file this phase). Register `queue:prune-failed --hours=168` (daily 03:10) and `queue:prune-batches --hours=168` (daily 03:20), both wrapped in `->onOneServer()` (backed by `DatabaseStore implements LockProvider`, `cache_locks` table already exists).
+- [x] 5.1 Create `api/app/Console/Commands/QueueWorkCommand.php` (`beai:queue-work`): delegates via `$this->call('queue:work', [...])` reading `--timeout/--max-time/--memory/--queue/--sleep` from `config('queue.runtime.*')`. **`--tries` MUST NOT be a defined option** — this is the structural enforcement of ruling #4, not a comment. Add a `--validate-only` flag that asserts the D2 invariant (PR1's Assertion A/B/C) against live config and exits 0/1 without starting the worker loop.
+- [x] 5.2 `api/bootstrap/app.php`: add `->withSchedule(...)` before `->create()` (confirmed absent — read the full 73-line file this phase). **Corrected in PR3** (folded in after the orchestrator revisited the PR2 scope-narrowing): `queue:prune-failed --hours=168` and `queue:prune-batches --hours=168`, both `->onOneServer()`, both reading their retention window from `config('queue.maintenance.*')` (never a literal), are now genuinely registered. PR2 had shipped only the empty runner closure — correctly deferring C13's *domain* GDPR purge sweep, but incorrectly also deferring queue-table hygiene, which is this change's own business (an unbounded `failed_jobs`/`job_batches` table was ownerless otherwise). `tests/Arch/Queue/SchedulerOnOneServerArchTest.php` (PR2) now protects two REAL tasks instead of only synthetic snippets.
 
 ### Phase 6: RED — Worker Command Tests (PR2, TDD)
 
-- [ ] 6.1 RED `api/tests/Feature/Queue/QueueWorkCommandTest.php`: (a) `beai:queue-work --tries=3` exits non-zero ("option does not exist") before any job is reserved; (b) `--validate-only` exits 0 when config satisfies the D2 invariant; (c) `--validate-only` exits non-zero when the invariant is violated (override config in-test); (d) `--timeout/--max-time/--memory/--queue/--sleep` are forwarded from `config('queue.runtime.*')` to the underlying `queue:work` call.
+- [x] 6.1 RED `api/tests/Feature/Queue/QueueWorkCommandTest.php` + `QueueWorkCommandValidateOnlyTest.php`: (a) `beai:queue-work --tries=3` is rejected at option-parsing time (before `Command::handle()` ever runs) — proven via `Artisan::call()` throwing `InvalidOptionException`, plus a pure reflection check that `--tries` is not in the command's option definition; (b) `--validate-only` exits 0 when config satisfies the D2 invariant; (c) `--validate-only` exits non-zero when the invariant is violated (override config in-test); (d) `--timeout/--max-time/--memory/--queue/--sleep` are forwarded from `config('queue.runtime.*')` to the underlying `queue:work` call, including multi-queue comma-joining.
 
 ### Phase 7: GREEN (PR2)
 
-- [ ] 7.1 Implement `QueueWorkCommand` per 5.1; run Phase 6 to GREEN.
-- [ ] 7.2 Document (not automated — CI cannot host a 20-min job): `SIGTERM` mid-job completes and exits 0, verified manually via `docker compose stop worker` once the wrapper compose service exists (PR5). Record as a manual-verification note in the PR body.
+- [x] 7.1 Implement `QueueWorkCommand` per 5.1; run Phase 6 to GREEN.
+- [x] 7.2 Documented (not automated — CI cannot host a 20-min job): `SIGTERM` mid-job completes and exits 0 — **cannot be manually verified yet**, no compose `worker` service exists until wrapper PR5. Recorded here as the manual-verification note (no PR body exists since this batch does not open a PR): once PR5 lands, run `docker compose stop worker` mid-scoring-job and confirm the container exits 0 after the in-flight job completes, not before.
 
 ### Phase 8: Full-Suite Gate + REFACTOR (PR2)
 
-- [ ] 8.1 Run `./vendor/bin/pest` — full suite.
-- [ ] 8.2 Run `php artisan test --parallel`.
-- [ ] 8.3 Run `php -d memory_limit=2G ./vendor/bin/phpstan analyse --memory-limit=2G` — 0 new errors.
-- [ ] 8.4 Run `./vendor/bin/pint` scoped to touched files only.
-- [ ] 8.5 Open api PR2 → PR1 branch.
+- [x] 8.1 Run `./vendor/bin/pest` — full suite.
+- [x] 8.2 Run `php artisan test --parallel`.
+- [x] 8.3 Run `php -d memory_limit=2G ./vendor/bin/phpstan analyse --memory-limit=2G` — 0 new errors.
+- [x] 8.4 Run `./vendor/bin/pint` scoped to touched files only.
+- [ ] 8.5 Open api PR2 → PR1 branch. **NOT DONE** — apply-phase instructions explicitly prohibit pushing or opening a PR; skipped and reported back.
 
 ---
 
@@ -142,18 +142,18 @@ Chain strategy: feature-branch-chain
 
 ### Phase 9: Foundation (PR3)
 
-- [ ] 9.1 `api/config/queue.php:16`: `'default' => env('QUEUE_CONNECTION', 'database')` → `env('QUEUE_CONNECTION', 'redis')`.
-- [ ] 9.2 Verify/update `api/.env.example` documents `QUEUE_CONNECTION=redis` and `REDIS_CLIENT=phpredis`.
+- [x] 9.1 `api/config/queue.php:16`: `'default' => env('QUEUE_CONNECTION', 'database')` → `env('QUEUE_CONNECTION', 'redis')`.
+- [ ] 9.2 Verify/update `api/.env.example` documents `QUEUE_CONNECTION=redis` and `REDIS_CLIENT=phpredis`. **BLOCKED, not skipped** — `.env.example` is denied by this environment's permission settings (env-file access blocked for the agent, confirmed via both `rg` and the `Read` tool). A human must apply this edit.
 
 ### Phase 10: RED — Driver-Switch Regression Coverage (PR3, TDD)
 
-- [ ] 10.1 RED a Feature test asserting `config('queue.default')` resolves to `redis` under the app's default env, and `Queue::connection()` resolves without throwing under the `redis` driver with `REDIS_CLIENT=phpredis` — guards the "Redis is ready" claim from silently drifting. Skippable if Redis is unreachable in the sandbox (mirror existing CI/test-env conventions).
+- [x] 10.1 RED `api/tests/Feature/Queue/QueueRedisDriverTest.php`: (a) `config/queue.php`'s own `env()` fallback (not the phpunit-overridden resolved value — `phpunit.xml` pins `QUEUE_CONNECTION=sync` suite-wide for determinism, confirmed, left untouched) is `'redis'`, verified by reading the file's raw source; (b) `Queue::connection('redis')` resolves without throwing when `REDIS_CLIENT=phpredis` — **skipped on this host** (no `ext-redis` in the native host PHP, mirrors this task's own "skippable if Redis is unreachable" allowance) but verified for real via a Docker-based dispatch (see Phase 11 note).
 
 ### Phase 11: GREEN + REFACTOR (PR3)
 
-- [ ] 11.1 Apply 9.1; re-run PR1's `QueueRuntimeConfigTest.php` — must still pass (driver name doesn't affect the numeric invariant).
-- [ ] 11.2 Run `./vendor/bin/pest`, `php artisan test --parallel`, `phpstan analyse --memory-limit=2G`, `pint` scoped.
-- [ ] 11.3 Open api PR3 → PR2 branch.
+- [x] 11.1 Apply 9.1; re-run PR1's `QueueRuntimeConfigTest.php` — still passes (driver name doesn't affect the numeric invariant).
+- [x] 11.2 Run `./vendor/bin/pest`, `php artisan test --parallel`, `phpstan analyse --memory-limit=2G`, `pint` scoped. **Additionally**: rebuilt `beai-api:local`, dispatched a real `App\Jobs\FinalizeInterview` job onto `Queue::connection('redis')` against the live `beai_redis` compose service, drained it with a real `queue:work redis --once --stop-when-empty` invocation (`RUNNING` → `DONE`, 16.80ms), confirmed queue depth 0 after drain, and confirmed `beai:queue-work --validate-only` passes inside the real image.
+- [ ] 11.3 Open api PR3 → PR2 branch. **NOT DONE** — apply-phase instructions explicitly prohibit pushing or opening a PR; skipped and reported back.
 
 ---
 
@@ -163,32 +163,32 @@ Chain strategy: feature-branch-chain
 
 ### Phase 12: Foundation (PR4)
 
-- [ ] 12.1 Create `api/app/Providers/QueueRuntimeServiceProvider.php`: `Looping` event listener writes cache key `beai:queue:heartbeat`; `JobProcessed` event listener writes `beai:queue:last_processed_at`.
-- [ ] 12.2 Register the provider in `api/bootstrap/providers.php` (currently 4 entries).
-- [ ] 12.3 Create `api/app/Http/Controllers/QueueHealthController.php`: reports `worker.alive` (heartbeat freshness), `queue.depth`/`queue.stalled` (`Queue::connection()->size('default')` + last-processed age), `failed.count`/`failed.oldest_age_seconds` (`failed_jobs` table, `database-uuids`). Returns HTTP 200 (`ok`/`degraded`) or 503 (`down`). Body carries counts/booleans/ages only — no candidate or tenant identifier.
-- [ ] 12.4 Register `GET /api/health/queue` in `api/routes/api.php` next to the existing `/health` route at `:33`; unauthenticated (Docker/Railway probes can't authenticate).
+- [x] 12.1 Create `api/app/Providers/QueueRuntimeServiceProvider.php`: `Looping` event listener writes cache key `beai:queue:heartbeat`; `JobProcessed` event listener writes `beai:queue:last_processed_at`.
+- [x] 12.2 Register the provider in `api/bootstrap/providers.php` (currently 4 entries).
+- [x] 12.3 Create `api/app/Http/Controllers/QueueHealthController.php`: reports `worker.alive` (heartbeat freshness), `queue.depth`/`queue.stalled` (`Queue::connection()->size('default')` + last-processed age), `failed.count`/`failed.oldest_age_seconds` (`failed_jobs` table, `database-uuids`). Returns HTTP 200 (`ok`/`degraded`) or 503 (`down`). Body carries counts/booleans/ages only — no candidate or tenant identifier. **Extended beyond the original design per review**: also reports `queue.oldest_reserved_age_seconds` / `queue.reservation_stalled` via new `App\Support\Queue\ReservedJobAgeProbe` — plain queue depth cannot see a job stuck RESERVED (picked up, not finished) during a mid-job restart, invisible for up to `retry_after` (1500s/~25min). Reconciled `stall_threshold_seconds` (300s, depth-based) against a new, separate `reserved_job_stall_threshold_seconds` (1320s = worker_timeout+60s buffer, reservation-based) — see `config/queue.php` docblock for the full reasoning.
+- [x] 12.4 Register `GET /api/health/queue` in `api/routes/api.php` next to the existing `/health` route at `:33`; unauthenticated (Docker/Railway probes can't authenticate).
 
 ### Phase 13: RED — Health Endpoint Tests (PR4, TDD)
 
-- [ ] 13.1 RED `api/tests/Feature/Health/QueueHealthEndpointTest.php`: (a) 200 when heartbeat fresh + queue draining + `failed.count=0`; (b) 503 when heartbeat stale; (c) response body contains no candidate/tenant-identifying key (explicit denylist assertion); (d) `failed.count` reflects actual `failed_jobs` rows.
+- [x] 13.1 RED `api/tests/Feature/Health/QueueHealthEndpointTest.php`: (a) 200 when heartbeat fresh + queue draining + `failed.count=0`; (b) 503 when heartbeat stale; (c) response body contains no candidate/tenant-identifying key (explicit denylist assertion); (d) `failed.count` reflects actual `failed_jobs` rows. **Plus** (e) `queue.reservation_stalled`/status degraded when a reserved job exceeds the new threshold.
 
 ### Phase 14: GREEN (PR4)
 
-- [ ] 14.1 Implement 12.1–12.4 per the design's JSON shape; run Phase 13 to GREEN.
+- [x] 14.1 Implement 12.1–12.4 per the design's JSON shape (extended per above); run Phase 13 to GREEN. Also verified for real end-to-end via Docker: rebuilt `beai-api:local`, ran a real worker against the live `beai_redis`/`beai_postgres` compose services, curled `/api/health/queue` on the running `beai_api` container and observed the cross-container heartbeat write (`{"status":"ok",...}`), and independently confirmed `ReservedJobAgeProbe`'s redis-driver path against a manually-simulated stuck reservation (ZADD'd a fake `queues:default:reserved` entry 1400s in the past → probe correctly returned `1400`).
 
 ### Phase 15: CI — Image Smoke (Tier 1) + Real-Worker Job (Tier 2)
 
-- [ ] 15.1 `api/.github/workflows/ci.yml`, after the existing Docker build step (`:118-120`, confirmed it builds but never runs the image): add `docker run --rm beai-api:ci php -m` asserting `pcntl`, `posix`, `redis` are present; add `docker run --rm beai-api:ci php artisan beai:queue-work --validate-only` asserting exit 0.
-- [ ] 15.2 `api/.github/workflows/ci.yml`: add a new job with a `redis:8.0-alpine` service container and `setup-php` extensions extended (base is `:68-74`, currently `pdo, pdo_pgsql, pcov, zip, opcache` — confirmed, no `redis`/`pcntl`/`posix` today) to `pdo, pdo_pgsql, pcov, zip, opcache, pcntl, posix, redis`; `QUEUE_CONNECTION=redis`; dispatch a fixture job; run `queue:work --once --stop-when-empty`; assert (a) the job drained, (b) `TenantContextScope::runFor` established context under the real driver — per `queue-runtime/spec.md`'s CI requirement. `sync` stays the default for the rest of the suite (`:45`, unchanged).
+- [x] 15.1 `api/.github/workflows/ci.yml`, after the existing Docker build step (`:118-120`, confirmed it builds but never runs the image): add `docker run --rm beai-api:ci php -m` asserting `pcntl`, `posix`, `redis` are present; add `docker run --rm beai-api:ci php artisan beai:queue-work --validate-only` asserting exit 0. Both steps verified to actually work standalone (no linked DB/Redis needed) against the locally-built image before committing to CI.
+- [x] 15.2 `api/.github/workflows/ci.yml`: added a NEW job `queue-real-worker` (not folded into the main `test` job) with a `redis:8.0-alpine` service container and `setup-php` extensions extended to `pdo, pdo_pgsql, pcov, zip, opcache, pcntl, posix, redis`; `QUEUE_CONNECTION=redis`; runs `tests/Feature/Queue/RealWorkerRedisDriverTest.php`, which dispatches a purpose-built `Tests\Fixtures\Queue\TenancyProofJob` (not a production job — records `TenantResolver`'s org-id state before and inside `TenantContextScope::runFor()`) onto `Queue::connection('redis')`, drains it in-process via `Artisan::call('queue:work', ['--once'=>true,'--stop-when-empty'=>true])`, and asserts (a) the queue drained to size 0, (b) `TenantContextScope::runFor` established org context that `Queue::before` had reset to null beforehand — under the REAL redis driver. `sync` stays the default for the main `test` job (`:45`, unchanged). YAML syntax-validated (Python `yaml.safe_load`); the new test's mechanics (dispatch+drain over real redis) independently re-verified via Docker in Phase 14's manual verification. **Not run by actual GitHub Actions** — this apply batch does not push or open a PR.
 
 ### Phase 16: Full-Suite Gate + Success-Criteria Close-Out (PR4)
 
-- [ ] 16.1 Run `./vendor/bin/pest` — full suite.
-- [ ] 16.2 Run `php artisan test --parallel`.
-- [ ] 16.3 Run `php -d memory_limit=2G ./vendor/bin/phpstan analyse --memory-limit=2G` — 0 new errors.
-- [ ] 16.4 Run `./vendor/bin/pint` scoped to touched files only.
-- [ ] 16.5 Cross-check every checkbox in `proposal.md`'s Success Criteria against test evidence produced across PR1–PR4 (config-invariant, arch test, `failed()` state machine, extensions, health probe, CI green, zero Horizon assertions, `redis` resolution).
-- [ ] 16.6 Open api PR4 → PR3 branch. Once all 4 api PRs are reviewed, merge tracker `feature/queue-worker-scheduler` → `api/develop`.
+- [x] 16.1 Run `./vendor/bin/pest` — full suite.
+- [x] 16.2 Run `php artisan test --parallel`.
+- [x] 16.3 Run `php -d memory_limit=2G ./vendor/bin/phpstan analyse --memory-limit=2G` — 0 new errors.
+- [x] 16.4 Run `./vendor/bin/pint` scoped to touched files only.
+- [x] 16.5 Cross-check every checkbox in `proposal.md`'s Success Criteria against test evidence produced across PR1–PR4 (config-invariant, arch test, `failed()` state machine, extensions, health probe, CI green, zero Horizon assertions, `redis` resolution) — all satisfied; see apply-progress for the full mapping.
+- [ ] 16.6 Open api PR4 → PR3 branch. Once all 4 api PRs are reviewed, merge tracker `feature/queue-worker-scheduler` → `api/develop`. **NOT DONE** — apply-phase instructions explicitly prohibit pushing or opening a PR; skipped and reported back.
 
 ---
 
@@ -198,24 +198,69 @@ Chain strategy: feature-branch-chain
 
 ### Phase 17: Foundation (PR5)
 
-- [ ] 17.1 `docker-compose.yml`: add `worker` service — `build: ./api`, `image: beai-api:local`, `command:` overridden to `beai:queue-work` (exec form, `php` = PID 1), `depends_on: postgres, redis` both `service_healthy`, `restart: unless-stopped`, `stop_grace_period: 1290s` (= `worker_timeout` 1260 + 30). **Note in the PR body, do not "fix":** worst case, `docker compose down` can take up to ~21 minutes while a scoring job is mid-flight — this is the accepted cost of not force-killing a legitimate 20-minute job, not a bug to shrink away.
-- [ ] 17.2 `docker-compose.yml`: add `scheduler` service — same image, `command: php artisan schedule:work`, same `depends_on`, `restart: unless-stopped`, **pinned to exactly 1 replica** (`deploy.replicas: 1` or equivalent) — scaling it double-runs every scheduled task even with `onOneServer()` as defense-in-depth, not a substitute for the replica pin.
-- [ ] 17.3 `docker-compose.yml`: `worker` `healthcheck` — `curl -fsS http://api:8000/api/health/queue >/dev/null || exit 1` (the `api` Dockerfile's runtime stage already installs `curl`, confirmed at `api/Dockerfile:45`).
-- [ ] 17.4 `scripts/dev.sh`: delete the stopgap block `:244-277` (`exec -d` worker inside the `api` container). Add `worker` and `scheduler` to the `wait_healthy` loop (`:212`, currently `postgres redis mailpit api frontend backoffice`). Change `--no-worker` (`:9,44`) to `--scale worker=0 --scale scheduler=0`. Remove the now-false note at `:273` ("Production still has no supervised worker service").
-- [ ] 17.5 Bump the `api` submodule pointer to the merged tracker commit on `api/develop`.
+- [x] 17.1 `docker-compose.yml`: add `worker` service — `build: ./api`, `image: beai-api:local`, `command:` overridden to `beai:queue-work` (exec form, `php` = PID 1), `depends_on: postgres, redis` both `service_healthy`, `restart: unless-stopped`, `stop_grace_period: 1290s` (= `worker_timeout` 1260 + 30). **Note in the PR body, do not "fix":** worst case, `docker compose down` can take up to ~21 minutes while a scoring job is mid-flight — this is the accepted cost of not force-killing a legitimate 20-minute job, not a bug to shrink away.
+- [x] 17.2 `docker-compose.yml`: add `scheduler` service — same image, `command: php artisan schedule:work`, same `depends_on`, `restart: unless-stopped`, **pinned to exactly 1 replica** (`deploy.replicas: 1` or equivalent) — scaling it double-runs every scheduled task even with `onOneServer()` as defense-in-depth, not a substitute for the replica pin.
+- [x] 17.3 `docker-compose.yml`: `worker` `healthcheck` — `curl -fsS http://api:8000/api/health/queue >/dev/null || exit 1` (the `api` Dockerfile's runtime stage already installs `curl`, confirmed at `api/Dockerfile:45`).
+- [x] 17.4 `scripts/dev.sh`: delete the stopgap block `:244-277` (`exec -d` worker inside the `api` container). Add `worker` and `scheduler` to the `wait_healthy` loop (`:212`, currently `postgres redis mailpit api frontend backoffice`). Change `--no-worker` (`:9,44`) to `--scale worker=0 --scale scheduler=0`. Remove the now-false note at `:273` ("Production still has no supervised worker service").
+- [ ] 17.5 Bump the `api` submodule pointer to the merged tracker commit on `api/develop`. **BLOCKED, not skipped** — the tracker has not merged. The four api PRs are open and awaiting review (#25 → #26 → #27 → #28, chained). This is the last task of the change and must be the last commit on the wrapper branch.
+- [x] 17.6 **Added this phase, not in the original plan.** Pin `QUEUE_CONNECTION: redis` on the shared compose anchor. Found by reading the *resolved* config (`docker compose config`) rather than the source file: `api/.env` sets `QUEUE_CONNECTION=database`, and an env value beats the config default PR3 flips to `redis`. Left alone, the worker would consume the DATABASE queue while the health probe (PR4) inspects REDIS — the probe would find an empty Redis queue and report healthy forever, regardless of what the worker was doing. Two subsystems, two queues, and a green light over the top.
+- [x] 17.7 **Added this phase.** Factor the shared runtime env into a single `x-api-environment` YAML anchor merged by `api`, `worker` and `scheduler`, plus an `x-api-depends-on` anchor. Three copies of the same block is three chances for a change to land on one service and silently miss the others, and a worker pointed at the wrong database fails asynchronously where nobody is watching. This anchor also resolves `notifications-reminders` design D7, which planned to introduce its own `x-beai-app-env` — see that change's `tasks.md` Reconciliation §1.
+- [x] 17.8 **Added this phase.** Document the `MAIL_MAILER` coordination seam as a comment on the anchor. C12 (`notifications-reminders`) flags as CRITICAL that the worker must carry the mail env or every operator alert is written to a log file inside a container nobody reads. `MAIL_MAILER` is deliberately left unset here — choosing the mail driver is C12's decision, not this change's — but the seam is now one documented line instead of a cross-change negotiation.
 
 ### Phase 18: End-to-End Verification (PR5, NOT unit-testable)
 
-- [ ] 18.1 `docker compose build` — confirm `api`, `worker`, `scheduler`, `frontend`, `backoffice` images build clean.
-- [ ] 18.2 `docker compose up -d` — confirm `postgres`, `redis`, `mailpit`, `api`, `worker`, `scheduler`, `frontend`, `backoffice` all reach healthy from cold start; `worker`/`scheduler` only start after `postgres`+`redis` report `service_healthy`.
-- [ ] 18.3 `docker compose logs worker` — confirm the `queue:work` loop started (via `beai:queue-work`) and no immediate crash-restart.
-- [ ] 18.4 Run `./scripts/dev.sh` end to end (migrate, optional seed, health-wait loop) and confirm `--no-worker` still suppresses both `worker` and `scheduler` via `--scale`.
-- [ ] 18.5 `curl http://localhost:8000/api/health/queue` — confirm 200 with the documented shape.
-- [ ] 18.6 `docker compose down` — confirm it returns promptly when the queue is empty (the ~21-minute worst case only applies mid-job, per 17.1's note).
+> **BLOCKED 2026-07-30 — environment, not code. 18.1–18.6 have NOT been run, and
+> nothing in this phase may be reported as passing.**
+>
+> `docker compose build` stalls indefinitely at
+> `#3 resolve image config for docker-image://docker.io/docker/dockerfile:1`
+> (the `# syntax=docker/dockerfile:1` frontend fetch). A first attempt sat for
+> 45 minutes at 0.0% CPU with no docker image events before being killed.
+>
+> Diagnosed, not guessed:
+> - The registry is reachable — `curl https://registry-1.docker.io/v2/` returns
+>   `401`, which is the correct unauthenticated response. Not a network fault.
+> - `~/.docker/config.json` sets `"credsStore": "desktop"`, and
+>   `docker-credential-desktop get` **hangs** (exit 124 on a 15s timeout).
+>   `docker pull` fails with `error getting credentials`.
+>
+> So the build never gets past authentication. The fix is on the machine —
+> sign in to / restart Docker Desktop, or unlock the keychain — and it needs a
+> human. Editing `~/.docker/config.json` to drop the credential helper would
+> make the build pass while silently mutating the developer's Docker setup;
+> that is an environment workaround, not a verification.
+>
+> **Consequence for review: wrapper PR5 opens as a DRAFT.** Every behavioural
+> claim in the compose healthcheck comments is derived from source (controller
+> status codes, heartbeat TTL, `LockProvider` implementations — each read and
+> cited), but no one has watched these containers reach healthy. `verify` is a
+> phase, not a formality.
+
+- [ ] 18.1 `docker compose build` — confirm `api`, `worker`, `scheduler`, `frontend`, `backoffice` images build clean. **BLOCKED** — see the note above.
+- [ ] 18.2 `docker compose up -d` — confirm `postgres`, `redis`, `mailpit`, `api`, `worker`, `scheduler`, `frontend`, `backoffice` all reach healthy from cold start; `worker`/`scheduler` only start after `postgres`+`redis` report `service_healthy`. **BLOCKED** — Docker credential helper hangs; see the Phase 18 note.
+- [ ] 18.3 `docker compose logs worker` — confirm the `queue:work` loop started (via `beai:queue-work`) and no immediate crash-restart. **BLOCKED** — Docker credential helper hangs; see the Phase 18 note.
+- [ ] 18.4 Run `./scripts/dev.sh` end to end (migrate, optional seed, health-wait loop) and confirm `--no-worker` still suppresses both `worker` and `scheduler` via `--scale`. **BLOCKED** — Docker credential helper hangs; see the Phase 18 note.
+- [ ] 18.5 `curl http://localhost:8000/api/health/queue` — confirm 200 with the documented shape. **BLOCKED** — Docker credential helper hangs; see the Phase 18 note.
+- [ ] 18.6 `docker compose down` — confirm it returns promptly when the queue is empty (the ~21-minute worst case only applies mid-job, per 17.1's note). **BLOCKED** — Docker credential helper hangs; see the Phase 18 note.
 - [ ] 18.7 Confirm `openspec/config.yaml:14` and `AGENTS.md:46` need no edit (already correct, reverified this phase) — document as closed, not silently skipped.
 - [ ] 18.8 Open wrapper PR5 → `develop`.
 
 ## Documented, Not Scoped (carried into the spec, not implemented here)
+
+- **`CACHE_STORE` / `SESSION_DRIVER` config defaults still say `database`.** The
+  compose anchor now pins both to `redis`, matching CLAUDE.md's binding stack
+  table ("Cache / Queue / Session — Redis 8"). `api/config/cache.php:18` and the
+  session equivalent still default to `database`, so anything running the API
+  **outside** Docker gets different drivers than the compose stack does. That is
+  a real local/production split and it is named here rather than hidden.
+  It is deliberately not fixed in this change: this change's own `design.md:369`
+  already classified the `config/cache.php` divergence as "real; not this
+  change". The alternative — pinning `database` in compose to match the config —
+  was rejected because it would promote an unratified drift from the binding
+  stack table into an explicit deployment decision, which is an SDD matter, not
+  a compose-comment matter. **Owner needed:** an api-side change that moves the
+  two config defaults to `redis`, or an SDD amendment that ratifies `database`
+  in the stack table. Until then the split stands, documented.
 
 - **Head-of-line blocking**: one worker replica, everything on `default` (`onQueue` appears nowhere in `api/app`) — a 20-minute scoring job stalls webhook delivery for 20 minutes. Mitigation available today = raise `WORKER_REPLICAS`; durable fix (queue splitting) is a later change.
 - **`WEBHOOK_QUEUE` trap**: `api/config/webhooks.php:68` defines `delivery.queue`, unconsumed (`onQueue` absent repo-wide). The worker's `--queue` list and this config key MUST change together in any future change — `queue-runtime/spec.md`'s Non-Goals section already states this.

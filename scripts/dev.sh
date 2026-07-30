@@ -6,7 +6,7 @@
 #   ./scripts/dev.sh --build      force a rebuild of the app images
 #   ./scripts/dev.sh --seed       run database seeders after migrating
 #   ./scripts/dev.sh --fresh      DESTRUCTIVE: wipe volumes and rebuild from zero
-#   ./scripts/dev.sh --no-worker  skip the queue worker
+#   ./scripts/dev.sh --no-worker  start without the worker and scheduler services
 #   ./scripts/dev.sh --status     show service health and exit
 #   ./scripts/dev.sh --logs       follow logs of all services
 #   ./scripts/dev.sh --down       stop containers (volumes preserved)
@@ -53,7 +53,7 @@ BEAI — one-shot local development launcher.
   ./scripts/dev.sh --build      force a rebuild of the app images
   ./scripts/dev.sh --seed       run database seeders after migrating
   ./scripts/dev.sh --fresh      DESTRUCTIVE: wipe volumes and rebuild from zero
-  ./scripts/dev.sh --no-worker  skip the queue worker
+  ./scripts/dev.sh --no-worker  start without the worker and scheduler services
   ./scripts/dev.sh --status     show service health and exit
   ./scripts/dev.sh --logs       follow logs of all services
   ./scripts/dev.sh --down       stop containers (volumes preserved)
@@ -133,7 +133,13 @@ ensure_secret() {
     ok "api: ${key} already set"
     return 0
   fi
-  value="$(dc run --rm --no-deps -T api sh -lc "php artisan ${artisan_cmd} --show" 2>/dev/null | tr -d '\r' | tail -1)"
+  # `|| true` is load-bearing under `set -euo pipefail` (line 17). The exit
+  # status of an assignment IS the status of its command substitution, so a
+  # failing `dc run` would kill the whole script right here — before the guard
+  # below ever runs, and with stderr already swallowed by 2>/dev/null, meaning
+  # dev.sh would die with no output whatsoever. That fires on precisely the
+  # path this function exists for: a fresh clone with no APP_KEY.
+  value="$(dc run --rm --no-deps -T api sh -lc "php artisan ${artisan_cmd} --show" 2>/dev/null | tr -d '\r' | tail -1)" || true
   if [[ -z "$value" || "$value" == *"error"* ]]; then
     warn "api: could not generate ${key} — set it manually in api/.env"
     return 0
@@ -182,7 +188,16 @@ fi
 ensure_secret APP_KEY    "key:generate"
 ensure_secret JWT_SECRET "jwt:secret"
 
-dc up -d
+# --no-worker is a compose-level scale to zero, not an application-level skip.
+# The worker and scheduler are real services now, so suppressing them means not
+# starting those containers — not starting them and then leaving something else
+# to consume the queue behind the operator's back.
+UP_ARGS=(-d)
+if [[ $WORKER -eq 0 ]]; then
+  UP_ARGS+=(--scale worker=0 --scale scheduler=0)
+fi
+
+dc up "${UP_ARGS[@]}"
 ok "Containers started"
 
 # ---------------------------------------------------------------- health wait
@@ -191,14 +206,23 @@ step "Waiting for services to become healthy"
 wait_healthy() {
   local svc="$1" timeout="${2:-180}" waited=0 cid state
   while :; do
-    cid="$(dc ps -q "$svc" 2>/dev/null || true)"
+    # `head -1`: `dc ps -q` prints one id PER CONTAINER, and `worker` is
+    # explicitly scalable. Passing two ids as a single argument makes
+    # `docker inspect -f` fail, `state` becomes "unknown", no case ever
+    # matches, and the loop burns the full 180s timeout before warning about
+    # a service that was healthy the whole time.
+    cid="$(dc ps -q "$svc" 2>/dev/null | head -1 || true)"
     if [[ -z "$cid" ]]; then
       warn "$svc: not defined in compose — skipped"; return 0
     fi
     state="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$cid" 2>/dev/null || echo unknown)"
     case "$state" in
       healthy|running) ok "$svc: $state"; return 0 ;;
-      exited|dead)     warn "$svc: $state"; dc logs --tail=40 "$svc" || true; return 1 ;;
+      # `unhealthy` belongs in the failure branch, not in the polling loop. A
+      # container that has already failed its retry budget will never become
+      # healthy by being asked again, so falling through here meant waiting out
+      # the full 180s timeout to be told something Docker had already decided.
+      exited|dead|unhealthy) warn "$svc: $state"; dc logs --tail=40 "$svc" || true; return 1 ;;
     esac
     (( waited >= timeout )) && { warn "$svc: still '$state' after ${timeout}s"; dc logs --tail=40 "$svc" || true; return 1; }
     sleep 3; waited=$((waited + 3))
@@ -209,7 +233,21 @@ wait_healthy() {
 }
 
 FAILED=0
-for svc in postgres redis mailpit api frontend backoffice; do
+
+# The wait is split in two, with migrations in between, and the ordering is
+# load-bearing rather than tidy.
+#
+# `/api/health/queue` — which the worker's healthcheck probes — runs
+# `DB::table('failed_jobs')->count()` (QueueHealthController.php:73). On a fresh
+# clone that table does not exist until `migrate` runs, so the endpoint 500s,
+# the probe fails, and the worker NEVER reaches healthy. Waiting on the whole
+# stack before migrating meant a correct worker was reported broken and
+# `dev.sh` exited 1 on every single first boot.
+#
+# `/api/health` itself touches neither the database nor the cache
+# (HealthController::__invoke), so `api` can and does go healthy before the
+# schema exists — which is what makes this split possible at all.
+for svc in postgres redis mailpit api; do
   wait_healthy "$svc" || FAILED=1
 done
 
@@ -226,11 +264,18 @@ if api_exec 'php artisan --version' >/dev/null 2>&1; then
   # APP_KEY / JWT_SECRET were handled host-side before boot (see ensure_secret):
   # the image carries no .env, so generating them inside an ephemeral container
   # would be lost on the next recreate.
-  if api_exec 'php artisan migrate --force' >/dev/null 2>&1; then
+  # Captured once, never re-run. The previous version discarded the first run
+  # and then executed `migrate --force` a SECOND time just to read the error —
+  # against a schema the first run had already partially mutated. The retry
+  # then reported a different, downstream failure ("relation already exists")
+  # and buried the real cause. A schema mutation is not a diagnostic you get to
+  # repeat.
+  migrate_out="$(api_exec 'php artisan migrate --force' 2>&1)" && migrate_ok=1 || migrate_ok=0
+  if [[ $migrate_ok -eq 1 ]]; then
     ok "Migrations applied"
   else
     warn "Migrations failed — showing the last lines:"
-    api_exec 'php artisan migrate --force' 2>&1 | tail -20 || true
+    printf '%s\n' "$migrate_out" | tail -20
   fi
 
   if [[ $SEED -eq 1 ]]; then
@@ -241,39 +286,34 @@ else
   warn "Could not reach artisan inside the api container — skipping migrations."
 fi
 
-# ---------------------------------------------------------------- queue worker
+# ---------------------------------------------------------------- app tier health
+# Everything whose health depends on the schema existing. See the note above the
+# first wait loop for why these cannot be checked before `migrate` has run.
+step "Waiting for the application tier"
+
+APP_SERVICES=(frontend backoffice)
+# Only wait on the queue services when they were actually started. With
+# --no-worker they are scaled to zero, and wait_healthy would sit there timing
+# out on containers that were never meant to exist.
 if [[ $WORKER -eq 1 ]]; then
-  step "Queue worker"
-  # NOTE: docker-compose.yml defines no worker service, so nothing consumes the
-  # queue by default — asynchronous scoring and webhook delivery would silently
-  # never run. This launches one inside the api container for local development.
-  # It is NOT a production deployment: production needs its own supervised
-  # worker service. See the infra backlog.
-  if dc exec -T api sh -lc 'pgrep -f "artisan queue:work" >/dev/null 2>&1'; then
-    ok "Worker already running"
-  # --timeout MUST stay below the connection's retry_after (90s, api/config/queue.php:43).
-  # With --timeout=120 the store re-reserves a job while the first worker is still
-  # running it, so ScoreEvaluationJob executes TWICE and writes duplicate Evaluation /
-  # CompetencyResult / IndicatorScore rows.
-  #
-  # --tries is deliberately NOT passed: a worker-level cap would override each job's own
-  # retry policy. DeliverWebhookJob owns a 6-attempt state machine with its own
-  # pending -> dead transition, and a framework-level cap would dead-letter it early,
-  # silently rewriting C10's design.
-  elif dc exec -d api sh -lc 'php artisan queue:work --timeout=60 >> storage/logs/worker.log 2>&1'; then
-    sleep 2
-    if dc exec -T api sh -lc 'pgrep -f "artisan queue:work" >/dev/null 2>&1'; then
-      ok "Worker started (log: storage/logs/worker.log inside the api container)"
-    else
-      warn "Worker did not stay up — check: docker compose exec api tail -50 storage/logs/worker.log"
-    fi
-  else
-    warn "Could not start the worker."
-  fi
-  note "This worker is local-only. Production still has no supervised worker service."
+  APP_SERVICES+=(worker scheduler)
+fi
+
+for svc in "${APP_SERVICES[@]}"; do
+  wait_healthy "$svc" || FAILED=1
+done
+
+# ---------------------------------------------------------------- queue services
+# The worker and scheduler are supervised compose services now, started by
+# `dc up` above and waited on in the health loop. The old block here launched a
+# background `queue:work` inside the api container as a stopgap, because compose
+# defined no worker at all; that stopgap is gone, and with it the divergence
+# between what runs locally and what runs in production.
+step "Queue services"
+if [[ $WORKER -eq 1 ]]; then
+  note "worker + scheduler run as supervised services (see docker compose ps)."
 else
-  step "Queue worker"
-  warn "Skipped (--no-worker). Asynchronous scoring and webhook delivery will NOT run."
+  warn "Scaled to zero (--no-worker). Asynchronous scoring, webhook delivery and scheduled tasks will NOT run."
 fi
 
 # ---------------------------------------------------------------- summary
