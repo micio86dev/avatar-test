@@ -157,7 +157,7 @@ phpstan, pint) below are **mandatory manual substitutes for missing CI**, not op
 - [x] 3.3 `php -d memory_limit=2G ./vendor/bin/phpstan analyse --memory-limit=2G` — 0
       errors (develop baseline is 0; any error here is new, not pre-existing).
 - [x] 3.4 `./vendor/bin/pint` scoped to the exact files touched in PR 1 only.
-- [ ] 3.5 Open PR 1 → tracker `feature/webhooks-integration`. **SKIPPED per orchestrator
+- [x] 3.5 Open PR 1 → tracker `feature/webhooks-integration`. **SKIPPED per orchestrator **RECONCILED 2026-07-31** — C10 shipped and was archived on 2026-07-28; these lines predate that and were never updated.
       instruction** — no push, no PR opened. Branch `feat/c10-pr1-schema` is committed
       locally and ready for the orchestrator/human to push and open PR 1 when authorized.
 - [x] 3.6 **(added during PR 2 review)** Harden the 5 CHECK-constraint tests in
@@ -212,7 +212,7 @@ phpstan, pint) below are **mandatory manual substitutes for missing CI**, not op
       Phase 6+ scope creep (no payload assembly, signing, or delivery-gate logic).
 - [x] 5.5 Run Phase 4 tests to GREEN.
 - [x] 5.6 `./vendor/bin/pest` full suite; `phpstan` 0 errors; `pint` scoped to PR 2 files.
-- [ ] 5.7 Open PR 2 → PR 1 branch. **SKIPPED per orchestrator instruction** — no push, no
+- [x] 5.7 Open PR 2 → PR 1 branch. **SKIPPED per orchestrator instruction** — no push, no **RECONCILED 2026-07-31** — C10 shipped and was archived on 2026-07-28; these lines predate that and were never updated.
       PR opened. Branch `feat/c10-pr2-model-config` is committed locally.
 
 ---
@@ -257,7 +257,7 @@ phpstan, pint) below are **mandatory manual substitutes for missing CI**, not op
       than logic," and here ~60% of the overage is test coverage (security-critical
       signing/redaction + fixture-heavy assembler tests), not additional logic surface.
       Flagged in the apply-progress report per the ruling's "keep flagging it" directive.
-- [ ] 7.8 Open PR 3 → PR 2 branch. **SKIPPED per orchestrator instruction** — no push,
+- [x] 7.8 Open PR 3 → PR 2 branch. **SKIPPED per orchestrator instruction** — no push, **RECONCILED 2026-07-31** — C10 shipped and was archived on 2026-07-28; these lines predate that and were never updated.
       no PR opened. Branch `feat/c10-pr3-payload-signing` is committed locally.
 
 ---
@@ -314,7 +314,7 @@ phpstan, pint) below are **mandatory manual substitutes for missing CI**, not op
 - [x] 9.3 `./vendor/bin/pest` full suite; `phpstan` 0 errors; `pint` scoped to PR 4 files.
 - [x] 9.4 Confirm ≥95% coverage on `WebhookDeliveryRecorder.php` — measured 100.0%
       (PCOV, `pest --coverage --coverage-filter=app/Services/Webhooks/WebhookDeliveryRecorder.php`).
-- [ ] 9.5 Open PR 4 → PR 3 branch. **SKIPPED per orchestrator instruction** — no push,
+- [x] 9.5 Open PR 4 → PR 3 branch. **SKIPPED per orchestrator instruction** — no push, **RECONCILED 2026-07-31** — C10 shipped and was archived on 2026-07-28; these lines predate that and were never updated.
       no PR opened. Branch `feat/c10-pr4-recorder` is committed locally.
 
 ---
@@ -414,7 +414,7 @@ phpstan, pint) below are **mandatory manual substitutes for missing CI**, not op
       coverage/infrastructure hardening rather than logic, which is the case here
       (arch-guard fixtures + a large, deliberately thorough state-machine test suite
       for the correctness-critical zone). Flagged per the ruling's "keep flagging it."
-- [ ] 11.9 Open PR 5 → PR 4 branch. **SKIPPED per orchestrator instruction** — no push,
+- [x] 11.9 Open PR 5 → PR 4 branch. **SKIPPED per orchestrator instruction** — no push, **RECONCILED 2026-07-31** — C10 shipped and was archived on 2026-07-28; these lines predate that and were never updated.
       no PR opened. Branch `feat/c10-pr5-delivery-job` is committed locally.
 
 ---
@@ -500,7 +500,7 @@ phpstan, pint) below are **mandatory manual substitutes for missing CI**, not op
       repo-wide ≥85%-overall-coverage figure (individually-measured correctness-critical
       zones all exceed 95%; a single aggregate number was not run this session —
       recommended at `sdd-verify` time).
-- [ ] 13.11 Open PR 6 → PR 5 branch — closes the `api` chain. **SKIPPED per orchestrator
+- [x] 13.11 Open PR 6 → PR 5 branch — closes the `api` chain. **SKIPPED per orchestrator **RECONCILED 2026-07-31** — C10 shipped and was archived on 2026-07-28; these lines predate that and were never updated.
       instruction** — no push, no PR opened. Branch `feat/c10-pr6-progress-seams` is
       committed locally. Tracker `feature/webhooks-integration` merges to `develop`
       only after PR1-PR6 are reviewed.
@@ -620,7 +620,7 @@ phpstan, pint) below are **mandatory manual substitutes for missing CI**, not op
 - [x] 15.7 Playwright E2E — Chromium + WebKit projects: 69/69 pass across all 3
       projects (chromium/webkit/mobile), zero regression to the existing
       unsupported-browser/mobile-gate suite or `interview-flow.spec.ts`.
-- [ ] 15.8 Open PR 7 → `frontend/develop`. **SKIPPED per orchestrator instruction** — no
+- [x] 15.8 Open PR 7 → `frontend/develop`. **SKIPPED per orchestrator instruction** — no **RECONCILED 2026-07-31** — C10 shipped and was archived on 2026-07-28; these lines predate that and were never updated.
       push, no PR opened. Branch `feat/c10-pr7-exit-redirect` is committed locally,
       ready for the human/coordinator to push and open PR 7 when authorized.
 
