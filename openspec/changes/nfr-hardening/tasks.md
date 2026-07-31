@@ -21,18 +21,18 @@
 
 ## PR1 — `ai_requests` conformance
 
-- [ ] 1.1 RED: a provider call whose response fails JSON parsing still produces one `ai_requests` row with `success = false` and a `failure_reason`. Fails today — the parse-error path returns before any row is written.
-- [ ] 1.2 RED: the same for an indicator-count mismatch, an invalid indicator score, and a non-verbatim excerpt. Four distinct failure classes, four billed calls, currently four silent losses.
-- [ ] 1.3 RED: when the transaction persisting competency results rolls back, the `ai_requests` row **survives**. This is the sharpest test in the change: it fails today because the row is written inside that transaction.
-- [ ] 1.4 RED: `failure_reason` contains no fragment of the provider payload. An error string can echo prompt content, and this table feeds an org-scoped dashboard.
-- [ ] 1.5 RED: `provider`, `estimated_cost_usd`, `success` are non-null on every row.
-- [ ] 1.6 GREEN: additive migration — `provider`, `estimated_cost_usd`, `success`, `failure_reason`. No `updated_at`; the table stays append-only.
-- [ ] 1.7 GREEN: move `AiRequest::create()` **out** of the results `DB::transaction()` in `ScoreEvaluationJob`. A provider call is external, irreversible and billed; the results are local and revocable. Nesting the first inside the second means a later failure erases the record of money already spent.
-- [ ] 1.8 GREEN: write a row on every failure path that follows a completed provider call — parse error, indicator mismatch, invalid score, non-verbatim excerpt.
-- [ ] 1.9 GREEN: derive `estimated_cost_usd` at write time from a config-driven rate table. Stored rather than computed on read, so a later rate change cannot silently rewrite history.
-- [ ] 1.10 Arch test: no `AiRequest::...->update(` or `->save()` on an existing row anywhere in `app/`. A cost record that can be edited is not a cost record.
-- [ ] 1.11 Gates: `artisan test --parallel`, `pint --test`, `phpstan analyse`.
-- [ ] 1.12 Open PR1.
+- [x] 1.1 RED: a provider call whose response fails JSON parsing still produces one `ai_requests` row with `success = false` and a `failure_reason`. Fails today — the parse-error path returns before any row is written.
+- [x] 1.2 RED: the same for an indicator-count mismatch, an invalid indicator score, and a non-verbatim excerpt. Four distinct failure classes, four billed calls, currently four silent losses.
+- [x] 1.3 RED: when the transaction persisting competency results rolls back, the `ai_requests` row **survives**. This is the sharpest test in the change: it fails today because the row is written inside that transaction.
+- [x] 1.4 RED: `failure_reason` contains no fragment of the provider payload. An error string can echo prompt content, and this table feeds an org-scoped dashboard.
+- [x] 1.5 RED: `provider`, `estimated_cost_usd`, `success` are non-null on every row.
+- [x] 1.6 GREEN: additive migration — `provider`, `estimated_cost_usd`, `success`, `failure_reason`. No `updated_at`; the table stays append-only.
+- [x] 1.7 GREEN: move `AiRequest::create()` **out** of the results `DB::transaction()` in `ScoreEvaluationJob`. A provider call is external, irreversible and billed; the results are local and revocable. Nesting the first inside the second means a later failure erases the record of money already spent.
+- [x] 1.8 GREEN: write a row on every failure path that follows a completed provider call — parse error, indicator mismatch, invalid score, non-verbatim excerpt.
+- [x] 1.9 GREEN: derive `estimated_cost_usd` at write time from a config-driven rate table. Stored rather than computed on read, so a later rate change cannot silently rewrite history.
+- [x] 1.10 Arch test: no `AiRequest::...->update(` or `->save()` on an existing row anywhere in `app/`. A cost record that can be edited is not a cost record.
+- [x] 1.11 Gates: `artisan test --parallel`, `pint --test`, `phpstan analyse`.
+- [x] 1.12 Open PR1. **DONE** — micio86dev/backend#39, CI green, merged.
 
 ## PR2 — Audit log
 
