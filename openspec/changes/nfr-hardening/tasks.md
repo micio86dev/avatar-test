@@ -36,21 +36,21 @@
 
 ## PR2 — Audit log
 
-- [ ] 2.1 RED: an admin mutation writes one append-only `audit_logs` row carrying actor, action, subject type/id, before/after, timestamp and `organization_id`.
-- [ ] 2.2 RED: the row is tenant-scoped — org B never reads org A's trail.
-- [ ] 2.3 RED: an attempt to update or delete an audit row fails.
-- [ ] 2.4 RED: before/after payloads exclude secrets (`password`, `key_hash`, `webhook_secret`, tokens). An audit trail that captures credentials is a breach waiting to be read.
-- [ ] 2.5 GREEN: migration, `AuditLog extends TenantModel`, recorder service, arch guard mirroring the `ai_requests` append-only pattern.
-- [ ] 2.6 GREEN: wire the first consumer — `DESIGN.md:580`'s "Request deletion" traceable server-side event.
-- [ ] 2.7 Gates + PR2.
+- [x] 2.1 RED: an admin mutation writes one append-only `audit_logs` row carrying actor, action, subject type/id, before/after, timestamp and `organization_id`.
+- [x] 2.2 RED: the row is tenant-scoped — org B never reads org A's trail.
+- [x] 2.3 RED: an attempt to update or delete an audit row fails.
+- [x] 2.4 RED: before/after payloads exclude secrets (`password`, `key_hash`, `webhook_secret`, tokens). An audit trail that captures credentials is a breach waiting to be read.
+- [x] 2.5 GREEN: migration, `AuditLog extends TenantModel`, recorder service, arch guard mirroring the `ai_requests` append-only pattern.
+- [x] 2.6 **REDIRECTED, with reason.** `DESIGN.md:595`'s "Request deletion" consumer needs an endpoint that does not exist — wiring an audit consumer to a button nobody built would be a test with no subject. It belongs to PR4 (GDPR purge), where the endpoint itself is in scope. The first consumer is instead M2M client creation and revocation: the most security-relevant admin mutation that exists today.
+- [x] 2.7 Gates + PR2. **DONE** — micio86dev/backend#41, merged.
 
 ## PR3 — Accessibility gaps
 
-- [ ] 3.1 Wire `checkA11y()` into `frontend/tests/e2e/interview-flow.spec.ts` and `browser-gate-middleware.spec.ts` — today it runs only on `health` and `unsupported`, so the two most complex screens are unchecked.
-- [ ] 3.2 Same audit for `backoffice` E2E specs.
-- [ ] 3.3 Add `eslint-plugin-vuejs-accessibility` to both Nuxt apps and fix what it reports.
-- [ ] 3.4 RED first where a violation exists: a failing axe run is the proof the wiring works, and a wiring that never failed has never been tested.
-- [ ] 3.5 Gates + PR3.
+- [x] 3.1 Wire `checkA11y()` into `frontend/tests/e2e/interview-flow.spec.ts` and `browser-gate-middleware.spec.ts` — today it runs only on `health` and `unsupported`, so the two most complex screens are unchecked.
+- [x] 3.2 Same audit for `backoffice` E2E specs.
+- [x] 3.3 Add `eslint-plugin-vuejs-accessibility` to both Nuxt apps and fix what it reports.
+- [x] 3.4 RED first — and it PAID OFF: wiring axe into the interview flow immediately surfaced a real WCAG 2.4.2 (Page Titled, Level A) violation. The interview page, where a candidate spends the whole session, had NO document title at all. Fixed with a localized one.
+- [x] 3.5 Gates + PR3. **DONE** — frontend#14, backoffice#6, merged.
 
 ## PR4 — GDPR purge mechanism (ships disabled)
 
