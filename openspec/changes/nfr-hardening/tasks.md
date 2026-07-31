@@ -54,20 +54,20 @@
 
 ## PR4 — GDPR purge mechanism (ships disabled)
 
-- [ ] 4.1 RED: the purge command deletes artifacts older than the configured retention and leaves newer ones untouched — driven by **fixture** durations, never the real ones.
-- [ ] 4.2 RED: it is a no-op when disabled, which is the default. A purge that runs before its durations are ratified deletes data nobody agreed to delete.
-- [ ] 4.3 RED: every deletion writes an audit row (depends on PR2).
-- [ ] 4.4 RED: the artifact inventory is complete — `interview_snapshots.s3_key`, the `s3` disk objects, transcripts, `webhook_deliveries.payload`, `participants.display_name`.
-- [ ] 4.5 GREEN: artisan command + retention-policy resolver + config, **disabled by default**.
-- [ ] 4.6 Gates + PR4.
+- [x] 4.1 RED: the purge command deletes artifacts older than the configured retention and leaves newer ones untouched — driven by **fixture** durations, never the real ones.
+- [x] 4.2 RED: it is a no-op when disabled, which is the default. A purge that runs before its durations are ratified deletes data nobody agreed to delete.
+- [x] 4.3 RED: every deletion writes an audit row (depends on PR2).
+- [x] 4.4 RED: the artifact inventory is complete — `interview_snapshots.s3_key`, the `s3` disk objects, transcripts, `webhook_deliveries.payload`, `participants.display_name`.
+- [x] 4.5 GREEN: artisan command + retention-policy resolver + config, **disabled by default**.
+- [x] 4.6 Gates + PR4. **DONE** — micio86dev/backend#42, merged.
 - [ ] 4.7 **BLOCKED, and stays blocked**: real durations. Open decision #2 needs legal sign-off, and the sign-off must cover `webhook_deliveries.payload` and `participants.display_name`, which postdate the original framing. The mechanism is built so that ratification is a config change, not a code change.
 
 ## PR5 — Observability stack
 
-- [ ] 5.1 Sentry in `api`, `frontend`, `backoffice`.
+- [x] 5.1 Sentry — **api DONE** (micio86dev/backend#43, merged). Nuxt halves remain.
 - [ ] 5.2 Laravel Pulse, admin-gated.
 - [ ] 5.3 Microsoft Clarity + GA4 in both Nuxt apps.
-- [ ] 5.4 RED: no PII, no candidate identifier and no token reaches any third-party sink. The whole point of this product is that a candidate's answers are confidential; an analytics tag that ships a `candidate_ref` breaks that in a way nobody will notice.
+- [x] 5.4 RED — **DONE for the api sink**, which is the one that sees confidential data: nine tests, each asserting a specific class of leak does not happen. `send_default_pii=false` proved insufficient on its own — it stops Sentry ATTACHING context but does nothing about what this app's own exceptions carry, and scoring exceptions carry prompt text. The whole point of this product is that a candidate's answers are confidential; an analytics tag that ships a `candidate_ref` breaks that in a way nobody will notice.
 - [ ] 5.5 Gates + PR5.
 
 ## Documented, Not Scoped
