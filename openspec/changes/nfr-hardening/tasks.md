@@ -65,10 +65,11 @@
 ## PR5 — Observability stack
 
 - [x] 5.1 Sentry — **api DONE** (micio86dev/backend#43, merged). Nuxt halves remain.
-- [ ] 5.2 Laravel Pulse, admin-gated.
-- [ ] 5.3 Microsoft Clarity + GA4 in both Nuxt apps.
+- [x] 5.2 Laravel Pulse — **DONE** (micio86dev/backend#44). Gated on the `admin` role AND a platform-operator allowlist, empty by default. A considered DEVIATION from `spec.md:242`: `admin` is org-scoped, Pulse is cross-tenant, so the spec read literally shows every customer's data to every customer's admin.
+- [x] 5.3 Clarity + GA4 — **DONE** (micio86dev/frontend#15, micio86dev/backoffice#7). Both tools default OFF twice over: unset ID and denied consent. **No consent UI exists yet, so nothing loads** — see 5.6.
 - [x] 5.4 RED — **DONE for the api sink**, which is the one that sees confidential data: nine tests, each asserting a specific class of leak does not happen. `send_default_pii=false` proved insufficient on its own — it stops Sentry ATTACHING context but does nothing about what this app's own exceptions carry, and scoring exceptions carry prompt text. The whole point of this product is that a candidate's answers are confidential; an analytics tag that ships a `candidate_ref` breaks that in a way nobody will notice.
-- [ ] 5.5 Gates + PR5.
+- [x] 5.5 Gates + PR5 — **DONE**. api 1320 tests / phpstan 0 / pint clean; frontend 449 tests; backoffice 230 tests; typecheck + eslint clean on both.
+- [ ] 5.6 **OPEN, product**: an analytics consent UI. The mechanism reads `beai.consent.analytics` and defaults to denied, so analytics is built and inert — the same posture as the retention purge. Granting consent needs a banner nobody has specified, and conflating it with the interview-recording `ConsentBanner` would mean agreeing to be assessed also agreed to be tracked by Google.
 
 ## Documented, Not Scoped
 
