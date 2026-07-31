@@ -104,7 +104,7 @@ Chain strategy: feature-branch-chain
 - [x] 4.2 Run `php artisan test --parallel` — the CI-equivalent run; catches ParaTest-worker helper issues the sequential run cannot.
 - [x] 4.3 Run `php -d memory_limit=2G ./vendor/bin/phpstan analyse --memory-limit=2G` — 0 new errors on new files.
 - [x] 4.4 Run `./vendor/bin/pint` scoped to touched files only (never bare).
-- [ ] 4.5 Open api PR1 → tracker `feature/queue-worker-scheduler`. **NOT DONE** — apply-phase instructions explicitly prohibit pushing or opening a PR; skipped and reported back.
+- [x] 4.5 Open api PR1 → tracker `feature/queue-worker-scheduler`. **NOT DONE** — apply-phase instructions explicitly prohibit pushing or opening a PR; skipped and reported back. **RECONCILED 2026-07-31** — opened and merged as micio86dev/backend #25→#26→#27→#28, tracker #30 → `api/develop`. Wrapper PR merged as avatar-test#1.
 
 ---
 
@@ -132,7 +132,7 @@ Chain strategy: feature-branch-chain
 - [x] 8.2 Run `php artisan test --parallel`.
 - [x] 8.3 Run `php -d memory_limit=2G ./vendor/bin/phpstan analyse --memory-limit=2G` — 0 new errors.
 - [x] 8.4 Run `./vendor/bin/pint` scoped to touched files only.
-- [ ] 8.5 Open api PR2 → PR1 branch. **NOT DONE** — apply-phase instructions explicitly prohibit pushing or opening a PR; skipped and reported back.
+- [x] 8.5 Open api PR2 → PR1 branch. **NOT DONE** — apply-phase instructions explicitly prohibit pushing or opening a PR; skipped and reported back. **RECONCILED 2026-07-31** — opened and merged as micio86dev/backend #25→#26→#27→#28, tracker #30 → `api/develop`. Wrapper PR merged as avatar-test#1.
 
 ---
 
@@ -153,7 +153,7 @@ Chain strategy: feature-branch-chain
 
 - [x] 11.1 Apply 9.1; re-run PR1's `QueueRuntimeConfigTest.php` — still passes (driver name doesn't affect the numeric invariant).
 - [x] 11.2 Run `./vendor/bin/pest`, `php artisan test --parallel`, `phpstan analyse --memory-limit=2G`, `pint` scoped. **Additionally**: rebuilt `beai-api:local`, dispatched a real `App\Jobs\FinalizeInterview` job onto `Queue::connection('redis')` against the live `beai_redis` compose service, drained it with a real `queue:work redis --once --stop-when-empty` invocation (`RUNNING` → `DONE`, 16.80ms), confirmed queue depth 0 after drain, and confirmed `beai:queue-work --validate-only` passes inside the real image.
-- [ ] 11.3 Open api PR3 → PR2 branch. **NOT DONE** — apply-phase instructions explicitly prohibit pushing or opening a PR; skipped and reported back.
+- [x] 11.3 Open api PR3 → PR2 branch. **NOT DONE** — apply-phase instructions explicitly prohibit pushing or opening a PR; skipped and reported back. **RECONCILED 2026-07-31** — opened and merged as micio86dev/backend #25→#26→#27→#28, tracker #30 → `api/develop`. Wrapper PR merged as avatar-test#1.
 
 ---
 
@@ -188,7 +188,7 @@ Chain strategy: feature-branch-chain
 - [x] 16.3 Run `php -d memory_limit=2G ./vendor/bin/phpstan analyse --memory-limit=2G` — 0 new errors.
 - [x] 16.4 Run `./vendor/bin/pint` scoped to touched files only.
 - [x] 16.5 Cross-check every checkbox in `proposal.md`'s Success Criteria against test evidence produced across PR1–PR4 (config-invariant, arch test, `failed()` state machine, extensions, health probe, CI green, zero Horizon assertions, `redis` resolution) — all satisfied; see apply-progress for the full mapping.
-- [ ] 16.6 Open api PR4 → PR3 branch. Once all 4 api PRs are reviewed, merge tracker `feature/queue-worker-scheduler` → `api/develop`. **NOT DONE** — apply-phase instructions explicitly prohibit pushing or opening a PR; skipped and reported back.
+- [x] 16.6 Open api PR4 → PR3 branch. Once all 4 api PRs are reviewed, merge tracker `feature/queue-worker-scheduler` → `api/develop`. **NOT DONE** — apply-phase instructions explicitly prohibit pushing or opening a PR; skipped and reported back. **RECONCILED 2026-07-31** — opened and merged as micio86dev/backend #25→#26→#27→#28, tracker #30 → `api/develop`. Wrapper PR merged as avatar-test#1.
 
 ---
 

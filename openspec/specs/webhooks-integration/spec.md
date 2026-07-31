@@ -364,3 +364,39 @@ hardcoded in `DeliverWebhookJob`, the signer, or any listener.
 - GIVEN `config/webhooks.php` defines a custom backoff curve for a test environment
 - WHEN `DeliverWebhookJob` schedules a retry
 - THEN the `next_attempt_at` delay matches the configured curve, not a value hardcoded in the job class
+
+<!-- promoted from notifications-reminders (C12) -->
+
+### Requirement: Dead-Letter Transition Emits a Notification-Triggering Event
+
+When a `webhook_deliveries` row transitions to `status = dead` (per the existing *Retry, backoff,
+and dead-letter classification* requirement — a retryable failure exhausted on the 6th attempt), the
+system MUST dispatch a domain event consumed by the `notifications` capability. The event MUST
+carry only the identifying reference needed to reload the row (`delivery_id` or equivalent), NOT a
+copy of `organization_id` trusted as-is — the notification's dispatcher job re-derives the org fresh
+from the reloaded row, per the tenancy capability's re-derivation rule. This capability MUST NOT
+itself resolve notification recipients, render copy, or perform a send; it stops at emitting the
+event — mirroring the "C10 must not grow a notification channel" boundary already ratified.
+
+#### Scenario: Dead-lettered delivery emits exactly one notification-triggering event
+
+- GIVEN a `webhook_deliveries` row exhausts its 6th retryable attempt and transitions to `status = dead`
+- WHEN the transition completes
+- THEN exactly one domain event is dispatched carrying a reference sufficient to reload that
+  delivery row
+- AND `webhooks-integration` code performs no recipient resolution, copy rendering, or send
+
+#### Scenario: Other terminal states do not emit this event
+
+- GIVEN a `webhook_deliveries` row resolves to `status = delivered`, `failed_permanent`, or
+  `skipped` (any of the three `skip_reason` variants)
+- WHEN that terminal state is reached
+- THEN no dead-letter notification event is dispatched for that row
+
+#### Scenario: Event carries a reference, not a trusted organization_id copy
+
+- GIVEN the dead-letter event is dispatched for a delivery belonging to Org A
+- WHEN the notifications capability's dispatcher job consumes the event
+- THEN it reloads the `webhook_deliveries` row from the DB and re-derives `organization_id`
+  from that reload — it does NOT trust an `organization_id` value carried directly on the event
+  payload as authoritative

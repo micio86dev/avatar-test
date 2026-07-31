@@ -602,3 +602,74 @@ correctly scoped to the M2M client's org. They do NOT need `withoutGlobalScopes(
 - External M2M / API-key authentication (C5)
 - Backoffice UI (C11)
 - BEAI organizational roles (ICO/FLL/MLL/BUL/SRX) in Spatie tables — C3
+
+<!-- promoted from admin-dashboards (C11) -->
+
+### Requirement: Explicit Org Filter for Non-TenantModel HTTP Reads
+
+Any HTTP controller under `App\Http\Controllers` reading a model that does
+**not** extend `TenantModel` (i.e. carries no `TenantScoped` global scope)
+MUST apply an explicit `->where('organization_id', $orgId)` filter, with
+`$orgId` sourced from the resolved `TenantContext`/`TenantContextM2m`/
+`TenantContextCandidate` state — never from request input. `withoutGlobalScopes()`
+MUST NOT be used in `App\Http` context; it is reserved for queued-job contexts
+with no ambient tenant resolver (e.g. `EvaluationPayloadAssembler`).
+
+#### Scenario: Plain-Model admin read applies explicit filter
+
+- GIVEN a controller action reading `Participant` (plain `Model`) after `TenantContext`
+- WHEN the query is built
+- THEN it includes `->where('organization_id', $resolvedOrgId)` before `findOrFail()`
+- AND a cross-org id returns `404`
+
+#### Scenario: Bare findOrFail() on a non-TenantModel is a defect
+
+- GIVEN a controller calls `Participant::findOrFail($id)` with no org filter
+- WHEN a cross-org id is requested
+- THEN the record IS returned with `200` (no scope applied)
+- AND this construction MUST NOT appear in any admin controller (violates this requirement)
+
+#### Scenario: No withoutGlobalScopes() in HTTP controllers
+
+- GIVEN all classes under `App\Http\Controllers`
+- WHEN their source is inspected
+- THEN no `withoutGlobalScopes()` call is present
+- AND this is verifiable by a static grep-based test in CI
+
+<!-- promoted from notifications-reminders (C12) -->
+
+### Requirement: Notification Renderer Classes Must Never Implement ShouldQueue
+
+Any class under `app/Notifications/` MUST NOT implement
+`Illuminate\Contracts\Queue\ShouldQueue`. Sending MUST always be triggered synchronously
+(`sendNow()` / `Notification::sendNow()`) from within a `ShouldQueue` dispatcher job that
+itself establishes tenant context per the *Queued-Job Tenant Context Establishment*
+requirement. A dedicated architecture-test scenario MUST target `app/Notifications/`
+explicitly, independent of the general recursive `app/`-tree scan, so this contract is
+verified by name rather than relying solely on the general scan's coverage.
+
+#### Scenario: A ShouldQueue Notification class is rejected
+
+- GIVEN a class under `app/Notifications/` implements `ShouldQueue`
+- WHEN the tenancy architecture test suite runs
+- THEN the test fails, naming the offending class
+- AND no allowlist entry may suppress a genuine Notification queue-boundary bypass
+
+#### Scenario: Compliant Notification is sent synchronously inside a tenant-scoped job
+
+- GIVEN a `Notification` class does not implement `ShouldQueue`
+- AND it is sent via `Notification::sendNow()` from within a job that wraps its body in
+  `TenantContextScope::runFor()`
+- WHEN the notification is dispatched
+- THEN the send executes synchronously inside the job's tenant-scoped closure
+- AND `Queue::before`/`Queue::after` still fire, because the OUTER job — not the
+  Notification — is the `ShouldQueue` class dispatched via `::dispatch()`
+
+#### Scenario: Existing job-tenancy requirements apply unchanged to the C12 dispatcher
+
+- GIVEN the C12 notification dispatcher job performs tenant-scoped writes (the
+  `notification_log` dedupe row)
+- WHEN its tenancy behavior is evaluated
+- THEN it is held to the same *Queued-Job Tenant Context Establishment* and *Queued-Job
+  Tenancy Test Discipline* requirements as any other `ShouldQueue` job — no exception or
+  weaker guard is introduced for notifications

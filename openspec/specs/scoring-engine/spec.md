@@ -22,13 +22,22 @@ the RT-B retry block are DELIVERED and in force.
 
 ## Requirements
 
+<!-- superseded by queue-worker-scheduler -->
+
 ### Requirement: Job Dispatch and Lifecycle
 
 `ScoreEvaluationJob` MUST be dispatched from `FinalizeInterview` at the `TODO(C9)` hook,
 with the `participant_id` as the only payload. The job runs on the Redis queue; p95
-latency MUST be < 10 min. On job completion, the participant MUST transition from
-`in_valutazione → completato` regardless of whether the Evaluation is `completed` or
-`pending` (both are terminal sub-states of the evaluation).
+latency MUST be < 10 min. `ScoreEvaluationJob` MUST declare an execution timeout of at least
+`max_role_competencies × scoring.anthropic.timeout_seconds × 1.1` (today: 1200 s / 20 min). The
+p95 < 10 min figure remains the **performance target**; the declared timeout is the **execution
+ceiling** and MUST exceed 600 seconds regardless of how any input config is tuned (see the
+`queue-runtime` capability's Timeout / Retry-After Ordering and Ceiling Invariant requirement,
+which enforces this as a config-independent floor). On job completion, the participant MUST
+transition from `in_valutazione → completato` regardless of whether the Evaluation is `completed`
+or `pending` (both are terminal sub-states of the evaluation).
+(Previously: stated only the p95 < 10 min target with no execution ceiling, leaving `retry_after`
+unsizeable without risking either premature `SIGALRM` kills or double-processing.)
 
 The C7a Redis-NX `finalize:{pid}` lock dedups the `FinalizeInterview` TRIGGER only — it
 does NOT dedup `ScoreEvaluationJob` execution. `ScoreEvaluationJob` MUST perform the
@@ -79,6 +88,15 @@ dispatch and exits no-op immediately. The `Evaluation` row is preserved for audi
 - GIVEN participant P is in state `in_valutazione` and the `TODO(C9)` hook is reached
 - WHEN `FinalizeInterview` executes
 - THEN `ScoreEvaluationJob::dispatch(P.id)` is enqueued exactly once on the Redis queue
+
+#### Scenario: Declared timeout clears the derived ceiling
+
+- GIVEN the standard framework's largest role has 18 competencies and
+  `scoring.anthropic.timeout_seconds = 60`
+- WHEN `ScoreEvaluationJob`'s declared `$timeout` is inspected
+- THEN it is >= `18 × 60 × 1.1` = 1188 seconds (today configured at 1200s)
+- AND it exceeds 600 seconds regardless of the computed formula value (the config-independent
+  floor from the p95 target)
 
 #### Scenario: Start-of-job guard — existing terminal Evaluation → no-op
 
@@ -153,8 +171,6 @@ dispatch and exits no-op immediately. The `Evaluation` row is preserved for audi
 - WHEN the queue worker calls `ScoreEvaluationJob::failed()`
 - THEN the `in_valutazione → errore` transition is SKIPPED (participant is already `errore`)
 - AND an `EvaluationFailed` lifecycle event is STILL emitted for C10
-
----
 
 ### Requirement: Per-Competency Scoring Pipeline
 
@@ -705,3 +721,40 @@ Known gaps documented at archive time (2026-07-22), to be addressed in a follow-
    and LifecycleResolutionTest; the exception class constructor line is never explicitly hit.
 4. **No standalone determinism run-twice test**: the golden cassette with CassetteLLMProvider
    at temperature=0 provides de-facto determinism evidence; a dedicated run-twice test is absent.
+
+<!-- promoted from notifications-reminders (C12) -->
+
+### Requirement: EvaluationFailed Is a Notification Trigger; Payload Stays Minimal
+
+`EvaluationFailed` MUST continue to carry only `participantId` (no `organization_id`, no
+denormalized copy of any tenant-scoped field) — the `notifications` capability's dispatcher
+job re-derives `organization_id` fresh from the `Participant` DB record at execution time,
+never from the event payload, per the tenancy capability's re-derivation rule. Scoring-engine
+code MUST NOT itself resolve notification recipients, render copy, or perform a send in
+response to this event — a listener external to this capability owns that behavior.
+
+#### Scenario: EvaluationFailed triggers exactly one notification, event payload unchanged
+
+- GIVEN `ScoreEvaluationJob::failed()` emits `EvaluationFailed(participantId: P)`
+- WHEN the event is observed by the `notifications` capability's listener
+- THEN exactly one `scoring_failed` notification is triggered for the organization owning
+  participant P
+- AND the event payload carries only `participantId` — no `organization_id` field was added
+  to satisfy this requirement
+
+#### Scenario: Notification dispatcher re-derives org from the participant record, not the event
+
+- GIVEN `EvaluationFailed(participantId: P)` is dispatched while the ambient `TenantResolver`
+  holds a foreign or null org
+- WHEN the notification dispatcher job runs
+- THEN it reloads participant P from the DB and derives `organization_id` from that reload
+- AND no notification-related row or recipient uses an org value taken directly from the event
+  object or the ambient resolver
+
+#### Scenario: Scoring-engine code performs no notification logic
+
+- GIVEN `EvaluationFailed` is dispatched
+- WHEN the scoring pipeline's own code (`ScoreEvaluationJob`, `EvaluationParser`, etc.) is
+  inspected
+- THEN none of it resolves notification recipients, renders notification copy, or sends mail —
+  that logic lives exclusively in the `notifications` capability's listener and dispatcher job

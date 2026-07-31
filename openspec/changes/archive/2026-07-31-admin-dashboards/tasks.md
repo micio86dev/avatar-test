@@ -163,7 +163,7 @@ B1 keeps B1 reviewable.
       — 0 errors on new files; do not attribute pre-existing errors to this change.
 - [x] 4.3 Run `./vendor/bin/pint` scoped to the 6 new files + `bootstrap/app.php`.
 - [x] 4.4 Confirm ~95% coverage on `AdminParticipantReader` + `LifecycleReadGate`.
-- [ ] 4.5 Open PR A1 → tracker `feature/admin-dashboards` (human authorizes push/PR).
+- [x] 4.5 Open PR A1 → tracker `feature/admin-dashboards` (human authorizes push/PR). **RECONCILED 2026-07-31** — the PR was opened and merged after this line was written; the 'no push' instruction applied to the apply-phase agent, not to the change. C11 is on `api/develop` and `backoffice/develop`.
       **SKIPPED per explicit orchestrator instruction: "DO NOT push. DO NOT open any
       PR."** Branch `feat/c11-a1-reader-gate` committed locally on top of
       `feature/admin-dashboards`, ready for a human to push/open.
@@ -221,7 +221,7 @@ B1 keeps B1 reviewable.
 
 - [x] 7.1 `./vendor/bin/pest` full suite; `phpstan` 0 new errors; `pint` scoped to the
       touched files.
-- [ ] 7.2 Open PR A2 → PR A1 branch. **SKIPPED per explicit orchestrator instruction:
+- [x] 7.2 Open PR A2 → PR A1 branch. **SKIPPED per explicit orchestrator instruction: **RECONCILED 2026-07-31** — the PR was opened and merged after this line was written; the 'no push' instruction applied to the apply-phase agent, not to the change. C11 is on `api/develop` and `backoffice/develop`.
       "DO NOT push. DO NOT open any PR."** Branch `feat/c11-a2-serializers` committed
       locally on top of `feat/c11-a1-reader-gate`, ready for a human to push/open.
 
@@ -327,7 +327,7 @@ B1 keeps B1 reviewable.
       any code path in A1–A3 — `AdminParticipantReader::read()` only ever
       authorizes against `Participant`, never against an `Evaluation` model
       instance directly. Dead/defensive code from A1, pre-existing.
-- [ ] 10.5 Open PR A3 → PR A2 branch. **SKIPPED per explicit orchestrator
+- [x] 10.5 Open PR A3 → PR A2 branch. **SKIPPED per explicit orchestrator **RECONCILED 2026-07-31** — the PR was opened and merged after this line was written; the 'no push' instruction applied to the apply-phase agent, not to the change. C11 is on `api/develop` and `backoffice/develop`.
       instruction: "DO NOT push. DO NOT open any PR."** Branch
       `feat/c11-a3-controllers` committed locally on top of
       `feat/c11-a2-serializers`, ready for a human to push/open.
@@ -379,7 +379,7 @@ B1 keeps B1 reviewable.
 - [x] 12.3 Flag to reviewer: this PR is >90% vendored source; request `size:exception`
       per the chained-pr skill's generated/vendor-diff gate rather than splitting
       component-by-component.
-- [ ] 12.4 Open PR B0 → tracker `feature/admin-dashboards`. **SKIPPED per explicit
+- [x] 12.4 Open PR B0 → tracker `feature/admin-dashboards`. **SKIPPED per explicit **RECONCILED 2026-07-31** — the PR was opened and merged after this line was written; the 'no push' instruction applied to the apply-phase agent, not to the change. C11 is on `api/develop` and `backoffice/develop`.
       orchestrator instruction: "DO NOT push. DO NOT open any PR."** Branch
       `feat/c11-b0-shadcn-init` committed locally, ready for a human to push/open.
 
@@ -440,7 +440,7 @@ B1 keeps B1 reviewable.
 - [x] 16.1 `bunx nuxi prepare` then `bun run typecheck` (nuxi typecheck) clean.
 - [x] 16.2 `bun run test:unit` full suite; `bun run test:e2e` (chromium+webkit+mobile
       unsupported-gate) green.
-- [ ] 16.3 Open PR B1 → PR B0 branch. **SKIPPED per explicit orchestrator instruction:
+- [x] 16.3 Open PR B1 → PR B0 branch. **SKIPPED per explicit orchestrator instruction: **RECONCILED 2026-07-31** — the PR was opened and merged after this line was written; the 'no push' instruction applied to the apply-phase agent, not to the change. C11 is on `api/develop` and `backoffice/develop`.
       "DO NOT push. DO NOT open any PR."** Branch `feat/c11-b1-theme-auth-shell`
       committed locally on top of `feat/c11-b0-shadcn-init`, ready for a human to
       push/open.
@@ -537,7 +537,7 @@ B1 keeps B1 reviewable.
       projects) green; confirm 85% overall backoffice coverage. **Result**:
       typecheck exit 0; 157/157 unit tests, 99.05% line coverage; 47/47 E2E
       (chromium+webkit+mobile).
-- [ ] 21.5 Open PR B3 → PR B2 branch. **SKIPPED per explicit orchestrator
+- [x] 21.5 Open PR B3 → PR B2 branch. **SKIPPED per explicit orchestrator **RECONCILED 2026-07-31** — the PR was opened and merged after this line was written; the 'no push' instruction applied to the apply-phase agent, not to the change. C11 is on `api/develop` and `backoffice/develop`.
       instruction: "DO NOT push. DO NOT open a PR."** Branch
       `feat/c11-b3-report-viewer` committed locally on top of
       `feat/c11-b2-participant-views`, ready for a human to push/open.
