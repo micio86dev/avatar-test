@@ -124,6 +124,58 @@ about itself.
 
 ---
 
+## Analytics consent
+
+**One banner, in both apps, and never two on screen at once.**
+
+Both Nuxt apps mount the same `ConsentBanner` component. It appears only where
+there is something to ask permission for (a measurement or project ID is
+configured) and only on routes where analytics is actually allowed to run.
+
+### Why the recording consent is a separate thing
+
+The interview page collects its own **recording** consent before a session
+starts. That one is a precondition of the service: refuse it and there is no
+interview. Analytics consent must be refusable at no cost whatsoever.
+
+Bundling them into a single "Accept" is precisely what makes a consent invalid —
+it is not freely given if saying no costs you the thing you came for. So they
+stay two decisions, and the analytics banner simply never appears on the pages
+where the other one lives. The candidate is asked one thing at a time.
+
+### Design rules, and the single fact behind them
+
+Not answering already means no. Analytics defaults to denied, so an ignored
+banner is a safe banner — and that licenses everything else:
+
+| Choice | Why |
+|---|---|
+| `role="region"`, not `role="dialog"` | A dialog implies a focus trap. Trapping somebody in a question they are free to ignore is hostile. |
+| Accept and Reject have **identical** styling | A prominent Accept beside a faint Reject is a dark pattern regulators name explicitly. Asserted by test. |
+| Refusal is first in the DOM | Whichever option a keyboard user reaches first should be the one with no consequences. |
+| A refusal stores `denied`, not nothing | Absence is indistinguishable from never asking, so the banner would return every visit — nagging, which reads as pressure towards yes. |
+| Granting starts the tags via an event, not a reload | Consenting and seeing nothing happen reads as a broken button; reloading would throw away the visitor's work. |
+
+Consent is **never revoked in place**. Unloading a running third-party SDK is not
+something any of them reliably support, so withdrawal is a reload — flipping the
+flag without one would only look like it worked.
+
+Storage key: `beai.consent.analytics`, values `granted` / `denied`. Deliberately
+distinct from the interview recording consent. The two apps are on separate
+origins and do not share storage: an operator's consent and a candidate's are
+different decisions by different people.
+
+### Where each app asks
+
+- **Candidate app** — on the landing and orientation pages. Never on
+  `/interview/**`.
+- **Backoffice** — after sign-in, on the first real page. Every unauthenticated
+  route either redirects to `/login` or is one the banner stands down on, and
+  that ordering is correct: asking somebody to make a privacy choice before they
+  are through the door is asking a stranger.
+
+---
+
 ## Retention
 
 Pulse trims its own tables on its own schedule. Candidate data is governed
