@@ -126,11 +126,39 @@ Funziona **completamente**. Accedi con `admin@beai.local` / `password`.
 
 - **Dashboard** — metriche aggregate dell'organizzazione
 - **Partecipanti** — elenco con filtri, e il dettaglio del singolo candidato
+- **Template avatar** — volto, voce e messa a punto del colloquio (vedi §4.5)
 - **Banner consenso analytics** — compare dopo il login (vedi §6)
 
 I gate di lifecycle sono veri: la trascrizione si apre da `in_valutazione` in
 poi, la valutazione solo su `completato`. Il candidato demo è `in_attesa`, quindi
 entrambe rispondono **409** — non è un errore, è il gate che funziona.
+
+### 4.5 Template avatar
+
+Definiscono il volto e la voce che ogni candidato dell'organizzazione incontra.
+**È attivo un solo template alla volta**, garantito da un indice unico parziale
+nel database: non è una regola applicativa, quindi due attivazioni contemporanee
+non possono vincere entrambe.
+
+Il form è costruito dalle *field spec* servite dall'API — 12 knob per HeyGen, 17
+per Tavus — quindi una manopola aggiunta lato server compare qui senza toccare
+il frontend, e una che il server non conosce non può comparire affatto.
+
+Cose da sapere provandolo:
+
+- **Il servizio è nominato solo qui.** Ti serve per sapere da quale dashboard
+  copiare gli identificativi. Il candidato non lo vede mai: nessuna stringa,
+  nessun errore, nessuna traduzione del frontend nomina il fornitore.
+- **Svuotare un campo lo rimuove**, non lo azzera: assente significa "usa il
+  default del fornitore", stringa vuota è un valore.
+- **Il servizio non è modificabile** dopo la creazione — le impostazioni
+  appartengono a un solo fornitore e nessuna si sovrappone.
+- **Il template attivo non si può eliminare**: attivane un altro prima.
+- Senza chiave provider puoi creare e attivare template, ma il colloquio non
+  parte (vedi §5).
+
+Un'organizzazione **senza** template attivo non è un errore: i colloqui usano i
+default d'ambiente, esattamente come prima che questa funzione esistesse.
 
 ### 4.2 API — http://localhost:8000
 
@@ -265,11 +293,21 @@ cd backoffice && bunx playwright test
 
 ## 9. Stato del prodotto
 
-13 slice verticali (C1→C13). **Tutte consegnate.**
+14 slice verticali (C1→C14). **Tutte consegnate.**
 
-Resta un solo task aperto in tutto il progetto: le **durate di retention GDPR**.
-Serve un legale, non altro codice — il meccanismo è costruito perché ratificarle
-sia un cambio di configurazione, non di codice.
+C14 ha anche chiuso due difetti che erano già in produzione: il candidato vedeva
+un iframe del fornitore dentro la pagina del colloquio, e le sessioni Tavus non
+raggiungevano mai il completamento — quindi non venivano mai valutate.
+
+Resta un solo task bloccante in tutto il progetto: le **durate di retention
+GDPR**. Serve un legale, non altro codice — il meccanismo è costruito perché
+ratificarle sia un cambio di configurazione, non di codice.
+
+Due cose rinviate per scelta, scritte in `openspec/changes/avatar-provider-templates/tasks.md`:
+nessun override del template per progetto (i progetti hanno già `language`,
+quindi un solo avatar per organizzazione potrebbe stare stretto a chi intervista
+in due lingue), e gli id avatar/voce non sono validati contro l'inventario reale
+del fornitore.
 
 Le tre lacune emerse scrivendo questa guida, tutte reali e nessuna bloccante per
 provare il prodotto:
