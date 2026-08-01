@@ -1,0 +1,35 @@
+schema: spec-driven
+change_name: tenancy-identity
+change_id: c2
+status: archived
+archived_date: "2026-07-17"
+artifacts:
+  proposal: proposal.md
+  specs:
+    - specs/identity-auth/spec.md
+    - specs/tenancy/spec.md
+  design: design.md
+  tasks: tasks.md
+  verify_report: verify-report.md
+merge_commit: "3ccbcab"
+verification:
+  tests_passed: true
+  coverage: 94.8
+  phpstan: clean
+  security_invariants: 9/9
+  verdict: PASS
+implementation:
+  branch: feature/c2-tenancy-identity
+  prs:
+    - pr1: "98b4dd9"
+    - pr2: "a353f0a"
+    - pr3: "d302742"
+  submodule: api
+  backend: Laravel 13 + PostgreSQL 17
+specs_promoted:
+  - from: openspec/changes/tenancy-identity/specs/identity-auth/spec.md
+    to: openspec/specs/identity-auth/spec.md
+    action: created
+  - from: openspec/changes/tenancy-identity/specs/tenancy/spec.md
+    to: openspec/specs/tenancy/spec.md
+    action: created

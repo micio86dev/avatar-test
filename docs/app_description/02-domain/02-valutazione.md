@@ -30,7 +30,7 @@ Per ogni **indicatore** (`behaviors`):
 | Campo | Descrizione |
 |-------|-------------|
 | `indicator` | Nome dell'indicatore comportamentale (da BARS) |
-| `score` | Punteggio assegnato (tipicamente 1–5) |
+| `score` | Punteggio assegnato sull'insieme discreto {1,3,5}; -1 se non valutabile |
 | `explanation` | Motivazione del punteggio |
 | `excerpts[]` | Estratti testuali dalle risposte del candidato a supporto |
 

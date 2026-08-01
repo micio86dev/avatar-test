@@ -1,0 +1,137 @@
+---
+# BEAI — wrapper Taskfile
+# Requires: go-task >= 3.0 (https://taskfile.dev)
+# Install: brew install go-task  (macOS) | see docs/dev-setup.md for other platforms
+version: "3"
+
+vars:
+  # Path to the wrapper docker-compose file.
+  COMPOSE_FILE: "{{.ROOT_DIR}}/docker-compose.yml"
+
+tasks:
+
+  # ---------------------------------------------------------------------------
+  # Infrastructure lifecycle
+  # ---------------------------------------------------------------------------
+
+  up:
+    desc: "Start local dev infra (postgres, redis, mailpit) in detached mode"
+    cmds:
+      - docker compose -f "{{.COMPOSE_FILE}}" up -d
+
+  down:
+    desc: "Stop and remove local dev infra containers (volumes are preserved)"
+    cmds:
+      - docker compose -f "{{.COMPOSE_FILE}}" down
+
+  # ---------------------------------------------------------------------------
+  # Submodule management
+  #
+  # NOTE: submodule repos (api, frontend, backoffice) are declared in .gitmodules
+  # but exist as plain local directories in this batch (not yet registered as git
+  # submodules). These tasks will become fully operational once the directories
+  # are converted to proper git submodules in a later batch (C1 Unit 5).
+  # TODO(C1-Unit5): replace stub bodies with real git submodule commands once
+  #   .gitmodules contains real remote URLs.
+  # ---------------------------------------------------------------------------
+
+  submodules:init:
+    desc: "Initialise and clone all git submodules"
+    cmds:
+      - |
+        echo "TODO(C1-Unit5): submodule URLs not yet registered."
+        echo "Once real URLs are set, this task will run:"
+        echo "  git submodule update --init --recursive"
+
+  submodules:update:
+    desc: "Pull the latest commit for each submodule (following pinned branch/tag)"
+    cmds:
+      - |
+        echo "TODO(C1-Unit5): submodule URLs not yet registered."
+        echo "Once real URLs are set, this task will run:"
+        echo "  git submodule update --remote --merge"
+
+  submodules:sync:
+    desc: "Sync submodule URLs from .gitmodules into .git/config"
+    cmds:
+      - |
+        echo "TODO(C1-Unit5): submodule URLs not yet registered."
+        echo "Once real URLs are set, this task will run:"
+        echo "  git submodule sync --recursive"
+
+  submodules:status:
+    desc: "Show submodule pointer freshness (ahead/behind tracking branch)"
+    cmds:
+      - |
+        echo "TODO(C1-Unit5): submodule URLs not yet registered."
+        echo "Once real URLs are set, this task will run:"
+        echo "  git submodule status --recursive"
+
+  # ---------------------------------------------------------------------------
+  # Per-app test runners
+  # These delegate to each app's own test suite.
+  # Prereq: task up (infra must be healthy for api integration tests).
+  # ---------------------------------------------------------------------------
+
+  test:api:
+    desc: "Run the api Pest test suite (requires postgres + redis healthy)"
+    dir: api
+    cmds:
+      - php artisan test --parallel
+
+  test:frontend:
+    desc: "Run the frontend Vitest unit suite (host) + Playwright E2E (pinned container)"
+    cmds:
+      - (cd frontend && bun run test:unit)
+      - bash "{{.ROOT_DIR}}/scripts/e2e-container.sh" frontend
+
+  test:backoffice:
+    desc: "Run the backoffice Vitest unit suite (host) + Playwright E2E (pinned container)"
+    cmds:
+      - (cd backoffice && bun run test:unit)
+      - bash "{{.ROOT_DIR}}/scripts/e2e-container.sh" backoffice
+
+  # E2E in the pinned Playwright container — same env as CI, so the committed
+  # -linux screenshot baselines match deterministically (visual regression 100% green).
+  e2e:frontend:
+    desc: "Run frontend Playwright E2E in the pinned Playwright container (matches CI)"
+    cmds:
+      - bash "{{.ROOT_DIR}}/scripts/e2e-container.sh" frontend
+
+  e2e:backoffice:
+    desc: "Run backoffice Playwright E2E in the pinned Playwright container (matches CI)"
+    cmds:
+      - bash "{{.ROOT_DIR}}/scripts/e2e-container.sh" backoffice
+
+  e2e:update:
+    desc: "Regenerate ALL Playwright screenshot baselines (both apps) in the pinned container"
+    cmds:
+      - bash "{{.ROOT_DIR}}/scripts/e2e-container.sh" frontend --update-snapshots
+      - bash "{{.ROOT_DIR}}/scripts/e2e-container.sh" backoffice --update-snapshots
+
+  # ---------------------------------------------------------------------------
+  # OpenAPI client sync (C11 D13)
+  #
+  # `backoffice/scripts/check-client-drift.sh` only re-derives `types/api.ts`
+  # from the COMMITTED `backoffice/openapi.json` snapshot — nothing copies the
+  # freshly-exported `api/openapi.json` into `backoffice/`, so a green drift
+  # check can still hide a stale snapshot against the live API. This task
+  # closes that gap: export -> copy -> regenerate the typed client.
+  # ---------------------------------------------------------------------------
+
+  openapi:sync:
+    desc: "Export the API's OpenAPI spec, sync it into backoffice, and regenerate the typed client"
+    dir: api
+    cmds:
+      - php artisan scramble:export
+      - cp "{{.ROOT_DIR}}/api/openapi.json" "{{.ROOT_DIR}}/backoffice/openapi.json"
+      - (cd "{{.ROOT_DIR}}/backoffice" && bun run codegen)
+
+  test:load:
+    desc: "Run K6 load tests against local docker-compose stack (never Railway). Prereq: task up"
+    dir: api
+    cmds:
+      # Reports saved to docs/load-testing/ (gitignored raw files — README is committed)
+      - k6 run --summary-export=../docs/load-testing/baseline-report.json tests/k6/scenarios/baseline.js
+      - k6 run --summary-export=../docs/load-testing/stress-report.json tests/k6/scenarios/stress.js
+      - k6 run --summary-export=../docs/load-testing/spike-report.json tests/k6/scenarios/spike.js

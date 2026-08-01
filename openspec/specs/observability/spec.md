@@ -257,7 +257,7 @@ NOT be exposed to any external stakeholder dashboard or public status page.
 
 #### Scenario: Pulse records queue depth and throughput
 
-- GIVEN the Laravel queue processing jobs via Redis + Horizon
+- GIVEN the Laravel queue processing jobs via Redis (native `queue:work`; Horizon is not installed)
 - WHEN Pulse collects application health data
 - THEN it records job throughput, failure rates, and current queue depth per queue
 
@@ -298,6 +298,8 @@ Cloudflare in production. Cloudflare analytics MUST provide:
 
 ---
 
+<!-- superseded by admin-dashboards (C11) -->
+
 ### Requirement: Internal Business Metrics — Database as Source of Truth
 
 All authoritative business metrics MUST be derived directly from the BEAI
@@ -316,19 +318,46 @@ in the internal Admin Dashboard (implemented in C11):
 - Completion rate (completed / started)
 - Average assessment duration
 
-**AI cost metrics**
+**AI usage metrics (delivered in C11)**
+
+- AI credits consumed (token usage per model)
+
+**AI metrics deferred — NOT in C11 scope**
 
 - AI reports generated (count by period)
-- AI credits consumed (token usage per provider and model)
 - Estimated AI cost (USD, based on logged pricing at request time)
+- Token usage broken down **per provider**
 
-**Business metrics**
+These three require columns the `ai_requests` table does not have. Verified
+against `api/database/migrations/*_create_ai_requests_table.php`: the shipped
+schema carries `model`, `prompt_version`, `input_tokens`, `output_tokens`,
+`finish_reason` and `latency_ms`, but **no `provider`, no `estimated_cost_usd`,
+no per-period report counter**. Design D7 made the right engineering call by
+narrowing the dashboard to token usage and latency rather than fabricating a
+currency figure from pricing that is nowhere recorded — `DashboardController`
+emits no cost field, and `AdminDashboardMetricsTest` asserts its absence
+explicitly. This text was simply never updated to match that decision.
+Ownership of these three passes to the `nfr-hardening` slice (C13), which owns
+closing the `ai_requests` conformance gap; that slice MUST update this
+requirement when it lands.
+
+**Business metrics (deferred — NOT in C11 scope)**
 
 - Conversion rate (trial → paid)
 - Trial conversion timeline (median days to conversion)
 - Subscription growth (month-over-month delta)
 - Monthly recurring revenue (MRR)
 - Feature adoption by organization
+
+These five business metrics require a billing/subscription schema that does not
+exist in the codebase as of C11. They MUST NOT be implemented, stubbed, or
+faked in C11's Admin Dashboard. They are deferred to a future billing slice
+that first introduces the subscription schema; that slice becomes the owner of
+this sub-list and MUST update this requirement when it lands.
+(Previously: listed usage, AI-cost, and business/billing metrics as one
+undifferentiated obligation for C11, including MRR — unbuildable without a
+billing schema, which does not exist. This split separates what C11 can and
+does deliver from what a future billing slice must deliver.)
 
 #### Scenario: Active organization count is derived from the database
 
@@ -343,14 +372,13 @@ in the internal Admin Dashboard (implemented in C11):
 - WHEN an operator queries AI costs for a billing period
 - THEN total token usage and estimated cost per provider and model are computable from those records alone
 
-#### Scenario: MRR is derived from subscription records
+#### Scenario: C11 dashboard does not surface business/billing metrics
 
-- GIVEN subscription records in the database reflecting active paid plans
-- WHEN MRR is calculated for a given date
-- THEN it is computed from the database subscription state
-- AND it does not require a query to a payment processor dashboard or GA4
-
----
+- GIVEN the C11 Admin Dashboard's KPI summary
+- WHEN it is reviewed
+- THEN it displays only usage and AI-cost metrics
+- AND no MRR, trial-conversion, subscription-growth, or feature-adoption widget
+  is present, disabled, or displaying placeholder/fake data
 
 ### Requirement: AI Request Logging
 
@@ -504,3 +532,23 @@ MUST be replaceable without changes to the application's core domain logic.
 - GIVEN any proposal to extend the observability stack with a new service
 - WHEN the change is prepared for review
 - THEN a design document entry documents the new tool's responsibility, why the existing stack is insufficient, and which existing tool (if any) it complements rather than duplicates
+
+<!-- promoted from queue-worker-scheduler -->
+
+### Requirement: Interim Queue Operator Surface Before Laravel Pulse
+
+Until Laravel Pulse is delivered by its owning slice (C13, per the Phased Rollout — C1 Scope
+Boundary requirement), the `queue-runtime` capability's health endpoint is the sole operator-facing
+surface for queue liveness, drain status, and dead-lettered work. No other tool in this spec's
+stack (Sentry, Clarity, GA4, Cloudflare) MUST be treated as providing this signal in the interim.
+When Pulse is delivered, its queue-monitoring scenarios (Requirement: Laravel Pulse — Application
+Health) become the authenticated, richer replacement; the `queue-runtime` health endpoint MAY
+continue to serve as the unauthenticated liveness probe consumed by container orchestration.
+
+#### Scenario: No tool other than the queue-runtime health endpoint is treated as the queue-liveness source before C13
+
+- GIVEN a deployment of this change without Laravel Pulse installed
+- WHEN an operator needs to know whether the worker is alive, the queue is draining, or jobs have
+  dead-lettered
+- THEN the `queue-runtime` capability's health endpoint is the answer
+- AND no business dashboard, Sentry, or external analytics platform is relied upon for that signal

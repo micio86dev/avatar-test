@@ -39,21 +39,52 @@ C1 ──┬─ C2 ──┬─ C3 ── C4 ─────────── C
 | C6 | `participant-sso` | Participant + lifecycle state machine; signed magic-link SSO ingress (create-on-first-access); opaque candidate id | C4 | FR-002; SA-01, SA-12 |
 | C7 | `interview-engine-port` | Port `providers/*`, `proctor.ts`, `proctor-config.ts` into the **frontend (SSR)** Nuxt app; session-credentials API; utterance/integrity/snapshot ingestion; WebRTC direct; unsupported-browser gate | C6 | SA-01, SA-11; latency NFR |
 | C8 | `conversation-orchestration` | Follow-up vs advance; answer→competency attribution; nudge on short answers; pause every N; standard vs potential flow | C7 | SA-02, SA-03, SA-04, SA-08 |
-| C9 | `scoring-engine` | Async `ScoreEvaluationJob`; LLM BARS (JSON-schema, indicators 1–5, competency mean, verbatim excerpts); reliability; 90% gate; retry | C3, C8 | FR-004; SA-05, SA-06, SA-07 |
+| C9 | `scoring-engine` | Async `ScoreEvaluationJob`; LLM BARS (JSON-schema, indicators {1,3,5}, competency mean (assessed only), verbatim excerpts); reliability; 90% gate; retry | C3, C8 | FR-004; SA-05, SA-06, SA-07 |
 | C10 | `webhooks-integration` | Per-project webhook cfg; progress + evaluation events; HMAC; idempotency; retry/backoff; exit redirect | C6, C9 | Integration 03/04; SA-06, SA-07 |
 | C11 | `admin-dashboards` | Build in the **backoffice (SPA)** Nuxt app: participant status views; results/report viewer; transcript & report download; state-gated | C9 | FR-005; SA-09 |
 | C12 | `notifications-reminders` | Invitations; deadline reminders; queued email/notification jobs | C6 | FR-002 |
 | C13 | `nfr-hardening` | Audit logs; GDPR retention/purge (audio/snapshot/transcript); full observability stack enforcement (Sentry, Laravel Pulse, Clarity, GA4, Cloudflare — see `specs/observability/spec.md`); white-label; accessibility; multi-test portal | C10, C11 | FR-006; NFR/GDPR |
+| C14 | `avatar-provider-templates` | Avatar/voice templates per organization, exactly one active at a time; declarative provider field specs; provider payload mapping and Tavus PAL sync; provider opacity toward the candidate | C7, C8 | Operator request |
 
-## Open product decisions (gate downstream changes — close with client)
+## Product decisions
 
-1. `reliability` formula + "valid competency" threshold for the 90% gate → **blocks C9**.
-2. GDPR retention for audio/video/snapshots/transcripts → **blocks production media (C13, decide early)**.
-3. Framework versioning vs live projects (pin `framework_version` at project creation) → C3/C4.
-4. Retry semantics (re-ask all vs invalid-only; token single-use vs retry reuse) → C6/C9.
-5. Time limits / deadline behavior → C4/C6.
-6. Non-English BARS anchors need expert-authored translations → **blocks non-EN scoring (C3/C9)**.
-7. Provider concurrency/cost at scale (queue/waiting-room) → C7.
+Ratified by the product owner on **2026-07-28** unless marked otherwise. Two carry legal
+weight and are implemented parametrically pending sign-off — they are NOT blocked, but they
+must not be treated as legally validated.
+
+1. **`reliability` formula + validity threshold — RATIFIED.** The formula was already
+   implemented and is confirmed as-is: `AssessableFractionReliability` returns
+   `assessed indicators / total indicators` in `[0,1]`, where an indicator scored `-1`
+   (unassessable) is excluded from the numerator. The validity threshold **T = 0.5**
+   (`api/config/scoring.php:36`) is ratified as the operating default: below half the
+   indicators carrying assessable evidence, a competency score would be inferred from a
+   minority of the evidence. T remains env-overridable per tenant.
+   **No High/Medium/Low bands.** The percentage IS the information; banding discards
+   precision for no gain in an expert-facing admin tool. `DESIGN.md` renders it verbatim.
+2. **GDPR retention — DEFAULTS SET, LEGAL SIGN-OFF PENDING.** The purge mechanism is
+   parametric and ships with defaults rather than blocking; the *durations* are a data
+   controller decision with legal consequences and are **not** the implementer's to finalise.
+   Ratification MUST be extended to cover two artefacts that postdate the original framing:
+   `webhook_deliveries.payload` (a frozen evaluation payload carrying the verbatim
+   `candidate_ref`) and `participants.display_name`.
+3. **Framework versioning — RATIFIED**: `framework_version` is pinned at project creation
+   (snapshot-at-pin), so a live project is never retargeted by a later catalogue revision.
+4. **Retry semantics** — still open, product-gated. Blocks the C9 chain-PR 4 (RT-B) only;
+   nothing else waits on it.
+5. **Time limits / deadline behaviour — RATIFIED: out of product scope.** The calling system
+   owns candidate scheduling and reminders, consistent with the SSO-first architecture in
+   which the portal owns candidate UX. BEAI enforces only its short-lived token expiry and
+   introduces no deadline concept of its own.
+6. **Non-English BARS anchors** — still open. Data, not code: expert-authored translations
+   block non-EN scoring go-live.
+7. **Provider concurrency/cost at scale** — still open, revisit when real load exists.
+8. **Candidate contact data (C12) — RATIFIED: BEAI does not hold it.** `participants` carries
+   no contact column by design, and that stays. Invitations and reminders to candidates
+   belong to the calling system; C12 is scoped to **operator-facing** notifications only.
+   Adding candidate PII would be a GDPR decision, not an architectural one.
+9. **White-label and FR-006 multi-test portal — PARKED, not deferred within a slice.** Two
+   lines of brief between them, and FR-006 is marked "Optional". Removed from C13's scope
+   entirely; they need a written requirement before any design work is meaningful.
 
 ## Notes
 
