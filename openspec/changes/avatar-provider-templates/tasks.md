@@ -67,10 +67,16 @@ with green CI, not against a local run.
 
 ## Open
 
-- [ ] 7.1 **Regenerate the typed API client.** `backoffice/app/types/avatar-template.ts`
-      is hand-written because these endpoints postdate the last generation of
-      `types/api.ts`. Two definitions of one contract is exactly the drift this
-      project avoids everywhere else — delete it once the spec is regenerated.
+- [x] 7.1 Regenerate the typed API client — **DONE** (micio86dev/frontend#20,
+      micio86dev/backoffice#11). Both apps regenerated from the same spec
+      snapshot; the template types now DERIVE from it. Two fields stay narrowed
+      with a stated reason: `config` generates as `unknown[]` (PHP has one array
+      type for lists and maps, and this one is a map — adopting it would have
+      the client confidently wrong rather than merely untyped), and `provider`
+      generates as `string` because the union lives in a PHP `match` and a
+      database CHECK, neither of which reaches OpenAPI. `FieldSpec` stays
+      hand-written: the endpoint returns a provider-keyed map of arbitrary
+      descriptors and Scramble types the whole response as `data: string`.
 - [ ] 7.2 **Per-project template override.** Out of scope by decision: the
       requirement is one active template per ORGANIZATION. Worth revisiting,
       because projects already carry `language`, so a single org-wide avatar may
