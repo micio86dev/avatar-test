@@ -6,6 +6,12 @@
       "sourceType": "github",
       "skillPath": "skills/engineering-excellence/SKILL.md",
       "computedHash": "62b576166a7180d44602a33d067bdd27acbcb9ed575ca53fc7aeb01a85f5745c"
+    },
+    "shadcn-vue": {
+      "source": "unovue/shadcn-vue",
+      "sourceType": "github",
+      "skillPath": "skills/shadcn-vue/SKILL.md",
+      "computedHash": "99c23e506f7fa3a1b26dede8e837d067549ba2fbc339ea9030d1563c1f4badf2"
     }
   }
 }

@@ -1,4 +1,4 @@
-# BEAI (Business Evaluation AI) - Software Requirements & Architecture
+# BEAI (Behavioral Event AI) - Software Requirements & Architecture
 
 ## Purpose
 BEAI is a configurable assessment platform used by HR departments to evaluate employees and candidates through psychometric/behavioral assessments.

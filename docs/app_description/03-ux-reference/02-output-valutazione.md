@@ -14,7 +14,7 @@
     "behaviors": [
       {
         "indicator": "Nome indicatore BARS",
-        "score": 4,
+        "score": 3,
         "explanation": "Motivazione del punteggio...",
         "excerpts": [
           "Estratto dalle risposte del candidato...",
@@ -35,6 +35,7 @@
 
 ## Note
 
-- I punteggi per indicatore sono tipicamente su scala 1–5;
+- I punteggi per indicatore usano l'insieme discreto {1,3,5} (ancora più vicina, mai valori intermedi); -1 = non valutabile (escluso dalla media);
 - `reliability` indica quanto le risposte hanno fornito evidenza sufficiente;
+- i valori di `reliability` nell'esempio sono illustrativi e non normativi (in attesa della decisione aperta #1);
 - `excerpts` devono essere citazioni fedeli dalla trascrizione (non inventate).

@@ -9,7 +9,7 @@
         ],
         "explanation": "The candidate demonstrated effective collaboration by working closely with a front-end developer to integrate back-end and front-end components. This direct interaction, outside usual practices, enhanced mutual understanding and project success. The candidate's willingness to adapt and engage directly with colleagues highlights their ability to foster a positive and productive work environment.",
         "indicator": "Work effectively with others",
-        "score": 4
+        "score": 5
       },
       {
         "excerpts": [
@@ -29,7 +29,7 @@
         ],
         "explanation": "The candidate demonstrated strong commitment to team goals by actively engaging in collaborative problem-solving and adapting to new working methods. Their willingness to explore different approaches and integrate diverse perspectives contributed to achieving shared objectives, showcasing their dedication to team success.",
         "indicator": "Demonstrate commitment and dedication to team goals",
-        "score": 4
+        "score": 3
       }
     ],
     "reliability": "100%",
@@ -45,7 +45,7 @@
         ],
         "explanation": "The candidate effectively communicated complex ideas in a simple manner during a company retreat, ensuring understanding among a diverse audience. They prepared and rehearsed their presentation, using slides and simplified explanations to convey technical concepts. This approach was well-received, indicating clarity and conciseness in their communication style.",
         "indicator": "Get the point across clearly and concisely",
-        "score": 4
+        "score": 5
       },
       {
         "excerpts": [
@@ -65,7 +65,7 @@
         ],
         "explanation": "The candidate demonstrated effective group communication by organizing meetings to present ideas clearly and persisting until their design was understood and accepted. They adapted their language to resonate with colleagues, facilitating successful implementation of their proposed architecture.",
         "indicator": "Speak effectively in a group",
-        "score": 4
+        "score": 3
       }
     ],
     "reliability": "100%",
@@ -81,7 +81,7 @@
         ],
         "explanation": "The candidate demonstrated a proactive approach to understanding customer needs by identifying a requirement for flexible map configurations in a cloud app. They addressed this need by proposing a feature to modify map areas post-activation, enhancing the product's value and aligning with customer interests.",
         "indicator": "Understand customer needs and interests",
-        "score": 4
+        "score": 5
       },
       {
         "excerpts": [
@@ -101,7 +101,7 @@
         ],
         "explanation": "The candidate built strong relationships with internal and external customers by collaborating on product development with public transport authorities. Their involvement in joint design and development efforts fostered trust and collaboration, demonstrating effective relationship-building skills.",
         "indicator": "Establish effective working relationships with internal and external customers",
-        "score": 4
+        "score": 3
       }
     ],
     "reliability": "100%",
@@ -117,7 +117,7 @@
         ],
         "explanation": "The candidate maintained high productivity during a critical period when the team leader was absent. They took initiative to learn and use new tools independently, ensuring the continuation of product development. This proactive approach allowed them to manage tasks effectively, demonstrating their ability to maintain productivity under pressure.",
         "indicator": "Maintain a consistent, high level of productivity",
-        "score": 4
+        "score": 5
       },
       {
         "excerpts": [
@@ -137,7 +137,7 @@
         ],
         "explanation": "The candidate efficiently managed multiple requests and conflicting priorities during a period of team leader absence. They communicated directly with other teams, such as DevOps, to ensure smooth operations. This proactive communication and management of tasks under pressure highlight their ability to handle conflicting priorities effectively.",
         "indicator": "Respond promptly to requests also managing conflicting priorities",
-        "score": 4
+        "score": 3
       }
     ],
     "reliability": "100%",
@@ -153,7 +153,7 @@
         ],
         "explanation": "The candidate effectively won support by organizing a meeting to present their architectural design, using clear communication and persistence. They addressed team concerns and repeated their ideas until they were accepted, demonstrating strong persuasive skills and gaining team endorsement for their proposal.",
         "indicator": "Win support from others",
-        "score": 4
+        "score": 5
       },
       {
         "excerpts": [
@@ -163,7 +163,7 @@
         ],
         "explanation": "The candidate tailored their proposal to align with team needs by discussing and understanding the right architecture. They engaged with colleagues to ensure their design addressed team priorities, fostering cooperation and mutual understanding, which led to the successful adoption of their idea.",
         "indicator": "Ensure that own positions address others' needs and priorities.",
-        "score": 4
+        "score": 3
       },
       {
         "excerpts": [
@@ -173,11 +173,11 @@
         ],
         "explanation": "The candidate provided a well-reasoned rationale for their architectural proposal, drawing on discussions with other teams and personal research. Their logical reasoning and evidence-based approach helped convince the team of the proposal's merits, leading to its successful implementation.",
         "indicator": "Provide sound rationale to support opinions and proposals",
-        "score": 4
+        "score": 5
       }
     ],
     "reliability": "100%",
-    "score": 4
+    "score": 4.33
   },
   "INN": {
     "behaviors": [
@@ -189,7 +189,7 @@
         ],
         "explanation": "The candidate consistently demonstrated curiosity and open-mindedness by exploring new methods to handle large datasets. They developed scripts to extract manageable subsets for testing, showing a proactive approach to problem-solving and a willingness to explore innovative solutions.",
         "indicator": "Approaches problems with curiosity and open-mindedness.",
-        "score": 4
+        "score": 5
       },
       {
         "excerpts": [
@@ -199,7 +199,7 @@
         ],
         "explanation": "The candidate generated innovative solutions by proposing a message broker architecture for microservices communication, challenging the existing API call method. This approach was initially met with resistance but was eventually adopted, demonstrating their ability to propose and implement novel ideas.",
         "indicator": "Generates innovative ideas and solutions to problems.",
-        "score": 4
+        "score": 5
       },
       {
         "excerpts": [
@@ -209,11 +209,11 @@
         ],
         "explanation": "The candidate quickly adapted to new methods by learning and applying chunked file uploads for large data handling. They embraced the change and effectively integrated new knowledge into their work, demonstrating a proactive approach to adapting to new technologies.",
         "indicator": "Quickly adapt to new ways of doing things",
-        "score": 4
+        "score": 3
       }
     ],
     "reliability": "100%",
-    "score": 4
+    "score": 4.33
   },
   "LRN": {
     "behaviors": [
@@ -225,7 +225,7 @@
         ],
         "explanation": "The candidate actively sought feedback from a senior developer to improve their coding skills. They demonstrated openness by asking for advice and applying the feedback to enhance their professional approach to software engineering, showing a willingness to learn and improve based on constructive criticism.",
         "indicator": "Accept feedback openly, without getting defensive",
-        "score": 4
+        "score": 5
       },
       {
         "excerpts": [
@@ -235,7 +235,7 @@
         ],
         "explanation": "The candidate actively pursued learning opportunities by creating toy projects to understand Docker and Kubernetes. They demonstrated a proactive approach to acquiring new skills, staying ahead of trends, and continuously expanding their knowledge base, which is indicative of a strong commitment to personal growth.",
         "indicator": "Seeks opportunities to acquire new knowledge and skills.",
-        "score": 4
+        "score": 5
       },
       {
         "excerpts": [
@@ -245,11 +245,11 @@
         ],
         "explanation": "The candidate demonstrated a strong curiosity and enthusiasm for learning by quickly acquiring knowledge about chunked file uploads and applying it to their work. Their proactive approach to learning new technologies and integrating them into their projects highlights their eagerness to explore new topics and apply knowledge effectively.",
         "indicator": "Prove \"hungry\" to learn new things",
-        "score": 4
+        "score": 3
       }
     ],
     "reliability": "100%",
-    "score": 4
+    "score": 4.33
   },
   "OPX": {
     "behaviors": [
@@ -281,11 +281,11 @@
         ],
         "explanation": "The candidate actively contributed to team goals by collaborating on product development with potential clients. They engaged in joint design and development efforts, demonstrating initiative and collaboration, which supported the team's success and strengthened client relationships.",
         "indicator": "Contribute to the achievement of own team goals",
-        "score": 4
+        "score": 5
       }
     ],
     "reliability": "100%",
-    "score": 3.33
+    "score": 3.67
   },
   "PRS": {
     "behaviors": [
@@ -297,7 +297,7 @@
         ],
         "explanation": "The candidate demonstrated the ability to recognize symptoms indicating problems by identifying large files mistakenly added to a Git repository. They understood the implications of this issue and took steps to address it before it escalated, showing a proactive approach to problem recognition and resolution.",
         "indicator": "Recognizes symptoms that indicate problems.",
-        "score": 4
+        "score": 5
       },
       {
         "excerpts": [
@@ -307,7 +307,7 @@
         ],
         "explanation": "The candidate effectively generated solution hypotheses by proposing a merge squash to resolve the issue of large files in the Git repository. This approach demonstrated their ability to devise practical solutions based on a clear understanding of the problem and the tools available.",
         "indicator": "Come up with solution hypotheses for problems",
-        "score": 4
+        "score": 5
       },
       {
         "excerpts": [
@@ -317,11 +317,11 @@
         ],
         "explanation": "The candidate quickly learned and applied new concepts to solve a problem involving large file uploads. They researched chunked file uploads and used Postman to test their backend code, demonstrating their ability to incorporate new information effectively into their work.",
         "indicator": "Analyzes, incorporates and applies new information and concepts.",
-        "score": 4
+        "score": 3
       }
     ],
     "reliability": "100%",
-    "score": 4
+    "score": 4.33
   },
   "RES": {
     "behaviors": [
@@ -333,7 +333,7 @@
         ],
         "explanation": "The candidate demonstrated flexibility and adaptability when a team member unexpectedly resigned. They quickly adjusted by planning a knowledge transfer and rescheduling tasks, maintaining productivity despite the disruption. Their proactive approach and collaboration with product management ensured a positive outcome, showcasing their ability to adapt to changing priorities effectively.",
         "indicator": "Demonstrate flexibility and adaptability when priorities change",
-        "score": 4
+        "score": 5
       },
       {
         "excerpts": [
@@ -343,7 +343,7 @@
         ],
         "explanation": "The candidate maintained composure under pressure when unexpected errors occurred after deploying new developments. They calmly restored previous functionality and analyzed logs to plan a resolution, demonstrating clear thinking and rational decision-making in high-pressure situations, which reassured their team and ensured continuity.",
         "indicator": "Keep calm under pressure",
-        "score": 4
+        "score": 5
       },
       {
         "excerpts": [
@@ -353,11 +353,11 @@
         ],
         "explanation": "The candidate took ownership of mistakes by addressing errors in a deployment. They restored previous functionality and analyzed the issue to prevent recurrence, demonstrating a proactive approach to acknowledging and learning from mistakes, which helped maintain trust and improve future processes.",
         "indicator": "Acknowledge own mistakes",
-        "score": 4
+        "score": 3
       }
     ],
     "reliability": "100%",
-    "score": 4
+    "score": 4.33
   },
   "SLF": {
     "behaviors": [
@@ -369,7 +369,7 @@
         ],
         "explanation": "The candidate provided a detailed and engaging description of a traffic management product, explaining its value to colleagues. They tailored their explanation to highlight the product's benefits, demonstrating a solid understanding and ability to communicate effectively about the product's features and potential impact.",
         "indicator": "Describe products and services accurately",
-        "score": 4
+        "score": 5
       },
       {
         "excerpts": [
@@ -379,7 +379,7 @@
         ],
         "explanation": "The candidate effectively linked their arguments to customer needs by discussing the automation of traffic management processes. They demonstrated an understanding of customer priorities and used this insight to persuade colleagues of the product's value, aligning their arguments with customer requirements.",
         "indicator": "Link own arguments to customer needs and priorities",
-        "score": 4
+        "score": 3
       },
       {
         "excerpts": [],
@@ -389,7 +389,7 @@
       }
     ],
     "reliability": "67%",
-    "score": 4
+    "score": 4.0
   },
   "STG": {
     "behaviors": [
@@ -401,7 +401,7 @@
         ],
         "explanation": "The candidate demonstrated foresight by planning the development of a microservices-based product to prevent future scalability issues. They anticipated resource needs and structured the architecture to accommodate growth, showing a strong understanding of the consequences of their actions on the project's success and sustainability.",
         "indicator": "Understand the short- and medium-term consequences of own actions",
-        "score": 4
+        "score": 5
       },
       {
         "excerpts": [
@@ -421,7 +421,7 @@
         ],
         "explanation": "The candidate demonstrated a deep understanding of the organization's purpose and processes by aligning product development with client needs. They engaged in joint design efforts with public transport authorities, ensuring the product met strategic goals and enhanced client relationships, reflecting a strong alignment with business objectives.",
         "indicator": "Know the purpose of the organization and how the main processes work",
-        "score": 4
+        "score": 3
       }
     ],
     "reliability": "100%",
