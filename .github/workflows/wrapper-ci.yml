@@ -434,6 +434,11 @@ jobs:
             echo "  ok — Dockerfile guard: a missing file"
           fi
 
+          # Horizon: present is a violation, a mention in prose is not.
+          printf '{"require":{"laravel/horizon":"^5.0"}}' > "$FIXTURE/composer.json"
+          HIT=$(grep -rl --include="composer.json" "laravel/horizon" "$FIXTURE" 2>/dev/null || true)
+          expect_caught "Horizon" "$HIT"
+
           rm -rf "$FIXTURE"
 
           if [ "$FAILED" -ne 0 ]; then
@@ -492,6 +497,22 @@ jobs:
           HITS=$(grep -rl --include="*.php" --include="*.ts" --include="*.vue" --include="composer.json" --include="composer.lock" "Sanctum\|sanctum" --exclude-dir=vendor --exclude-dir=node_modules . 2>/dev/null | grep -v "design.md\|openspec/" | xargs -r grep -H "Sanctum\|sanctum" | grep -v "NOT Sanctum\|not Sanctum\|not use Sanctum" || true)
           if [ -n "$HITS" ]; then
             echo "ERROR: Sanctum reference found outside 'NOT Sanctum' contexts:"
+            echo "$HITS"
+            FAIL=1
+          fi
+
+          # Horizon stays uninstalled. Ratified 2026-07-28 and stated in CLAUDE.md:
+          # workers run Laravel's native queue:work + schedule:work, and Horizon
+          # "is deferred, NOT installed — do not assume it exists".
+          #
+          # Guarded because it is the kind of decision that gets quietly undone:
+          # somebody reaches for a queue dashboard, composer require succeeds,
+          # and a ratified architectural choice is reversed by a convenience.
+          # Adopting it later is an additive change with a proposal, not a
+          # dependency somebody added on a Tuesday.
+          HITS=$(grep -rl --include="composer.json" --include="composer.lock" "laravel/horizon" --exclude-dir=vendor . 2>/dev/null || true)
+          if [ -n "$HITS" ]; then
+            echo "ERROR: laravel/horizon is installed. It is DEFERRED by ratified decision (CLAUDE.md)."
             echo "$HITS"
             FAIL=1
           fi
