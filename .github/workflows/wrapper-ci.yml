@@ -5,22 +5,38 @@
 # Does NOT re-run per-app unit/E2E suites (those belong to each app's own CI).
 # Does NOT deploy — Railway deploy is manual and per-service.
 #
-# NOTE (Unit 5 adaptation): app directories are plain local dirs (not git submodules yet).
-# The submodule-pointer sanity check is DEFERRED to Unit 5 when real submodule URLs exist.
-# In its place this workflow validates:
+# The app directories ARE git submodules with real remotes, and the checkout
+# below fetches them recursively. The note that stood here said the opposite and
+# deferred the submodule-pointer check "until real URLs exist" — they have
+# existed for a long time, and the note outliving that fact is why nobody
+# noticed the openapi gate below had never once run.
+#
+# This workflow validates:
 #   (a) docker compose config parses without errors
 #   (b) the committed openapi.json is semantically identical across api/frontend/backoffice
 #   (c) each app's check-client-drift.sh exits 0 (generated TS client matches openapi.json)
 #
-# Triggers: push/PR to develop only (not main — releases handled by Git Flow release process).
+# Triggers: develop, main, release/** and hotfix/**.
+#
+# It used to be develop only, justified as "releases handled by Git Flow". This
+# is the ONLY workflow in the wrapper, so nothing re-ran these gates on a
+# release: the branch where submodule pointers are bumped to release tags, and
+# the branch that becomes production, got no cross-stack validation at all.
+# hotfix/** is worse — by definition it ships straight to main, under pressure.
 
 on:
   push:
     branches:
       - develop
+      - main
+      - 'release/**'
+      - 'hotfix/**'
   pull_request:
     branches:
       - develop
+      - main
+      - 'release/**'
+      - 'hotfix/**'
 
 jobs:
   wrapper-cross-stack:
@@ -30,7 +46,24 @@ jobs:
     steps:
       - name: Checkout wrapper repo
         uses: actions/checkout@v4
-        # NOTE(Unit 5): add `submodules: recursive` here once .gitmodules has real remote URLs.
+        with:
+          # Without this the submodules are empty directories, and every check
+          # below that reads a file inside one fails on FileNotFoundError before
+          # it can compare anything.
+          #
+          # The note that used to sit here said to add this "once .gitmodules
+          # has real remote URLs". They have been real for a long time — so the
+          # cross-stack openapi gate, which guards the single most drift-prone
+          # artifact in a three-repository setup, has never once run.
+          submodules: recursive
+          # Full history, not the default depth-1. That depth applies to
+          # submodules too, and in a shallow clone `merge-base --is-ancestor`
+          # cannot see the ancestry chain — so the pointer check below reports a
+          # perfectly good pin as unreachable the moment a submodule's develop
+          # advances past it, which is the NORMAL state of a wrapper between
+          # bumps. It is green today only because all three pointers happen to
+          # equal their branch tips.
+          fetch-depth: 0
 
       # -----------------------------------------------------------------------
       # (a) docker compose config — validates the compose file parses cleanly
@@ -41,67 +74,137 @@ jobs:
           docker compose config -q
           echo "Checking all pinned image tags (no 'latest' or bare-major allowed):"
           docker compose config | grep 'image:' | grep -v '#'
-          # Fail if any image tag is 'latest' or a bare major (e.g. :8, :24) — D24 requires pinned tags
-          if docker compose config | grep 'image:' | grep -vE ':[a-zA-Z0-9._-]+-[a-zA-Z0-9._-]+|:[a-zA-Z0-9._-]+\.[a-zA-Z0-9._-]+|:v[0-9]+\.[0-9]+|:pg[0-9]+-|:local$' | grep -v '#' | grep 'image:'; then
-            echo "ERROR: One or more services use a floating image tag (latest or bare-major). Fix per D24/D25."
+          # The SAME tag rule the Dockerfile check below uses. Two different
+          # pinning rules in one file is how one of them drifts — and this one
+          # had: it accepted any tag containing a dot anywhere, so
+          # `node:24-alpine3.19` passed on the variant's version while the major
+          # floated across every patch.
+          #
+          # The tag is everything after the last colon, and it must START with a
+          # dotted version, or be `local`.
+          docker compose config | grep -E '^\s*image:' | while read -r _ REF; do
+            case "$REF" in *:*) ;; *) echo "UNPINNED:$REF"; continue ;; esac
+            TAG=${REF##*:}
+            printf '%s' "$TAG" | grep -qE '^v?[0-9]+\.[0-9]+|^local$' || echo "UNPINNED:$REF"
+          done > /tmp/unpinned.txt
+          if [ -s /tmp/unpinned.txt ]; then
+            echo "ERROR: floating image tag(s) in docker-compose — pin per D24/D25:"
+            sed 's/^UNPINNED://' /tmp/unpinned.txt
             exit 1
           fi
-          echo "All image tags are pinned."
+          echo "All compose image tags are pinned."
+
+          # Deliberately small. Earlier versions parsed stage names and refs by
+          # hand and kept breaking on real syntax — `FROM builder AS runtime`,
+          # `FROM --platform=$BUILDPLATFORM node:24`, lowercase `from`. Each fix
+          # grew the parser and revealed another case, which is the signal that
+          # the medium is wrong: it was a Dockerfile parser written in bash.
+          #
+          # It asks one question per LINE. Per line, not over a flattened token
+          # list — an earlier version broke out after the first registry
+          # reference, so a pinned builder stage hid a floating runtime stage
+          # entirely, and the test matrix missed it because its multi-stage
+          # fixture used a stage reference rather than a second image.
+          #
+          # A registry reference contains ':' or '/'; a bare word is a stage
+          # name and is skipped. The TAG — everything after the last colon —
+          # must start with a dotted version, or be `local`.
+          #
+          # Known limit, stated rather than parsed around: `FROM ubuntu`, with
+          # no tag at all, reads as a stage name and passes. Distinguishing it
+          # needs the declared-stage tracking this deliberately does not do.
+          for DF in api/Dockerfile frontend/Dockerfile backoffice/Dockerfile; do
+            if [ ! -f "$DF" ]; then
+              echo "ERROR: $DF not found. The base-image check cannot verify what it cannot read."
+              exit 1
+            fi
+
+            while IFS= read -r LINE; do
+              REF=$(printf '%s' "$LINE" \
+                | sed 's/^[[:space:]]*[Ff][Rr][Oo][Mm][[:space:]]\{1,\}//' \
+                | tr ' \t' '\n\n' | grep -v '^--' | grep -v '^$' | head -1)
+              [ -n "$REF" ] || continue
+              case "$REF" in *:*|*/*) ;; *) continue ;; esac
+              TAG=${REF##*:}
+              if ! printf '%s' "$TAG" | grep -qE '^v?[0-9]+\.[0-9]+|^local$'; then
+                echo "ERROR: $DF uses a floating base image: $REF. Pin it per D24/D25."
+                exit 1
+              fi
+            done < <(grep -iE '^[[:space:]]*from[[:space:]]' "$DF")
+          done
+
+          echo "All image tags are pinned — compose services and Dockerfile bases."
 
       # -----------------------------------------------------------------------
       # (b) openapi.json cross-repo consistency check
       #     The committed openapi.json in api/, frontend/, and backoffice/ MUST
       #     be semantically identical (same parsed JSON, whitespace-agnostic).
       # -----------------------------------------------------------------------
-      - name: Set up Python (for JSON comparison)
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Verify openapi.json is identical across api/frontend/backoffice
-        run: |
-          python3 - <<'EOF'
-          import json, sys
-
-          files = {
-              'api/openapi.json':        'api',
-              'frontend/openapi.json':   'frontend',
-              'backoffice/openapi.json': 'backoffice',
-          }
-
-          loaded = {}
-          for path, label in files.items():
-              with open(path) as f:
-                  loaded[label] = json.load(f)
-
-          reference = loaded['api']
-          errors = []
-          for label, content in loaded.items():
-              if label == 'api':
-                  continue
-              if content != reference:
-                  errors.append(f"  {label}/openapi.json differs from api/openapi.json")
-
-          if errors:
-              print("ERROR: openapi.json cross-repo drift detected!")
-              print("The committed openapi.json must be identical in api/, frontend/, and backoffice/.")
-              print("To fix: re-export from api (php artisan scramble:export), copy to frontend/ and backoffice/, regenerate typed clients, run full test suites green, commit.")
-              for e in errors:
-                  print(e)
-              sys.exit(1)
-          else:
-              print("openapi.json is semantically identical across all 3 repos.")
-          EOF
-
-      # -----------------------------------------------------------------------
-      # (c) TS client drift check — each app's check-client-drift.sh must exit 0.
-      #     Requires Bun and openapi-typescript to be available.
-      # -----------------------------------------------------------------------
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: '1.3'
 
+      - name: Verify openapi.json is identical across api/frontend/backoffice
+        run: |
+          # Bun, not Python. Python is not in the required toolchain
+          # (docs/dev-setup.md: PHP, Composer, Bun, Node, Docker, Playwright,
+          # go-task, git, k6), and installing a whole language runtime to do a
+          # JSON.parse and an equality check is a D37 dependency question rather
+          # than a style preference — especially in a job that already pins Bun.
+          bun --eval '
+            const files = {
+              "api/openapi.json": "api",
+              "frontend/openapi.json": "frontend",
+              "backoffice/openapi.json": "backoffice",
+            };
+
+            const loaded = {};
+            for (const [path, label] of Object.entries(files)) {
+              loaded[label] = JSON.parse(await Bun.file(path).text());
+            }
+
+            // Compared as PARSED JSON with keys sorted RECURSIVELY, not as bytes:
+            // prettier reformats these files in the Nuxt repos, so a byte
+            // comparison fails on whitespace while the contract is identical.
+            //
+            // The obvious-looking JSON.stringify(v, Object.keys(v).sort()) does
+            // NOT do this. That second argument is a replacer ARRAY: it FILTERS
+            // properties by name, at every level, so almost the whole document
+            // drops out of the comparison. Written that way this gate reported
+            // "identical" against a deliberately corrupted spec — verified, and
+            // it is why the failure path is now part of the check itself.
+            const canonical = (v) => {
+              if (Array.isArray(v)) return v.map(canonical);
+              if (v === null || typeof v !== "object") return v;
+              return Object.fromEntries(
+                Object.keys(v).sort().map((k) => [k, canonical(v[k])]),
+              );
+            };
+
+            const serialize = (v) => JSON.stringify(canonical(v));
+            const reference = serialize(loaded.api);
+
+            const errors = Object.entries(loaded)
+              .filter(([label]) => label !== "api")
+              .filter(([, content]) => serialize(content) !== reference)
+              .map(([label]) => `  ${label}/openapi.json differs from api/openapi.json`);
+
+            if (errors.length > 0) {
+              console.log("ERROR: openapi.json cross-repo drift detected!");
+              console.log("The committed openapi.json must be identical in api/, frontend/, and backoffice/.");
+              console.log("To fix: re-export from api (php artisan scramble:export), copy to frontend/ and backoffice/, regenerate typed clients, run full test suites green, commit.");
+              errors.forEach((e) => console.log(e));
+              process.exit(1);
+            }
+
+            console.log("openapi.json is semantically identical across all 3 repos.");
+          '
+
+      # -----------------------------------------------------------------------
+      # (c) TS client drift check — each app's check-client-drift.sh must exit 0.
+      #     Requires Bun and openapi-typescript to be available.
+      # -----------------------------------------------------------------------
       - name: Install frontend deps (for drift check)
         working-directory: frontend
         run: bun install --frozen-lockfile
@@ -123,21 +226,258 @@ jobs:
       #     (MySQL, Laravel 12, Sanctum in non-design contexts, pnpm/yarn/npm
       #     in Nuxt apps, etc.)
       # -----------------------------------------------------------------------
+      # -----------------------------------------------------------------------
+      # (e) Self-test: prove the guards can FAIL.
+      #
+      # Every defect fixed in this file was the same shape — a check whose text
+      # stated the rule while its mechanism excluded the violation. Reading
+      # cannot find those. Only running the guard against a deliberately broken
+      # input can, and that is what this step does.
+      #
+      # A guard with no red test is a guard trusted on faith. Three of them
+      # here had never once gone red, and all three were broken.
+      # -----------------------------------------------------------------------
+      # -----------------------------------------------------------------------
+      # Submodule pointers: is every pinned commit actually reachable?
+      #
+      # This was the gap the header named and left open, and adding release/**
+      # and hotfix/** to the triggers made it sharper rather than smaller —
+      # those are precisely the branches where pointers get bumped to release
+      # tags. A trigger was added for the branch while the only check that
+      # branch specifically needs was missing.
+      #
+      # A pointer to a commit that exists only on somebody's laptop clones as a
+      # detached, unfetchable SHA: `git submodule update` fails for everyone
+      # else, and nothing here would have said so.
+      # -----------------------------------------------------------------------
+      - name: Verify submodule pointers are reachable on their tracking branches
+        run: |
+          FAIL=0
+          while read -r SHA P _; do
+            SHA=${SHA#[-+U]}
+            BRANCH=$(git config -f .gitmodules "submodule.$P.branch" 2>/dev/null || echo develop)
+            git -C "$P" fetch -q origin "$BRANCH" 2>/dev/null || true
+            if git -C "$P" merge-base --is-ancestor "$SHA" "origin/$BRANCH" 2>/dev/null; then
+              echo "  ok — $P at ${SHA:0:8}, reachable from origin/$BRANCH"
+            else
+              echo "ERROR: $P is pinned at $SHA, which is NOT reachable from origin/$BRANCH."
+              echo "  The pointer references a commit nobody else can fetch."
+              FAIL=1
+            fi
+          done < <(git submodule status | sed 's/^[[:space:]]*//')
+          [ "$FAIL" -eq 0 ] || exit 1
+          echo "All submodule pointers are reachable."
+
+      - name: Self-test — each guard must reject a known-bad fixture
+        run: |
+          set -e
+          FIXTURE=$(mktemp -d)
+          FAILED=0
+
+          expect_caught() {
+            # $1 = what is being tested, $2 = grep output (non-empty means caught)
+            if [ -z "$2" ]; then
+              echo "SELF-TEST FAILED: the $1 guard did NOT reject its known-bad fixture."
+              echo "  The guard is decorative: it cannot detect the thing it exists to detect."
+              FAILED=1
+            else
+              echo "  ok — $1 guard rejects a known violation"
+            fi
+          }
+
+          # Bun-only: a real command, and a runner invocation.
+          mkdir -p "$FIXTURE/app"
+          printf 'npm install\nnpx nuxi typecheck\n' > "$FIXTURE/app/README.md"
+          HIT=$(grep -rn -E --include="*.md" "(^|[^a-z-])((npm|pnpm|yarn)[[:space:]]+(install|run|add|exec|create|dlx|ci|test|build|dev|start|link|update|why|list)|(npx|pnpx)[[:space:]]+[a-zA-Z@])" "$FIXTURE" 2>/dev/null || true)
+          expect_caught "Bun-only" "$HIT"
+
+          # Bun-only must NOT reject a line documenting the prohibition, nor a
+          # comment. Both were false positives this file actually produced.
+          printf '# was `npm install -g bun`\nnpm, pnpm and yarn are not used here.\n' > "$FIXTURE/app/NOTES.md"
+          FALSE=$(grep -rn -E --include="NOTES.md" "(^|[^a-z-])((npm|pnpm|yarn)[[:space:]]+(install|run|add|exec|create|dlx|ci|test|build|dev|start|link|update|why|list)|(npx|pnpx)[[:space:]]+[a-zA-Z@])" "$FIXTURE" 2>/dev/null | grep -v -E "^[^:]*:[0-9]+:[[:space:]]*#" || true)
+          if [ -n "$FALSE" ]; then
+            echo "SELF-TEST FAILED: the Bun-only guard rejects prose that merely NAMES the banned tools:"
+            echo "$FALSE"
+            FAILED=1
+          else
+            echo "  ok — Bun-only guard tolerates documentation of the rule"
+          fi
+
+          # Compose image pinning — the same tag rule, asserted on the two forms
+          # that used to slip through: a bare major with a suffix, and a variant
+          # that carries its own version.
+          tag_pinned() {
+            case "$1" in *:*) ;; *) return 1 ;; esac
+            printf '%s' "${1##*:}" | grep -qE '^v?[0-9]+\.[0-9]+|^local$'
+          }
+          for BAD in redis:8-alpine node:24-alpine3.19 postgres:17 nginx:latest; do
+            if tag_pinned "$BAD"; then
+              echo "SELF-TEST FAILED: the compose image-pin rule accepted $BAD."
+              FAILED=1
+            fi
+          done
+          for GOOD in redis:8.0-alpine pgvector/pgvector:0.8.0-pg17 axllent/mailpit:v1.22 beai-api:local; do
+            if ! tag_pinned "$GOOD"; then
+              echo "SELF-TEST FAILED: the compose image-pin rule rejected $GOOD."
+              FAILED=1
+            fi
+          done
+          echo "  ok — compose image-pin rule: 4 rejected, 4 accepted"
+
+          # openapi drift: a single changed value anywhere in the document.
+          mkdir -p "$FIXTURE/a" "$FIXTURE/b"
+          printf '{"paths":{"/x":{"get":{"summary":"one"}}}}' > "$FIXTURE/a/openapi.json"
+          printf '{"paths":{"/x":{"get":{"summary":"two"}}}}' > "$FIXTURE/b/openapi.json"
+          # EXPORTED, not passed as argv. `bun --eval 'script' FIXTURE=...` puts
+          # that in argv, where process.env cannot see it — which is how the
+          # self-test caught its own sub-test being broken on the first run.
+          export FIXTURE
+          DRIFT=$(bun --eval '
+            const canonical = (v) => {
+              if (Array.isArray(v)) return v.map(canonical);
+              if (v === null || typeof v !== "object") return v;
+              return Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonical(v[k])]));
+            };
+            const s = async (p) => JSON.stringify(canonical(JSON.parse(await Bun.file(p).text())));
+            const dir = process.env.FIXTURE;
+            console.log((await s(dir + "/a/openapi.json")) === (await s(dir + "/b/openapi.json")) ? "" : "differs");
+          ' 2>/dev/null || true)
+          expect_caught "openapi-drift" "$DRIFT"
+
+          # Sanctum — the sharpest rule in the standards ("JWT, NOT Sanctum") and
+          # the most fragile mechanism in this file: a -l pass piped through
+          # xargs into a second grep. Untested, it was one pipe away from
+          # silently passing everything.
+          printf 'laravel/sanctum: ^4.0\n' > "$FIXTURE/composer.json"
+          HIT=$(grep -rl --include="composer.json" "Sanctum\|sanctum" "$FIXTURE" 2>/dev/null | xargs -r grep -H "Sanctum\|sanctum" | grep -v "NOT Sanctum\|not Sanctum\|not use Sanctum" || true)
+          expect_caught "Sanctum" "$HIT"
+
+          # ...and must still tolerate the phrasing the standards themselves use.
+          printf 'Auth is JWT — NOT Sanctum.\n' > "$FIXTURE/composer.json"
+          FALSE=$(grep -rl --include="composer.json" "Sanctum\|sanctum" "$FIXTURE" 2>/dev/null | xargs -r grep -H "Sanctum\|sanctum" | grep -v "NOT Sanctum\|not Sanctum\|not use Sanctum" || true)
+          if [ -n "$FALSE" ]; then
+            echo "SELF-TEST FAILED: the Sanctum guard rejects the standards' own wording:"
+            echo "$FALSE"
+            FAILED=1
+          else
+            echo "  ok — Sanctum guard tolerates 'NOT Sanctum'"
+          fi
+
+          # MySQL/MariaDB.
+          printf "'"'"'mysql'"'"' => ['"'"'driver'"'"' => '"'"'mysql'"'"'],\n" > "$FIXTURE/db.php"
+          HIT=$(grep -rl --include="*.php" "mysql\|mariadb" "$FIXTURE" 2>/dev/null || true)
+          expect_caught "MySQL/MariaDB" "$HIT"
+
+          # Laravel 12 (we are on 13).
+          printf 'Laravel 12\n' > "$FIXTURE/notes.md"
+          HIT=$(grep -rl --include="*.md" "Laravel 12\|laravel/laravel:^12" "$FIXTURE" 2>/dev/null || true)
+          expect_caught "Laravel-12" "$HIT"
+
+          # The pgsql pin — a POSITIVE assertion, so its failure mode is the
+          # line being absent rather than present.
+          printf 'services:\n  api:\n    environment:\n      DB_CONNECTION: mysql\n' > "$FIXTURE/compose.yml"
+          if grep -q "DB_CONNECTION: pgsql" "$FIXTURE/compose.yml"; then
+            echo "SELF-TEST FAILED: the pgsql-pin check passed a compose file pinning mysql."
+            FAILED=1
+          else
+            echo "  ok — pgsql-pin check rejects a compose file that pins another driver"
+          fi
+
+          # The Dockerfile base-image guard, against every real Dockerfile idiom.
+          # Each row here exists because an earlier version of that guard got it
+          # wrong — the multi-stage reference, the BuildKit --platform flag, and
+          # lowercase `from` all broke CI or slipped through, and only running
+          # them showed it.
+          df_guard() {
+            local DF="$1"
+            [ -f "$DF" ] || return 1
+            while IFS= read -r LINE; do
+              local REF TAG
+              REF=$(printf '%s' "$LINE" \
+                | sed 's/^[[:space:]]*[Ff][Rr][Oo][Mm][[:space:]]\{1,\}//' \
+                | tr ' \t' '\n\n' | grep -v '^--' | grep -v '^$' | head -1)
+              [ -n "$REF" ] || continue
+              case "$REF" in *:*|*/*) ;; *) continue ;; esac
+              TAG=${REF##*:}
+              printf '%s' "$TAG" | grep -qE '^v?[0-9]+\.[0-9]+|^local$' || return 1
+            done < <(grep -iE '^[[:space:]]*from[[:space:]]' "$DF")
+            return 0
+          }
+
+          df_case() {
+            printf "$3" > "$FIXTURE/Dockerfile.case"
+            local GOT
+            if df_guard "$FIXTURE/Dockerfile.case"; then GOT=pass; else GOT=fail; fi
+            if [ "$GOT" = "$2" ]; then
+              echo "  ok — Dockerfile guard: $1"
+            else
+              echo "SELF-TEST FAILED: Dockerfile guard on '$1' expected $2, got $GOT."
+              FAILED=1
+            fi
+          }
+
+          df_case "a pinned base"              pass 'FROM node:24.11-slim AS runtime\n'
+          df_case "a floating base"            fail 'FROM node:24-slim AS runtime\n'
+          df_case "a multi-stage reference"    pass 'FROM node:24.11-slim AS builder\nFROM builder AS runtime\n'
+          df_case "a floating SECOND stage"    fail 'FROM node:24.11-slim AS builder\nFROM node:24-slim AS runtime\n'
+          df_case "a --platform flag"          pass 'FROM --platform=$BUILDPLATFORM node:24.11-slim AS b\n'
+          df_case "--platform + floating"      fail 'FROM --platform=$BUILDPLATFORM node:24-slim AS b\n'
+          df_case "lowercase from"             fail 'from node:24-slim as runtime\n'
+          df_case "a versioned VARIANT"        fail 'FROM node:24-alpine3.19\n'
+          df_case "the :local convention"      pass 'FROM beai-api:local\n'
+
+          # A missing file must FAIL, not pass quietly.
+          if df_guard "$FIXTURE/Dockerfile.absent"; then
+            echo "SELF-TEST FAILED: the Dockerfile guard passed on a file that does not exist."
+            FAILED=1
+          else
+            echo "  ok — Dockerfile guard: a missing file"
+          fi
+
+          rm -rf "$FIXTURE"
+
+          if [ "$FAILED" -ne 0 ]; then
+            exit 1
+          fi
+          echo "Every guard rejected its known-bad fixture."
+
       - name: Stack token consistency check
         run: |
           echo "Checking for stale stack tokens..."
           FAIL=0
 
           # MySQL/MariaDB outside design.md (where it's mentioned as rejected alternative)
-          HITS=$(grep -r --include="*.php" --include="*.ts" --include="*.vue" --include="*.json" --include="*.yml" --include="*.yaml" -l "mysql\|mariadb" --exclude-dir=vendor --exclude-dir=node_modules --exclude-dir=.nuxt . 2>/dev/null | grep -v "design.md" | grep -v "openspec/changes" || true)
+          # Three exclusions, each for a hit that is legitimate rather than a
+          # violation. Found by running this — it had never executed, because the
+          # openapi step above died on missing submodules before reaching it.
+          #
+          #   this workflow      — contains the search pattern itself, so the
+          #                        guard flagged its own source on every run
+          #   config/database.php — Laravel ships a connection block for every
+          #                        driver it supports; what matters is which one
+          #                        is SELECTED, asserted separately below
+          #   the Pulse migration — vendor-published, multi-driver by design
+          HITS=$(grep -r --include="*.php" --include="*.ts" --include="*.vue" --include="*.json" --include="*.yml" --include="*.yaml" -l "mysql\|mariadb" --exclude-dir=vendor --exclude-dir=node_modules --exclude-dir=.nuxt . 2>/dev/null | grep -v "design.md" | grep -v "openspec/changes" | grep -v ".github/workflows/wrapper-ci.yml" | grep -v "api/config/database.php" | grep -v "create_pulse_tables.php" || true)
           if [ -n "$HITS" ]; then
             echo "ERROR: MySQL/MariaDB reference found outside design.md:"
             echo "$HITS"
             FAIL=1
           fi
 
+          # The invariant the check above only approximates: which driver the
+          # stack actually SELECTS. Grepping for a forbidden word says nothing
+          # about configuration — Laravel's stock config mentions every driver
+          # it supports and always will.
+          if ! grep -q "DB_CONNECTION: pgsql" docker-compose.yml; then
+            echo "ERROR: docker-compose.yml does not pin DB_CONNECTION to pgsql."
+            FAIL=1
+          fi
+
           # Laravel 12 (we're on 13)
-          HITS=$(grep -r --include="*.php" --include="*.json" --include="*.md" "Laravel 12\|laravel/laravel:^12" --exclude-dir=vendor --exclude-dir=node_modules . 2>/dev/null | grep -v "design.md" | grep -v "openspec/" | grep -v "legacy-demo" || true)
+          # -l, so the exclusions below filter PATHS. Without it the output is
+          # path:line and a genuine violation whose LINE TEXT happens to mention
+          # design.md is silently swallowed.
+          HITS=$(grep -rl --include="*.php" --include="*.json" --include="*.md" "Laravel 12\|laravel/laravel:^12" --exclude-dir=vendor --exclude-dir=node_modules . 2>/dev/null | grep -v "design.md" | grep -v "openspec/" | grep -v "legacy-demo" || true)
           if [ -n "$HITS" ]; then
             echo "ERROR: Laravel 12 reference found:"
             echo "$HITS"
@@ -145,17 +485,42 @@ jobs:
           fi
 
           # Sanctum — only allowed as "NOT Sanctum" in design/docs
-          HITS=$(grep -r --include="*.php" --include="*.ts" --include="*.vue" "Sanctum\|sanctum" --exclude-dir=vendor --exclude-dir=node_modules . 2>/dev/null | grep -v "NOT Sanctum\|not Sanctum\|not use Sanctum\|design.md\|openspec/" || true)
+          # composer.json/lock included deliberately: the dependency manifest is the ONE
+          # place laravel/sanctum would ever actually appear, and it was excluded — so the
+          # strongest auth rule in the standards had a guard blind to the only file that
+          # could break it.
+          HITS=$(grep -rl --include="*.php" --include="*.ts" --include="*.vue" --include="composer.json" --include="composer.lock" "Sanctum\|sanctum" --exclude-dir=vendor --exclude-dir=node_modules . 2>/dev/null | grep -v "design.md\|openspec/" | xargs -r grep -H "Sanctum\|sanctum" | grep -v "NOT Sanctum\|not Sanctum\|not use Sanctum" || true)
           if [ -n "$HITS" ]; then
             echo "ERROR: Sanctum reference found outside 'NOT Sanctum' contexts:"
             echo "$HITS"
             FAIL=1
           fi
 
-          # pnpm/yarn inside Nuxt app dirs (legacy-demo may use npm — excluded)
-          HITS=$(grep -r --include="*.yml" --include="*.yaml" --include="*.json" --include="*.sh" "pnpm\|yarn" frontend/ backoffice/ 2>/dev/null | grep -v node_modules | grep -v ".nuxt" || true)
+          # Bun-only, in the Nuxt apps. (legacy-demo keeps its npm toolchain and is
+          # excluded by not being listed.)
+          #
+          # This searched for "pnpm\|yarn" — two of the five banned tools — and never
+          # looked at Markdown. Both READMEs shipped `npm install` as the first
+          # instruction a new developer read, while this check stayed green.
+          #
+          # Matched as COMMANDS rather than bare words, so a line documenting the
+          # prohibition ("npm, pnpm and yarn are not used") is not itself a violation.
+          # No carve-outs. The one hit this found was `npm install -g bun` in the
+          # submodules' own CI, and the right answer was to fix that — they now
+          # use oven-sh/setup-bun@v2, as this workflow already did. Excluding a
+          # violation by name protects nothing and leaves a hole open.
+          # --exclude-dir, not a post-filter. `grep -v node_modules` matched the
+          # whole `path:line:text` string, so a README line that merely MENTIONED
+          # node_modules was dropped along with the directory — the same
+          # filter-the-text-not-the-path bug fixed above.
+          #
+          # Comment lines are skipped: a commented-out command does not run, and
+          # without this the guard flagged the comment in each submodule's CI
+          # explaining why it STOPPED using npm. A check that cannot tell code
+          # from an explanation of the fix will keep reporting the fix.
+          HITS=$(grep -rn -E --include="*.yml" --include="*.yaml" --include="*.json" --include="*.sh" --include="*.md" --exclude-dir=node_modules --exclude-dir=.nuxt --exclude-dir=.output "(^|[^a-z-])((npm|pnpm|yarn)[[:space:]]+(install|run|add|exec|create|dlx|ci|test|build|dev|start|link|update|why|list)|(npx|pnpx)[[:space:]]+[a-zA-Z@])" frontend/ backoffice/ 2>/dev/null | grep -v -E "^[^:]*:[0-9]+:[[:space:]]*#" || true)
           if [ -n "$HITS" ]; then
-            echo "ERROR: pnpm/yarn reference in frontend/backoffice (Bun-only projects):"
+            echo "ERROR: non-Bun package manager command in frontend/backoffice (Bun-only projects):"
             echo "$HITS"
             FAIL=1
           fi
@@ -166,9 +531,4 @@ jobs:
             exit 1
           fi
 
-      # -----------------------------------------------------------------------
-      # NOTE: Docker image build is DEFERRED to unit testing once Docker daemon
-      # is confirmed available in the CI runner environment.
-      # The compose config validation above ensures the Dockerfile references
-      # are syntactically correct.
       # -----------------------------------------------------------------------
