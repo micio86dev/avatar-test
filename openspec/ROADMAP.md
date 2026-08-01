@@ -44,6 +44,7 @@ C1 ──┬─ C2 ──┬─ C3 ── C4 ─────────── C
 | C11 | `admin-dashboards` | Build in the **backoffice (SPA)** Nuxt app: participant status views; results/report viewer; transcript & report download; state-gated | C9 | FR-005; SA-09 |
 | C12 | `notifications-reminders` | Invitations; deadline reminders; queued email/notification jobs | C6 | FR-002 |
 | C13 | `nfr-hardening` | Audit logs; GDPR retention/purge (audio/snapshot/transcript); full observability stack enforcement (Sentry, Laravel Pulse, Clarity, GA4, Cloudflare — see `specs/observability/spec.md`); white-label; accessibility; multi-test portal | C10, C11 | FR-006; NFR/GDPR |
+| C14 | `avatar-provider-templates` | Avatar/voice templates per organization, exactly one active at a time; declarative provider field specs; provider payload mapping and Tavus PAL sync; provider opacity toward the candidate | C7, C8 | Operator request |
 
 ## Product decisions
 
