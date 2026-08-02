@@ -154,6 +154,31 @@ Opzioni utili:
 > non scrive nulla. L'admin creato è amministratore **della sua organizzazione**,
 > non un superadmin di piattaforma — quello resta `app:create-superadmin`.
 
+#### In produzione su Railway: `ssh`, non `run`
+
+```bash
+railway ssh --service api \
+  "php artisan beai:provision-organization --name=Quint --admin-email=admin@quint.com"
+```
+
+**`railway run` non funziona per questo.** Inietta le variabili dell'ambiente ma
+esegue il comando *sulla tua macchina*, e `DB_HOST` punta a
+`pgvector.railway.internal` — un nome della rete privata di Railway, che da un
+portatile non si risolve:
+
+```
+SQLSTATE[08006] could not translate host name "pgvector.railway.internal" to address
+```
+
+`railway ssh` esegue **dentro** il container, dove quel nome esiste. In più le
+credenziali del database non transitano mai dalla tua macchina.
+
+Verifica a vuoto prima di scrivere, se vuoi:
+
+```bash
+railway ssh --service api "php artisan tinker --execute=\"echo App\\\\Models\\\\Organization::count();\""
+```
+
 ---
 
 ## 4. Cosa puoi provare adesso
