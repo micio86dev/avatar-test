@@ -280,8 +280,14 @@ jobs:
           # Compared as PARSED JSON, like openapi.json: formatting is not the
           # contract, content is.
           while IFS= read -r REL; do
-            A="$SRC/$REL"
-            B="$VENDORED/$REL"
+            # EXPORTED. bun's process.env cannot see a shell variable that is
+            # merely assigned — the first version of this gate omitted the
+            # export, so every file threw inside the script and every file was
+            # reported as differing. It failed loudly rather than silently,
+            # which is the only reason it was caught; the identical-content row
+            # in the self-test below is what makes that guaranteed.
+            export A="$SRC/$REL"
+            export B="$VENDORED/$REL"
             if [ ! -f "$B" ]; then
               echo "ERROR: $REL exists in the authored source but not in $VENDORED."
               FAIL=1
@@ -497,6 +503,42 @@ jobs:
             FAILED=1
           else
             echo "  ok — Dockerfile guard: a missing file"
+          fi
+
+          # The catalog gate: it must reject real drift, and must NOT reject two
+          # files whose CONTENT is identical but whose bytes differ. That second
+          # row is not padding — the first version of this gate reported every
+          # file as differing because it never exported its variables, and only
+          # a same-content fixture proves the comparison actually compares.
+          catalog_same() {
+            export A="$1" B="$2"
+            bun --eval '
+              const canonical = (v) => {
+                if (Array.isArray(v)) return v.map(canonical);
+                if (v === null || typeof v !== "object") return v;
+                return Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonical(v[k])]));
+              };
+              const s = async (p) => JSON.stringify(canonical(JSON.parse(await Bun.file(p).text())));
+              process.exit((await s(process.env.A)) === (await s(process.env.B)) ? 0 : 1);
+            ' 2>/dev/null
+          }
+
+          printf '{"ICO":{"name":"Contributor"}}' > "$FIXTURE/cat-a.json"
+          printf '{ "ICO" : { "name" : "Contributor" } }\n' > "$FIXTURE/cat-b.json"
+          printf '{"ICO":{"name":"CHANGED"}}' > "$FIXTURE/cat-c.json"
+
+          if catalog_same "$FIXTURE/cat-a.json" "$FIXTURE/cat-b.json"; then
+            echo "  ok — catalog gate ignores formatting"
+          else
+            echo "SELF-TEST FAILED: the catalog gate reported identical content as drift."
+            FAILED=1
+          fi
+
+          if catalog_same "$FIXTURE/cat-a.json" "$FIXTURE/cat-c.json"; then
+            echo "SELF-TEST FAILED: the catalog gate accepted a real content change."
+            FAILED=1
+          else
+            echo "  ok — catalog gate rejects a real content change"
           fi
 
           # Horizon: present is a violation, a mention in prose is not.
