@@ -93,12 +93,12 @@ Database\Seeders\FrameworkCatalogSeeder ......... DONE
 
 ### 3.2 Tenant demo
 
-Non esiste **nessuna** API né schermata per creare un'organizzazione: progetti e
-partecipanti hanno endpoint, le organizzazioni no, e il superadmin di piattaforma
-nasce con `organization_id = null`. Quindi da un database migrato non si arriva
-in nessun modo supportato a qualcosa in cui fare login.
+Non esiste API né schermata per creare un'organizzazione: progetti e partecipanti
+hanno endpoint, le organizzazioni no, e il superadmin di piattaforma nasce con
+`organization_id = null`. Da un database migrato non si arriva quindi in nessun
+modo *via HTTP* a qualcosa in cui fare login.
 
-Finché quella lacuna resta, c'è un seeder apposito:
+Per il locale c'è un seeder che monta anche progetto e partecipante:
 
 ```bash
 docker compose exec api php artisan db:seed --class=DemoSeeder
@@ -115,6 +115,44 @@ docker compose exec api php artisan db:seed --class=DemoSeeder
 
 > Quella password è pubblica: il seeder si rifiuta di girare in produzione.
 > È idempotente, puoi rilanciarlo quando vuoi.
+
+### 3.3 Organizzazione vera (anche in produzione)
+
+Il `DemoSeeder` si rifiuta di girare in produzione, e giustamente: password nota
+e dati finti. Per creare un tenant reale c'è un comando che funziona ovunque, e
+che soprattutto **non chiede niente in input** — quindi gira in un container
+senza terminale, dove `app:create-superadmin` non può andare.
+
+```bash
+php artisan beai:provision-organization \
+  --name="Acme Corp" \
+  --admin-email=admin@acme.com \
+  --admin-name="Acme Admin"
+```
+
+```
+Organization provisioned: Acme Corp (id=1, slug=acme-corp)
+Roles created: admin, operator, viewer (scoped to this organization)
+Administrator: admin@acme.com
+Password: <generata, 20 caratteri>
+This password is shown once and cannot be recovered. Store it now.
+```
+
+Crea in un'unica transazione l'organizzazione, i tre ruoli di autorizzazione
+(`admin`, `operator`, `viewer`) scoped a quell'organizzazione, e l'utente
+amministratore. Con quelle credenziali entri nel backoffice.
+
+Opzioni utili:
+
+| Opzione | Effetto |
+|---|---|
+| `--slug=` | slug esplicito invece di derivarlo dal nome |
+| `--admin-password=` | password scelta da te — in quel caso **non** viene stampata |
+| `--locale=` | lingua delle notifiche dell'admin (default `it`) |
+
+> Rifiuta di sovrascrivere: se lo slug o l'email esistono già esce con errore e
+> non scrive nulla. L'admin creato è amministratore **della sua organizzazione**,
+> non un superadmin di piattaforma — quello resta `app:create-superadmin`.
 
 ---
 

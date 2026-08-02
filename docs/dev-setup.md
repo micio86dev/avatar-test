@@ -150,6 +150,16 @@ cp .env.example .env
 composer install
 php artisan migrate
 
+# 4b. Create an organization and an admin to log in with.
+#     A migrated database has no organization, so it has no admin, so there is
+#     no account the backoffice can authenticate. Every input is an option, so
+#     this also works in a container with no TTY.
+php artisan beai:provision-organization \
+  --name="Local Dev" \
+  --admin-email=admin@local.test
+# Prints a generated password once — store it.
+# Use --admin-password=… to choose your own (it is then NOT echoed).
+
 # 5. Bootstrap the frontend (in ./frontend directory)
 cd ../frontend
 cp .env.example .env
