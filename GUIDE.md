@@ -291,6 +291,19 @@ cd backoffice && bunx playwright test
 
 ---
 
+## 8.1 Vercel: disattivato di proposito
+
+Il deploy target è **Railway**. Una GitHub App di Vercel era collegata a questo
+wrapper e creava un deployment Production a ogni merge su `main` — in pratica
+innocuo, perché qui non c'è applicazione da servire, ma è comunque una
+violazione di una regola vincolante.
+
+`vercel.json` con `git.deploymentEnabled: false` lo spegne dal repository.
+Il file è lì per **impedire** i deploy su Vercel, non per configurarli.
+
+Per rimuoverlo del tutto serve scollegare l'integrazione dalla dashboard Vercel:
+questo file la neutralizza, non la disinstalla.
+
 ## 9. Stato del prodotto
 
 14 slice verticali (C1→C14). **Tutte consegnate.**
