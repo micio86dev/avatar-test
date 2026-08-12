@@ -4,7 +4,7 @@
 #
 #   ./scripts/dev.sh              start everything (idempotent, safe to re-run)
 #   ./scripts/dev.sh --build      force a rebuild of the app images
-#   ./scripts/dev.sh --seed       run database seeders after migrating
+#   ./scripts/dev.sh --seed       run database seeders, then create a local admin
 #   ./scripts/dev.sh --fresh      DESTRUCTIVE: wipe volumes and rebuild from zero
 #   ./scripts/dev.sh --no-worker  start without the worker and scheduler services
 #   ./scripts/dev.sh --status     show service health and exit
@@ -51,7 +51,7 @@ BEAI — one-shot local development launcher.
 
   ./scripts/dev.sh              start everything (idempotent, safe to re-run)
   ./scripts/dev.sh --build      force a rebuild of the app images
-  ./scripts/dev.sh --seed       run database seeders after migrating
+  ./scripts/dev.sh --seed       run database seeders, then create a local admin
   ./scripts/dev.sh --fresh      DESTRUCTIVE: wipe volumes and rebuild from zero
   ./scripts/dev.sh --no-worker  start without the worker and scheduler services
   ./scripts/dev.sh --status     show service health and exit
@@ -260,6 +260,49 @@ step "Application bootstrap"
 
 api_exec() { dc exec -T api sh -lc "$1"; }
 
+# `db:seed` deliberately does NOT create a user. RolesAndPermissionsSeeder makes
+# the `dev-org` organization and FrameworkCatalogSeeder the competency catalog,
+# and that is where the seeders stop — so a seeded database still had zero rows
+# in `users`, and the backoffice answered every login with a correct, useless
+# 401. Seeding an environment you cannot then log into is not seeding it.
+#
+# Minting the administrator stays OUT of the seeders on purpose: they run with
+# --force in CI and inside the production image, and neither has any business
+# creating an account at a known address with a known password. It belongs here,
+# in the local-development launcher, behind --seed.
+#
+# Override with DEV_ADMIN_EMAIL / DEV_ADMIN_ORG / DEV_ADMIN_ORG_SLUG, and pass
+# DEV_ADMIN_PASSWORD to choose the password instead of having one generated.
+ensure_admin() {
+  local out
+
+  # DemoSeeder, NOT `beai:provision-organization`. The two exist for different
+  # jobs and picking the wrong one is not a cosmetic difference: the artisan
+  # command provisions a REAL tenant and generates a random password it prints
+  # exactly once, which is correct for onboarding a customer and useless for a
+  # laptop you re-bootstrap weekly. DemoSeeder converges on a published,
+  # documented password and brings the fixtures — templates, projects,
+  # participants across every lifecycle state, evaluations — with it.
+  #
+  # `|| true` for the same reason as in ensure_secret: under `set -euo pipefail`
+  # an assignment inherits its command substitution's exit status, so a failing
+  # seeder would kill dev.sh here with its output already captured and never
+  # printed.
+  out="$(api_exec 'php artisan db:seed --class=DemoSeeder --force' 2>&1)" || true
+
+  if printf '%s' "$out" | grep -q 'Demo tenant ready'; then
+    ok "admin: demo tenant ready — ${B}admin@beai.local${N} / ${B}password${N}"
+    # The fixture counts, verbatim. They are the answer to "did the seed
+    # actually put anything in there", which is the only question worth asking
+    # of a seeder that reports success.
+    printf '%s\n' "$out" | grep -E '^\| (Avatar|Projects|Participants|Evaluations)' | sed 's/^/    /'
+    return 0
+  fi
+
+  warn "admin: DemoSeeder failed — showing the last lines:"
+  printf '%s\n' "$out" | tail -8 | sed 's/^/    /'
+}
+
 if api_exec 'php artisan --version' >/dev/null 2>&1; then
   # APP_KEY / JWT_SECRET were handled host-side before boot (see ensure_secret):
   # the image carries no .env, so generating them inside an ephemeral container
@@ -281,6 +324,7 @@ if api_exec 'php artisan --version' >/dev/null 2>&1; then
   if [[ $SEED -eq 1 ]]; then
     if api_exec 'php artisan db:seed --force' >/dev/null 2>&1; then ok "Seeders executed"
     else warn "Seeding failed — run manually: docker compose exec api php artisan db:seed"; fi
+    ensure_admin
   fi
 else
   warn "Could not reach artisan inside the api container — skipping migrations."
