@@ -12,7 +12,7 @@ own cadence.
 | Repo | Role | Version SoT |
 |------|------|-------------|
 | wrapper (this repo) | Superproject; holds docs, SDD, docker-compose, Taskfile, submodule pointers | `package.json` `version` |
-| `api` | Laravel 13 backend | `VERSION` file |
+| `api` | Laravel 13 backend | `VERSION` file **and** `composer.json` `version` (CI asserts they match) |
 | `frontend` | Nuxt 4 SSR candidate app | `package.json` `version` |
 | `backoffice` | Nuxt 4 SPA admin panel | `package.json` `version` |
 
@@ -58,6 +58,9 @@ git checkout -b release/0.2.0
 
 # 2. Bump the version SoT in this branch
 #    api:          echo "0.2.0" > VERSION
+#                  AND set composer.json "version": "0.2.0" — the api CI step
+#                  "Assert VERSION matches composer.json" fails the build if the
+#                  two disagree, so bumping only the VERSION file turns main red
 #    Nuxt apps:    edit package.json "version": "0.2.0"
 #    wrapper:      edit package.json "version": "0.2.0"
 #    Commit the bump: git commit -m "chore: bump version to 0.2.0"
