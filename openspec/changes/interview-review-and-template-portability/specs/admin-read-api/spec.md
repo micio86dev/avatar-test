@@ -1,5 +1,36 @@
 # Delta: admin-read-api — interview session review
 
+## MODIFIED Requirements
+
+### Requirement: Downloadable Artifacts Are Limited to Transcript and Evaluation
+
+The previous wording stated that `InterviewSnapshot` proctoring artifacts are
+"never exposed via this API". That is superseded, narrowly and deliberately.
+
+The API MUST still never serve snapshot BYTES, and `s3_key` MUST never leave the
+server. Snapshots reach an operator only as short-lived signed URLs inside the
+session review payload, and only through the admin guard.
+
+The original concern was an unauthenticated or long-lived path to a webcam
+frame; that concern is unchanged and still enforced. What is no longer true is
+that the artifacts are invisible to the operator responsible for judging the
+interview.
+
+Audio remains without storage and without a route, gated by open decision 2.
+Retention is untouched: making evidence visible does not extend how long it is
+kept, and this surface must not become the argument for keeping it longer.
+
+#### Scenario: No route serves audio or snapshot bytes
+
+- WHEN the admin route surface is enumerated
+- THEN no URI contains `audio` or `snapshot`
+
+#### Scenario: Snapshots reach the operator only as signed URLs
+
+- WHEN a session review is read
+- THEN snapshots appear as expiring signed URLs in the payload
+- AND no route exists that returns the bytes directly
+
 ## ADDED Requirements
 
 ### Requirement: Admin session review endpoint
@@ -19,9 +50,14 @@ Snapshot references MUST be returned as short-lived signed URLs, never as raw
 object keys. A raw key implies either a public bucket holding identifiable
 webcam frames or a disclosed storage layout; both are refused.
 
-Cost MUST be returned as two separate estimates — avatar provider minutes and
-LLM tokens — and MUST NOT be summed. They are different vendors on different
-meters, and a single total would be a number with no owner.
+Cost MUST be returned as an estimate of avatar provider minutes, and MUST be
+labelled as an estimate.
+
+LLM token cost is NOT returned. `ai_requests` records organization, provider,
+model and tokens but carries no `interview_session_id`, so token spend cannot be
+attributed to one session without inventing the link — and a plausible number
+with no basis is worse than an absent one. Attributing it needs that column,
+which belongs to whoever owns the writer side.
 
 #### Scenario: A session review returns timing, integrity and snapshots
 
@@ -36,11 +72,18 @@ meters, and a single total would be a number with no owner.
 - THEN each snapshot carries a signed URL with a short expiry
 - AND no raw storage key appears anywhere in the response
 
-#### Scenario: Costs are separate estimates
+#### Scenario: Cost is an avatar-minutes estimate, explicitly flagged
 
 - WHEN a session review is read
-- THEN the avatar-minutes estimate and the LLM-token estimate are distinct fields
-- AND no combined total is returned
+- THEN the avatar estimate is present and marked as an estimate
+- AND no LLM figure is reported, because none can be attributed to a session
+
+#### Scenario: An unpriceable session reports no cost rather than zero
+
+- GIVEN a session that never ended, or one on an unrecognised provider
+- WHEN its review is read
+- THEN the estimate is absent
+- AND it is not reported as zero, which would claim the session was free
 
 #### Scenario: Cross-tenant isolation
 

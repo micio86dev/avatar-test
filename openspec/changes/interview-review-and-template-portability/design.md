@@ -53,10 +53,15 @@ Therefore the number MUST be rendered as an estimate in the UI, never as a
 charge. An operator who reads it as an invoice line will eventually reconcile it
 against a real bill and find a discrepancy that was never a defect.
 
-Two costs are shown separately and never summed: **avatar minutes** (provider
-duration × rate) and **LLM tokens** (already in `ai_requests`, via the existing
-`AiRequestCostEstimator`). They come from different vendors on different meters;
-one total would be a number with no owner.
+Only **avatar minutes** are reported. LLM token cost was planned alongside it
+and had to be dropped on contact with the schema: `ai_requests` carries
+organization, provider, model and tokens but **no `interview_session_id`**, so
+token spend cannot be attributed to a session without inventing the link.
+
+A plausible number with no basis is worse than an absent one — an operator
+comparing two sessions on a figure that was never per-session would draw a
+conclusion the data cannot support. Attribution needs that column, and adding it
+belongs to whoever owns the writer side.
 
 ## D6 — Export is a versioned document with an explicit shape
 
