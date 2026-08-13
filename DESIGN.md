@@ -564,6 +564,47 @@ The candidate app has the equivalent at its only decision point: `InterviewGuide
 sits on the consent screen, before consent, because that is the last moment a
 candidate can read at their own pace. Five short lines, no more.
 
+### 8.2.5 Interview session review
+
+Each interview session has a review page of its own, reached from the
+participant detail. It shows the session's timing and duration, the proctoring
+timeline with its weighted risk score and band, the timed snapshot strip, and
+the avatar cost estimate.
+
+Not a panel on the participant detail: a participant has one session per
+competency, and folding N proctoring timelines into a page that already carries
+a lifecycle timeline, a transcript and a BARS report makes all four harder to
+read.
+
+Three rules this surface must keep:
+
+- **The score never appears without its events.** A band an operator cannot
+  check against the evidence that produced it is a verdict on a candidate, not
+  an input to a judgement.
+- **Cost is always labelled an estimate**, and shows a dash rather than zero
+  when a session cannot be priced. No provider exposes a per-session billed
+  amount; zero would claim the session was free.
+- **Backoffice only, forever.** The integrity taxonomy is the list of behaviours
+  being counted and the thresholds at which they count, so it must never be
+  reachable with a candidate token. Enforced by
+  `tests/Arch/C11/CandidateCannotReadProctoringArchTest.php`.
+
+Snapshots reach the browser as short-lived signed URLs. `s3_key` never leaves
+the server: a raw key implies either a public bucket of identifiable webcam
+frames or a disclosed storage layout.
+
+### 8.2.6 Avatar template portability
+
+Avatar template configuration exports and imports as a versioned JSON document
+(`beai.avatar-template/1`), **admin only in both directions**. The controls do
+not render for other roles at all — a control that appears and then fails with
+403 teaches the operator that the product is broken rather than that they lack
+the right.
+
+Imports arrive **inactive** and never overwrite: a colliding name creates under
+a derived name. A file must not silently change which avatar an organization's
+live interviews are running on.
+
 ### 8.3 BARS Report View
 
 The evaluation report is the most complex view:
