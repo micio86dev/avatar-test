@@ -61,12 +61,18 @@ Every verb requires the Spatie `admin` role in the caller's organization.
 A `{id}` belonging to a different organization MUST return `404` (existence
 never leaked), not `403`.
 
+> `GET /api/users/{id}` is deliberately absent from this surface (design D4):
+> there is no single-user show endpoint, so the scenario above exercises the
+> three verbs that actually exist. An earlier revision listed a `GET` the route
+> inventory never declared — a scenario asserting behaviour for an endpoint
+> nobody built.
+
 #### Scenario: Foreign-org id is invisible
 
 - GIVEN user U belongs to org B; the requester is an org A admin
-- WHEN org A calls `GET /api/users/{U}`, `PATCH /api/users/{U}`, `POST
-  /api/users/{U}/deactivate`, or `POST /api/users/{U}/activate`
-- THEN every one of the four responses is `404`
+- WHEN org A calls `PATCH /api/users/{U}`, `POST /api/users/{U}/deactivate`,
+  or `POST /api/users/{U}/activate`
+- THEN every one of the three responses is `404`
 - AND no response body contains any field from U's record
 
 ### Requirement: Privilege-Escalation Guards On Write
@@ -131,9 +137,20 @@ conflation risk, which lives in the payloads. Therefore:
 
 ### Requirement: Last-Admin And Self-Action Guards
 
-An organization MUST always retain at least one `admin`. Self-demotion (an
-admin changing their own role) and self-deactivation MUST be rejected `422`
-when the caller is the org's last admin.
+An organization MUST always retain at least one admin **who can actually log
+in**. Self-demotion (an admin changing their own role) and self-deactivation
+MUST be rejected `422` when the caller is the org's last such admin.
+
+The surviving-admin count MUST exclude deactivated users. Deactivation stamps
+the marker and deliberately does NOT revoke the role, so a deactivated admin's
+role assignment survives — counting it would let the last admin who can still
+authenticate demote or deactivate themselves, leaving the organization locked
+out of its own backoffice with no self-service recovery. A guard that counts
+users who cannot log in is not counting administrators.
+
+The count MUST be taken under a row lock held for the duration of the
+mutating transaction, so two admins acting concurrently cannot both observe
+the pre-removal count.
 
 #### Scenario: Last admin cannot self-demote
 
@@ -146,6 +163,20 @@ when the caller is the org's last admin.
 - GIVEN org A has exactly one `admin`, who is the caller
 - WHEN they `POST /api/users/{self}/deactivate`
 - THEN the response is `422` and the user remains active
+
+#### Scenario: A deactivated admin does not count as a surviving admin
+
+- GIVEN org A has two admins, one of whom is deactivated
+- WHEN the active admin demotes themselves or deactivates themselves
+- THEN the response is `422` and nothing changes
+
+#### Scenario: Concurrent demotions cannot both see the pre-removal count
+
+- GIVEN org A has two admins and two requests arrive at once, each demoting
+  the other
+- WHEN both reach the guard
+- THEN the second blocks on the first's row lock and observes the post-commit
+  count, so exactly one demotion succeeds
 
 #### Scenario: Demoting a peer admin succeeds when another admin remains
 
