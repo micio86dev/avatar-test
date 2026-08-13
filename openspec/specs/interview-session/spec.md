@@ -831,6 +831,13 @@ explain; deriving it at read time keeps the calculation inspectable.
 Neither supported provider exposes a per-session billed amount through an API,
 so the value MUST be treated and labelled as an estimate everywhere it surfaces.
 
+The configured defaults are RATIFIED (2026-08-13): BEAI and `quint-avatar-tester`
+run on the same provider accounts and API keys, so the same contracts apply —
+HeyGen 2 credits/min at $0.10/credit, Tavus $0.37/min. This ratifies the RATE,
+not the reconciliation: a correct rate on a measured duration is still not an
+invoice line. The values stay env-overridable so a plan change is a config
+change, not a release.
+
 #### Scenario: Cost follows the configured rate
 
 - GIVEN a session of known duration and a configured provider rate

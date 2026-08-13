@@ -57,12 +57,23 @@
 - [x] 6.1 `DESIGN.md` §8.2 gains the session review; §5 gains the new components.
 - [x] 6.2 Submodule pointers bumped.
 
-## Open, to resolve before slice 2
+## Resolved
 
-- **Rate accuracy.** The `avatar-tester` defaults were verified in 2026 for its
-  own plan. BEAI's plan may differ, and a wrong rate produces a confident wrong
-  number. The estimate ships behind config; the values need confirming against
-  the actual contracts before anyone treats the figure as guidance.
+- **Rate accuracy — RATIFIED 2026-08-13.** The open question was whether
+  `avatar-tester`'s defaults describe BEAI's plan. They do: both projects run on
+  the SAME provider accounts and the same API keys, so the same contracts and
+  the same per-minute economics apply.
+
+  Verified rather than assumed: `avatar-tester/.env` sets none of the three
+  rate variables, so it runs on its own code defaults, and those defaults are
+  identical to BEAI's — HeyGen 2 credits/min at $0.10/credit, Tavus $0.37/min.
+
+  The figure stays an ESTIMATE regardless. Neither provider exposes a
+  per-session billed amount, so this ratifies the RATE, not the reconciliation:
+  a correct rate applied to a measured duration is still not an invoice line.
+
+  Re-open if the accounts are ever split, or if a plan changes tier — the rates
+  are env-overridable precisely so that is a config change, not a release.
 
 ## Documented, Not Scoped
 
