@@ -75,9 +75,23 @@ small body text.)
 | `--color-neutral-100` | `#f1f5f9` | Card / panel backgrounds |
 | `--color-neutral-200` | `#e2e8f0` | Borders, dividers |
 | `--color-neutral-400` | `#94a3b8` | Placeholder text, disabled icons |
+| `--color-neutral-500` | `#64748b` | Form control borders (`input`/`select`/`textarea`/`checkbox`) — see §9.1 |
 | `--color-neutral-600` | `#475569` | Secondary text, captions |
 | `--color-neutral-800` | `#1e293b` | Primary text |
 | `--color-neutral-900` | `#0f172a` | High-emphasis text, headings |
+
+**`--color-neutral-500` and non-text contrast (D12).** shadcn-vue's default `--input`
+token (`#e2e8f0`, i.e. `--color-neutral-200`) on the `#f8fafc`/white surfaces it sits on
+measures ≈1.18:1, failing §9.1's binding **≥3:1 for UI components and graphical objects**.
+`--color-neutral-500` fixes this at **≈4.55:1** on `--color-neutral-50` (≈4.76:1 on pure
+white) while staying visually light — a deliberate step above the floor, not a bare pass.
+Two alternatives were measured and rejected: `#94a3b8` (`--color-neutral-400`) at 2.6:1
+still fails; `#475569` (`--color-neutral-600`) passes at 7.5:1 but reads as a heavy,
+disproportionate outline for a border. `--input` in both apps' `@theme`/`:root` blocks
+resolves to this token (`backoffice/app/assets/css/main.css`,
+`frontend/app/assets/css/main.css`, identical per §17). axe-core has **no** non-text-contrast
+rule, so this class of defect is a manual check, not an automated gate — verify with a real
+contrast calculation, never by eye.
 
 #### Semantic
 
@@ -358,6 +372,28 @@ No `sm` or `md` breakpoints are used in production UI (those widths = unsupporte
 
 ## 7. Frontend (Candidate Interview App) — UX Flows
 
+### 7.0 Standalone routes (`NoticeShell`)
+
+The four non-interview routes — root landing, SA-11 gate, interview done,
+interview error — all render through one component,
+`app/components/molecules/NoticeShell.vue`. They exist for four different
+reasons but share one job: tell a candidate in one glance what happened and
+what to do next.
+
+Layout is a two-column grid: a solid `--color-primary` brand band (wordmark +
+tagline) beside a content column holding a tone chip, an `<h1>` and one
+paragraph. Below `lg` it collapses to a single column, which is the SA-11 gate's
+only rendering — that page is the one BEAI surface a phone visitor ever sees.
+
+- `tone` (`info` / `success` / `warning` / `danger`) may change the **icon chip
+  and nothing else**. The moment a tone starts altering copy or structure the
+  four pages stop being one system.
+- The SA-11 gate is `warning`, not `danger`: nothing failed and the candidate
+  did nothing wrong. An error tone there reads as "your assessment broke".
+- No action affordance unless a route passes one in. The root landing must stay
+  free of forms, buttons and contact links — see `tests/unit/root-page.spec.ts`
+  for why each of those is prohibited.
+
 ### 7.1 Entry (SSO / Magic-Link)
 
 The candidate arrives via a signed magic-link JWT. The entry point:
@@ -458,6 +494,75 @@ Content padding: `--spacing-section` horizontal, `--spacing-panel` vertical.
 | Evaluation report | BARS competency grid: each competency with indicator scores (1–5), mean score, reliability, excerpts |
 | Settings | Organization profile, API keys, webhook config, user management (RBAC) |
 | Data management | GDPR data deletion requests; export |
+
+> **Scope note (`backoffice-missing-pages`).** This table describes the eventual admin
+> panel surface, not what any single change ships. `/projects`, `/reports`, and
+> `/settings` (Organization profile, API keys, Webhook defaults, Users & roles) are built
+> by this change. **Project detail, the webhook log, and Data management remain unbuilt**
+> — no route, no component — and stay out of scope until a future change picks them up.
+
+### 8.2.1 Settings — section rail (not a tab strip)
+
+`/settings` presents its four sections (Organization profile, API keys, Webhook
+defaults, Users & roles) as a **vertical section rail**, 16 rem wide and sticky,
+with the panel to its right. Each rail item carries an icon, the section label,
+and a one-line description; the same label and description repeat as the panel
+heading, so the nav and the content can never disagree.
+
+A horizontal tab strip is **not** used here, and must not be reintroduced:
+
+- The sections are distinct destinations with different shapes (form, table +
+  dialog, form, table), not peer views of one dataset — which is what a
+  segmented tab strip signals.
+- The labels run 11–28 characters in Italian, so a horizontal strip reflowed
+  unpredictably between 1 280 px and 1 920 px.
+- A rail scales to further sections (C12/C13) without reflowing.
+
+Implementation stays on the reka-ui `Tabs` primitive with
+`orientation="vertical"`, preserving `role="tab"` / `role="tabpanel"`, roving
+arrow-key focus, and lazy panel mounting (only the visible panel is in the DOM).
+Selected state: `bg-primary/10` with a `--color-primary` label and icon. Side
+stripes (`border-left` accents) are **not** an allowed selected-state affordance.
+
+### 8.2.2 Selected state on toggles
+
+`ToggleGroup` / `Toggle` selected state is `--color-primary` fill with
+`--primary-foreground` text (8.2:1, §9.1). The shadcn default `bg-muted` fill is
+`--color-neutral-100` against a `--color-neutral-50` page — roughly 1.05:1, which
+made a selected toggle indistinguishable from an unselected one. Unselected
+toggles sit at `--muted-foreground`, so the state difference is carried by both
+fill and text colour.
+
+### 8.2.3 reka-ui state variants (CSS contract)
+
+reka-ui exposes state as `data-state="active|checked|open|closed"` and axis as
+`data-orientation="vertical|horizontal"`, while vendored shadcn-vue components
+style those states with Tailwind's **bare** `data-active:` / `data-checked:` /
+`data-open:` / `data-vertical:` variants, which compile to attribute-*presence*
+selectors (`[data-active]`). Both Nuxt apps' `main.css` MUST therefore redefine
+those variant names via `@custom-variant` to target the `data-state` /
+`data-orientation` values. Without them every such rule is dead CSS.
+
+### 8.2.4 Contextual help (`HelpSheet`)
+
+Every backoffice route carries a **Help** button in the top nav that opens a
+right-hand sheet scoped to that route: what the page is for, the steps in the
+order they must happen, and a short glossary of the domain words that page uses.
+
+Constraints that make it work, and that a future change must not quietly drop:
+
+- **One topic per route**, keyed on the first path segment (so `/projects/42`
+  and `/projects` share a topic). A help button that opens generic help on a
+  specific page is worse than no help button.
+- **Unknown routes fall back to the overview topic.** New routes are added more
+  often than the topic map is updated; an empty panel is a bug the operator sees.
+- **Steps are an `<ol>`, the glossary is a `<dl>`.** They are an order and a set
+  of definitions respectively, and assistive tech announces them as such.
+- Content lives entirely in `i18n/locales/{en,it}.json` under `help.*`.
+
+The candidate app has the equivalent at its only decision point: `InterviewGuide`
+sits on the consent screen, before consent, because that is the last moment a
+candidate can read at their own pace. Five short lines, no more.
 
 ### 8.3 BARS Report View
 
@@ -683,17 +788,60 @@ Usage:
 
 ## 16. Form Design
 
-All forms use `@tailwindcss/forms` for consistent base styling.
+> **D11 reconciliation.** This section previously named `@tailwindcss/forms` as the
+> primary form-styling mechanism and "VeeValidate or Zod" for client-side validation.
+> `@tailwindcss/forms` genuinely is installed and loaded — that half was never stale —
+> but its actual role is a Preflight-level reset, not visual styling, and neither
+> VeeValidate nor Zod is a dependency of either app. The semantics below (`aria-invalid`,
+> `aria-describedby`, i18n-keyed messages, errors after blur) are preserved verbatim from
+> the prior version; only the named stack and the state classes change.
 
-**Input states:**
-- Default: `border-neutral-200 bg-white focus:border-accent focus:ring-accent`
-- Error: `border-error bg-error-light focus:border-error focus:ring-error` + `aria-invalid="true"` + `aria-describedby` pointing to error message element
-- Disabled: `opacity-50 cursor-not-allowed`
+1. **Structure.** `FieldGroup` > `Field` > `FieldLabel` + control + `FieldError` /
+   `FieldDescription` (shadcn-vue). Never a raw `div` with `space-y-*`. `FieldSet` +
+   `FieldLegend` for grouped checkboxes/radios (e.g. a competency picker).
+2. **Base styling.** `@tailwindcss/forms` stays installed as a Preflight-level reset
+   only — it normalizes native control appearance so shadcn-vue's own classes have a
+   consistent base to override, not the other way around. Visual state (default, focus,
+   invalid, disabled) lives entirely in the vendored shadcn-vue component classes; pages
+   must not re-style controls with ad hoc `class` overrides.
+3. **Validation.** No VeeValidate, no Zod. Per-field validate functions run **on blur**
+   and again on submit — all fields validated on submit, never short-circuited by `&&`,
+   so a form submitted empty flags every invalid field at once, not one at a time.
+   Server-side: Laravel `422` responses map to the same field-level messages through the
+   typed API client. Error messages are always i18n-keyed (`$t('validation.required')`
+   etc.), never hardcoded.
+4. **Accessibility (unchanged, binding).** `data-invalid` on `Field`, `aria-invalid` on
+   the control, `aria-describedby` pointing at the message element's `id`, id convention
+   `{form}-{field}-error`.
+5. **Two-level feedback contract (ratified).** Field-level validation messages render
+   directly under their own field (`FieldError`, associated via `aria-describedby`).
+   Independently, the form-level submit outcome renders as a `role="alert"
+   aria-live="polite"` banner **adjacent to the submit CTA** — not detached at the top of
+   the card — because that is where the eye already is after pressing the button, and
+   because an outcome that cannot be attributed to a single field (e.g. "invalid
+   credentials", which must not disclose which field was wrong) must not masquerade as a
+   field error. Reference implementation: `backoffice/app/pages/login.vue:11-26` (field
+   level) and `:47-63` (form-level banner), tested in
+   `backoffice/tests/unit/login.spec.ts`.
+6. **i18n.** Every message is a key in `i18n/locales/{en,it}.json`. No literal string
+   ever, in either the field-level or the form-level message.
+7. **Disabled / immutable fields** carry a `FieldDescription` explaining *why* the field
+   is disabled (e.g. "locked after project activation"). A silently disabled field with no
+   explanation reads as a bug, not a rule.
+8. **Control sizing (D12).** Default control height is `--spacing-control` (44px —
+   `Input`, `Select` trigger, `Button`; `min-height` for `Textarea`); dense contexts
+   (table filter rows, inline table actions) use `--spacing-control-sm` (36px). Border
+   color resolves to `--color-neutral-500` for ≥3:1 non-text contrast — see §3.1, §9.1.
 
-**Validation:**
-- Client-side: VeeValidate or Zod-based composable; errors shown immediately after blur.
-- Server-side: Laravel validation errors mapped to field-level messages via the typed API client.
-- Error messages: always i18n-keyed (`$t('validation.required')` etc.), never hardcoded.
+   **Native `<select>` is excluded from the dense size and always uses the 44px
+   default.** A native select cannot shrink gracefully: its option line box plus
+   the platform's own vertical padding does not fit, and unlike a styled div it
+   clips rather than overflowing visibly. Every native `<select>` and every raw
+   `<input>` that cannot go through the vendored components uses the single
+   `formControlClass` in `app/components/ui/form-control` — four hand-written
+   variants had already drifted across three files, one of them at 32px and
+   visibly cutting its own text.
+9. **Testing.** Assertions target `data-testid`, never CSS selectors, per §5.
 
 ---
 

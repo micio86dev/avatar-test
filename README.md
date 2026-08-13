@@ -13,11 +13,29 @@ that is pushed to the calling HR system via webhook.
 - **How we work:** Spec-Driven Development (SDD) **+** Test-Driven Development (TDD),
   coverage target 85%, Git Flow (`main`/`develop` + `feature`/`release`/`hotfix`).
 
+### Quick start
+
+```bash
+git clone --recursive https://github.com/your-org/beai.git
+cd beai
+./scripts/dev.sh
+```
+
+One command brings up the whole stack in Docker — API, both Nuxt apps, Postgres,
+Redis, Mailpit, queue worker and scheduler — creating missing `.env` files,
+generating secrets and applying migrations along the way. It needs only Docker +
+Compose v2, and it is safe to re-run.
+
+Then: `--logs`, `--status`, `--down`, `--build`, `--seed`, `--fresh`.
+Full walkthrough, including the one manual step (creating an admin account) and
+the host-toolchain alternative, in [`docs/dev-setup.md`](docs/dev-setup.md).
+
 ### Target stack
 
 This repo is a **wrapper superproject**. The `api`, `frontend`, and `backoffice` directories
-are currently local scaffolds; they will be converted to git submodules in C1 Unit 5
-once their first `v0.1.0` releases are tagged.
+are **git submodules**, each its own repository tracking its own `develop` branch; the wrapper
+pins one commit per submodule. Clone with `--recursive` (or run `task submodules:init`) to
+restore those pins — see `task --list` for the rest of the submodule tasks.
 
 - **`api`** — **Laravel 13** + PHP 8.5 + Eloquent + **PostgreSQL 17** (pgvector) + Redis 8,
   **API-only** (no Blade). **Scramble** (`dedoc/scramble ^0.13`) publishes `openapi.json`.

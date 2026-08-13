@@ -27,45 +27,68 @@ tasks:
   # ---------------------------------------------------------------------------
   # Submodule management
   #
-  # NOTE: submodule repos (api, frontend, backoffice) are declared in .gitmodules
-  # but exist as plain local directories in this batch (not yet registered as git
-  # submodules). These tasks will become fully operational once the directories
-  # are converted to proper git submodules in a later batch (C1 Unit 5).
-  # TODO(C1-Unit5): replace stub bodies with real git submodule commands once
-  #   .gitmodules contains real remote URLs.
+  # api, frontend and backoffice are real git submodules, declared in .gitmodules
+  # with remote URLs and each tracking its own `develop` branch. The wrapper pins
+  # one commit per submodule; `git clone --recursive` (or `submodules:init`)
+  # restores exactly those pins.
   # ---------------------------------------------------------------------------
 
   submodules:init:
-    desc: "Initialise and clone all git submodules"
+    desc: "Initialise and clone all git submodules at their pinned commits"
     cmds:
-      - |
-        echo "TODO(C1-Unit5): submodule URLs not yet registered."
-        echo "Once real URLs are set, this task will run:"
-        echo "  git submodule update --init --recursive"
+      - git submodule update --init --recursive
 
   submodules:update:
-    desc: "Pull the latest commit for each submodule (following pinned branch/tag)"
+    desc: "Advance each submodule to the tip of its tracking branch (MOVES the pins)"
     cmds:
-      - |
-        echo "TODO(C1-Unit5): submodule URLs not yet registered."
-        echo "Once real URLs are set, this task will run:"
-        echo "  git submodule update --remote --merge"
+      # This is the one mutating task in the group. `--remote` resolves each
+      # submodule against its `branch` in .gitmodules (develop) rather than the
+      # commit the wrapper currently pins, so it deliberately moves the pointers
+      # OFF the release tags they usually sit on. Nothing is committed here: the
+      # wrapper is left with a dirty submodule diff for you to review and commit
+      # explicitly, because re-pinning the superproject is a release decision,
+      # not a side effect of syncing.
+      - git submodule update --remote --merge
+      - cmd: |
+          echo
+          echo "Submodule pointers moved. Review, then commit them in the wrapper:"
+          echo
+          git submodule status
+          echo
+          echo "  git add api frontend backoffice"
+          echo "  git commit -m 'chore(submodules): bump pointers'"
+        silent: true
 
   submodules:sync:
     desc: "Sync submodule URLs from .gitmodules into .git/config"
     cmds:
-      - |
-        echo "TODO(C1-Unit5): submodule URLs not yet registered."
-        echo "Once real URLs are set, this task will run:"
-        echo "  git submodule sync --recursive"
+      # `sync` only rewrites the recorded URLs; it never fetches. The follow-up
+      # `update` is what makes a URL change actually take effect on disk, which
+      # is the whole reason you would run this task after a remote is renamed.
+      - git submodule sync --recursive
+      - git submodule update --init --recursive
 
   submodules:status:
     desc: "Show submodule pointer freshness (ahead/behind tracking branch)"
     cmds:
-      - |
-        echo "TODO(C1-Unit5): submodule URLs not yet registered."
-        echo "Once real URLs are set, this task will run:"
-        echo "  git submodule status --recursive"
+      - git submodule status --recursive
+      - cmd: |
+          echo
+          echo "Freshness against each tracking branch:"
+          # `git submodule status` reports the pinned SHA and nearest tag, but says
+          # nothing about how stale that pin is — which is what this task claims to
+          # answer. Getting that requires asking the remote, so this fetches.
+          git submodule foreach --quiet '
+            branch=$(git config -f "$toplevel/.gitmodules" "submodule.$name.branch" 2>/dev/null || echo develop)
+            if ! git fetch --quiet origin "$branch" 2>/dev/null; then
+              echo "  $name: origin unreachable — showing local state only"
+              exit 0
+            fi
+            behind=$(git rev-list --count HEAD..FETCH_HEAD 2>/dev/null || echo "?")
+            ahead=$(git rev-list --count FETCH_HEAD..HEAD 2>/dev/null || echo "?")
+            echo "  $name: $(git describe --tags --always) — $behind behind / $ahead ahead of origin/$branch"
+          '
+        silent: true
 
   # ---------------------------------------------------------------------------
   # Per-app test runners
