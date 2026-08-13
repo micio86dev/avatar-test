@@ -135,19 +135,28 @@ tasks:
   # ---------------------------------------------------------------------------
   # OpenAPI client sync (C11 D13)
   #
-  # `backoffice/scripts/check-client-drift.sh` only re-derives `types/api.ts`
-  # from the COMMITTED `backoffice/openapi.json` snapshot — nothing copies the
-  # freshly-exported `api/openapi.json` into `backoffice/`, so a green drift
+  # Each app's `scripts/check-client-drift.sh` only re-derives `types/api.ts`
+  # from that app's COMMITTED `openapi.json` snapshot — nothing copies the
+  # freshly-exported `api/openapi.json` into the consumers, so a green drift
   # check can still hide a stale snapshot against the live API. This task
-  # closes that gap: export -> copy -> regenerate the typed client.
+  # closes that gap: export -> copy -> regenerate the typed clients.
+  #
+  # BOTH consumers, not just backoffice. The wrapper's Cross-Stack Consistency
+  # job requires `openapi.json` to be identical in api/, frontend/ AND
+  # backoffice/, so syncing only one of them turns the next added endpoint into
+  # a red `main` — which is exactly how it failed after `GET /m2m/abilities`
+  # landed. The frontend calls none of the admin endpoints; it carries the spec
+  # because the gate treats all three repos as one contract.
   # ---------------------------------------------------------------------------
 
   openapi:sync:
-    desc: "Export the API's OpenAPI spec, sync it into backoffice, and regenerate the typed client"
+    desc: "Export the API's OpenAPI spec, sync it into frontend and backoffice, and regenerate the typed clients"
     dir: api
     cmds:
       - php artisan scramble:export
+      - cp "{{.ROOT_DIR}}/api/openapi.json" "{{.ROOT_DIR}}/frontend/openapi.json"
       - cp "{{.ROOT_DIR}}/api/openapi.json" "{{.ROOT_DIR}}/backoffice/openapi.json"
+      - (cd "{{.ROOT_DIR}}/frontend" && bun run codegen)
       - (cd "{{.ROOT_DIR}}/backoffice" && bun run codegen)
 
   test:load:
