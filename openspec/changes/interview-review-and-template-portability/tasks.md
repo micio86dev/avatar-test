@@ -13,10 +13,10 @@
 ## 1 — API: session review read surface
 
 - [ ] 1.1 `SessionReviewResource`: timing, duration, provider, provider ref, ended reason, integrity timeline, risk score + band, snapshots, cost estimates.
-- [ ] 1.2 Port `summarizeIntegrity()` + `RISK_WEIGHTS` + `RISK_BANDS` from `legacy-demo/src/lib/proctor-config.ts` into a server-side service. Server-side ONLY (D3) — the backoffice must not hold a second implementation.
+- [x] 1.2 Port `summarizeIntegrity()` + `RISK_WEIGHTS` + `RISK_BANDS` from `legacy-demo/src/lib/proctor-config.ts` into a server-side service. Server-side ONLY (D3) — the backoffice must not hold a second implementation.
 - [ ] 1.3 Signed, short-expiry URLs per snapshot (D4). A test asserts no raw `s3_key` appears in any response field.
 - [ ] 1.4 `GET /api/participants/{id}/sessions` and `GET /api/interview-sessions/{id}/review`, org-scoped, behind `auth:api` + `TenantContext`.
-- [ ] 1.5 Arch test: no route under the `candidate` guard exposes integrity events or snapshots (D2). This is the constraint most likely to be eroded by a well-meaning future change.
+- [x] 1.5 Arch test: no route under the `candidate` guard exposes integrity events or snapshots (D2). This is the constraint most likely to be eroded by a well-meaning future change.
 - [ ] 1.6 Tests: payload shape, cross-tenant 404, candidate token refused, clean session renders an empty timeline rather than failing.
 
 ## 2 — API: cost estimation
