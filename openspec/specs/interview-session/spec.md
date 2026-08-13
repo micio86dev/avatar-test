@@ -817,3 +817,35 @@ scenario in the POST /end requirement.
 - GIVEN a `POST /end` request referencing a `session_id` that does not resolve via `resolveOwnedSession` (cross-tenant or cross-participant)
 - WHEN the request is handled
 - THEN the existing behavior is unchanged (HTTP 404, no mutation) AND no `progress` event is dispatched, because the transaction closure is never reached
+
+### Requirement: Session cost is derived from stored timings, not recorded
+
+The system MUST derive an avatar-provider cost estimate for a session from its
+`started_at`/`ended_at` duration and a configured per-provider rate, with the
+rates overridable by environment without a code change.
+
+The estimate MUST NOT be persisted on the session. Rates change, and a stored
+figure computed under an old rate becomes a number nobody can reproduce or
+explain; deriving it at read time keeps the calculation inspectable.
+
+Neither supported provider exposes a per-session billed amount through an API,
+so the value MUST be treated and labelled as an estimate everywhere it surfaces.
+
+The configured defaults are RATIFIED (2026-08-13): BEAI and `quint-avatar-tester`
+run on the same provider accounts and API keys, so the same contracts apply —
+HeyGen 2 credits/min at $0.10/credit, Tavus $0.37/min. This ratifies the RATE,
+not the reconciliation: a correct rate on a measured duration is still not an
+invoice line. The values stay env-overridable so a plan change is a config
+change, not a release.
+
+#### Scenario: Cost follows the configured rate
+
+- GIVEN a session of known duration and a configured provider rate
+- WHEN its review is read
+- THEN the returned estimate equals duration × rate for that provider
+
+#### Scenario: An unfinished session has no cost estimate
+
+- GIVEN a session with no `ended_at`
+- WHEN its review is read
+- THEN the estimate is absent rather than computed from a partial duration
