@@ -135,7 +135,7 @@ zone — flagged honestly rather than artificially trimmed.
       Scoped to `tests/unit/theme.spec.ts` only; diff reviewed — only the intended `--input`/
       `--color-neutral-500`/`--spacing-control*` lines changed.
 - [x] 4.2 Refresh `frontend` Vitest snapshot baselines invalidated by the token change, same discipline as 4.1.
-- [~] 4.3 Refresh both apps' Playwright screenshot baselines (`--update-snapshots`, chromium + webkit) for any route rendering a form control.
+- [~] 4.3 Refresh both apps' Playwright screenshot baselines (`--update-snapshots`, chromium + webkit) for any route rendering a form control. **Still partial, and the reason matters:** the only visual baseline in the suite is `unsupported-gate`, which renders no form control — so the `--spacing-control` change had no baseline to invalidate and none to refresh. The suite is green (97/97) but that greenness proves nothing about the new control sizing. A baseline covering a form route is missing coverage, not a completed task.
       **PARTIAL/BLOCKED**. Ran `health.spec.ts` and `unsupported-gate.spec.ts` (chromium + webkit +
       mobile) — both green with NO diff against the existing baselines (neither page renders a
       shadcn form control, so no update was needed or produced). `admin-flow.spec.ts` — the one spec
@@ -425,12 +425,7 @@ zone — flagged honestly rather than artificially trimmed.
 
 ### Phase 22: E2E + Gate
 
-- [~] 22.1 Run 20.8 GREEN against the real page. **BLOCKED — pre-existing, confirmed unrelated**: the spec's
-      `login()` helper (copied from `admin-flow.spec.ts`'s established convention) times out on
-      `getByLabel('Email')`, identically to the blocker already documented and verified (via `git stash` against a
-      clean `develop` checkout) in task 4.3 of this same tasks.md. All 3 scenarios in `projects-crud.spec.ts` are
-      written and ready; none could run to completion in this environment. Not something this batch should spend
-      time on per the batch's own explicit instruction.
+- [x] 22.1 Run 20.8 GREEN against the real page. Unblocked: the E2E server collided with the `frontend` container on port 3000, so `serve` port-switched and the readiness probe was answered by the wrong app. Moved to 4173; suite runs 97/97 across chromium, webkit and mobile.
 - [x] 22.2 Extend `backoffice/i18n/locales/{en,it}.json` with every new field/validation/description string.
 - [x] 22.3 `bun run codegen` / confirm `backoffice/types/api.ts` already covers `/projects` (no drift expected — API unchanged).
       Confirmed: `/projects` was already present pre-batch; `codegen:check` green.
@@ -486,8 +481,7 @@ zone — flagged honestly rather than artificially trimmed.
 
 ### Phase 26: E2E + Gate
 
-- [~] 26.1 Run 24.9 GREEN against the real page. **BLOCKED — pre-existing, confirmed unrelated**: same `login()`
-      blocker as 22.1/`projects-crud.spec.ts` (task 4.3). Written and ready; could not run to completion here.
+- [x] 26.1 Run 24.9 GREEN against the real page. Unblocked: the E2E server collided with the `frontend` container on port 3000, so `serve` port-switched and the readiness probe was answered by the wrong app. Moved to 4173; suite runs 97/97 across chromium, webkit and mobile.
 - [x] 26.2 Extend `backoffice/i18n/locales/{en,it}.json` with `users.role.*` (distinct from existing `projects.roleCode.*`) and every new settings string; UI copy uses "Access level", never bare "role", for the auth field.
 - [x] 26.3 `bun run typecheck` clean; `bun run test:unit` + `test:e2e` (chromium+webkit) green; `mobile` project unaffected.
       `bun run typecheck`: exit 0. `bunx vitest run`: 66 files / 400 tests passing. `test:e2e`: same blocker as
@@ -531,8 +525,7 @@ zone — flagged honestly rather than artificially trimmed.
 
 ### Phase 29: E2E + Gate
 
-- [~] 29.1 Run 27.7 GREEN against the real page. **BLOCKED — pre-existing, confirmed unrelated**: same `login()`
-      blocker as 22.1/26.1. Written and ready; could not run to completion here.
+- [x] 29.1 Run 27.7 GREEN against the real page. Unblocked: the E2E server collided with the `frontend` container on port 3000, so `serve` port-switched and the readiness probe was answered by the wrong app. Moved to 4173; suite runs 97/97 across chromium, webkit and mobile.
 - [x] 29.2 Extend `backoffice/i18n/locales/{en,it}.json` with every new reports string.
 - [x] 29.3 `bun run typecheck` clean; `bun run test:unit` + `test:e2e` (chromium+webkit) green.
       `bun run typecheck`: exit 0. `bunx vitest run`: 71 files / 420 tests passing. `test:e2e`: same blocker as
@@ -544,7 +537,7 @@ zone — flagged honestly rather than artificially trimmed.
 
 ## Phase 30: Cross-Slice Integration Gate
 
-- [~] 30.1 RED then GREEN `backoffice/tests/e2e/sidebar-navigation.spec.ts`: iterate every `SidebarNav.vue` entry (`/`, `/projects`, `/participants`, `/reports`, `/avatar-templates`, `/settings`) and assert none resolves to a 404/SPA-fallback — the change's own success criterion, made executable.
+- [x] 30.1 RED then GREEN `backoffice/tests/e2e/sidebar-navigation.spec.ts`: iterate every `SidebarNav.vue` entry (`/`, `/projects`, `/participants`, `/reports`, `/avatar-templates`, `/settings`) and assert none resolves to a 404/SPA-fallback — the change's own success criterion, made executable.
       **Written, BLOCKED in this environment — root cause found and it is NOT the six-separate-blockers picture
       implied by tasks 22.1/26.1/29.1.** Bypassed the broken `login()` helper entirely (session token injected
       directly into `sessionStorage`, matching `useAuth().ensureHydrated()`'s own read path — no login FORM
@@ -559,23 +552,14 @@ zone — flagged honestly rather than artificially trimmed.
       (`discovery/backoffice-e2e-deep-link-blocker-port-3000-...`). Also fixed a real bug found while building this
       spec: two of its own API mocks (`/participants`, `/projects`, `/avatar-templates` — byte-identical to their
       own SPA route since `apiBase` is same-origin) were intercepting the DOCUMENT navigation itself and producing
-      false-positive passes; rewritten with the `isDataRequest()` guard (`admin-flow.spec.ts` precedent).
+      false-positive passes; rewritten with the `isDataRequest()` guard (`admin-flow.spec.ts` precedent). Unblocked: the E2E server collided with the `frontend` container on port 3000, so `serve` port-switched and the readiness probe was answered by the wrong app. Moved to 4173; suite runs 97/97 across chromium, webkit and mobile.
 - [x] 30.2 Run `task openapi:sync` + `bun run codegen:check` in `backoffice` after all three API slices are merged — final drift-free confirmation.
       Re-confirmed green after every commit in this batch (2a/2b/6/7), most recently after Unit 7. All three api
       slices (organization-settings, user-management, admin-read-api) are on `api`'s local tracker branch, not
       merged to `api/develop` — this task's literal precondition ("after all three API slices are merged") is not
       yet met project-wide (merging is a human/PR-review step, out of an apply batch's authority), but the
       openapi.json/types/api.ts snapshot IS already synced from the tracker-branch state and drift-free against it.
-- [~] 30.3 Run Lighthouse (Accessibility 100, Best Practices 100, Performance ≥90) on `/projects`, `/reports`, `/settings`.
-      **Partial.** `/projects` unauthenticated-but-desktop-viewport run (Lighthouse CLI, `--preset=desktop`,
-      headless Chrome against an independently-started, verified-working `serve` instance): Performance 0.90,
-      Accessibility 1.00, Best Practices 1.00 — meets the bar, though the audited page was the client-redirect
-      target (`/unsupported` at mobile default, then `/login` once desktop preset was forced) rather than
-      `/projects` itself, since there is no live backend and this batch's session-injection trick (reliable in
-      Playwright) did not reliably carry into Lighthouse's own internally-driven navigation within the time spent
-      attempting it (Puppeteer-primed `sessionStorage` did not persist into Lighthouse's own audit target).
-      `/reports` and `/settings` NOT run — same authentication-injection limitation. Not a claim of "green";
-      reported as attempted, partially informative, and honestly incomplete.
+- [~] 30.3 Run Lighthouse (Accessibility 100, Best Practices 100, Performance ≥90) on `/projects`, `/reports`, `/settings`. **Not done.** Only `/projects` was measured, and unauthenticated (0.90 / 1.00 / 1.00) — it redirects to login, so that score describes the login page, not the projects page. The three authenticated routes are unmeasured against a DESIGN.md §14 target that is non-negotiable.
 - [x] 30.4 Confirm full-suite coverage: 85% overall across `api`/`backoffice`; ~95% on `UserGuards`, `UserAdminReader`, `EvaluationIndexQuery`.
       `api`: 94.58% overall (prior batch, unchanged this batch). `backoffice`: `bun run test:unit:coverage` →
       **90.93%** overall lines (target 85%), 86.95% branches, 83.77% functions. `UserGuards`/`UserAdminReader`/

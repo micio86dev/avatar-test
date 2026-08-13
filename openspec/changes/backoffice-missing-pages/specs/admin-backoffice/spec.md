@@ -20,11 +20,22 @@ prefilled with the existing value.
 - THEN `framework_version_id`, `assessment_type`, and `role_code` controls
   are disabled
 
-#### Scenario: Draft project allows editing every field
+#### Scenario: Draft project unlocks assessment_type and role_code, but not the framework version
 
 - GIVEN a project with `status = draft`
 - WHEN the edit form renders
-- THEN all fields, including `framework_version_id`, are editable
+- THEN `assessment_type` and `role_code` are editable
+- AND `framework_version_id` is still disabled
+
+> Corrected. This scenario previously read "all fields, including
+> `framework_version_id`, are editable", which contradicted its own requirement
+> paragraph above and design D9. `framework_version_id` is `prohibited` on
+> EVERY PATCH — `UpdateProjectRequest` rejects it even on a draft, and even when
+> the submitted value is unchanged — because a project's results are only
+> comparable against the catalogue they were scored with. Only
+> `assessment_type` and `role_code` are status-gated; the framework pin is not
+> gated at all, it is fixed at creation. The implementation always followed the
+> requirement text; it was the scenario that was wrong.
 
 #### Scenario: Webhook secret is never prefilled
 
