@@ -75,9 +75,23 @@ small body text.)
 | `--color-neutral-100` | `#f1f5f9` | Card / panel backgrounds |
 | `--color-neutral-200` | `#e2e8f0` | Borders, dividers |
 | `--color-neutral-400` | `#94a3b8` | Placeholder text, disabled icons |
+| `--color-neutral-500` | `#64748b` | Form control borders (`input`/`select`/`textarea`/`checkbox`) — see §9.1 |
 | `--color-neutral-600` | `#475569` | Secondary text, captions |
 | `--color-neutral-800` | `#1e293b` | Primary text |
 | `--color-neutral-900` | `#0f172a` | High-emphasis text, headings |
+
+**`--color-neutral-500` and non-text contrast (D12).** shadcn-vue's default `--input`
+token (`#e2e8f0`, i.e. `--color-neutral-200`) on the `#f8fafc`/white surfaces it sits on
+measures ≈1.18:1, failing §9.1's binding **≥3:1 for UI components and graphical objects**.
+`--color-neutral-500` fixes this at **≈4.55:1** on `--color-neutral-50` (≈4.76:1 on pure
+white) while staying visually light — a deliberate step above the floor, not a bare pass.
+Two alternatives were measured and rejected: `#94a3b8` (`--color-neutral-400`) at 2.6:1
+still fails; `#475569` (`--color-neutral-600`) passes at 7.5:1 but reads as a heavy,
+disproportionate outline for a border. `--input` in both apps' `@theme`/`:root` blocks
+resolves to this token (`backoffice/app/assets/css/main.css`,
+`frontend/app/assets/css/main.css`, identical per §17). axe-core has **no** non-text-contrast
+rule, so this class of defect is a manual check, not an automated gate — verify with a real
+contrast calculation, never by eye.
 
 #### Semantic
 
@@ -459,6 +473,12 @@ Content padding: `--spacing-section` horizontal, `--spacing-panel` vertical.
 | Settings | Organization profile, API keys, webhook config, user management (RBAC) |
 | Data management | GDPR data deletion requests; export |
 
+> **Scope note (`backoffice-missing-pages`).** This table describes the eventual admin
+> panel surface, not what any single change ships. `/projects`, `/reports`, and
+> `/settings` (Organization profile, API keys, Webhook defaults, Users & roles) are built
+> by this change. **Project detail, the webhook log, and Data management remain unbuilt**
+> — no route, no component — and stay out of scope until a future change picks them up.
+
 ### 8.3 BARS Report View
 
 The evaluation report is the most complex view:
@@ -683,17 +703,51 @@ Usage:
 
 ## 16. Form Design
 
-All forms use `@tailwindcss/forms` for consistent base styling.
+> **D11 reconciliation.** This section previously named `@tailwindcss/forms` as the
+> primary form-styling mechanism and "VeeValidate or Zod" for client-side validation.
+> `@tailwindcss/forms` genuinely is installed and loaded — that half was never stale —
+> but its actual role is a Preflight-level reset, not visual styling, and neither
+> VeeValidate nor Zod is a dependency of either app. The semantics below (`aria-invalid`,
+> `aria-describedby`, i18n-keyed messages, errors after blur) are preserved verbatim from
+> the prior version; only the named stack and the state classes change.
 
-**Input states:**
-- Default: `border-neutral-200 bg-white focus:border-accent focus:ring-accent`
-- Error: `border-error bg-error-light focus:border-error focus:ring-error` + `aria-invalid="true"` + `aria-describedby` pointing to error message element
-- Disabled: `opacity-50 cursor-not-allowed`
-
-**Validation:**
-- Client-side: VeeValidate or Zod-based composable; errors shown immediately after blur.
-- Server-side: Laravel validation errors mapped to field-level messages via the typed API client.
-- Error messages: always i18n-keyed (`$t('validation.required')` etc.), never hardcoded.
+1. **Structure.** `FieldGroup` > `Field` > `FieldLabel` + control + `FieldError` /
+   `FieldDescription` (shadcn-vue). Never a raw `div` with `space-y-*`. `FieldSet` +
+   `FieldLegend` for grouped checkboxes/radios (e.g. a competency picker).
+2. **Base styling.** `@tailwindcss/forms` stays installed as a Preflight-level reset
+   only — it normalizes native control appearance so shadcn-vue's own classes have a
+   consistent base to override, not the other way around. Visual state (default, focus,
+   invalid, disabled) lives entirely in the vendored shadcn-vue component classes; pages
+   must not re-style controls with ad hoc `class` overrides.
+3. **Validation.** No VeeValidate, no Zod. Per-field validate functions run **on blur**
+   and again on submit — all fields validated on submit, never short-circuited by `&&`,
+   so a form submitted empty flags every invalid field at once, not one at a time.
+   Server-side: Laravel `422` responses map to the same field-level messages through the
+   typed API client. Error messages are always i18n-keyed (`$t('validation.required')`
+   etc.), never hardcoded.
+4. **Accessibility (unchanged, binding).** `data-invalid` on `Field`, `aria-invalid` on
+   the control, `aria-describedby` pointing at the message element's `id`, id convention
+   `{form}-{field}-error`.
+5. **Two-level feedback contract (ratified).** Field-level validation messages render
+   directly under their own field (`FieldError`, associated via `aria-describedby`).
+   Independently, the form-level submit outcome renders as a `role="alert"
+   aria-live="polite"` banner **adjacent to the submit CTA** — not detached at the top of
+   the card — because that is where the eye already is after pressing the button, and
+   because an outcome that cannot be attributed to a single field (e.g. "invalid
+   credentials", which must not disclose which field was wrong) must not masquerade as a
+   field error. Reference implementation: `backoffice/app/pages/login.vue:11-26` (field
+   level) and `:47-63` (form-level banner), tested in
+   `backoffice/tests/unit/login.spec.ts`.
+6. **i18n.** Every message is a key in `i18n/locales/{en,it}.json`. No literal string
+   ever, in either the field-level or the form-level message.
+7. **Disabled / immutable fields** carry a `FieldDescription` explaining *why* the field
+   is disabled (e.g. "locked after project activation"). A silently disabled field with no
+   explanation reads as a bug, not a rule.
+8. **Control sizing (D12).** Default control height is `--spacing-control` (44px —
+   `Input`, `Select` trigger, `Button`; `min-height` for `Textarea`); dense contexts
+   (table filter rows, inline table actions) use `--spacing-control-sm` (36px). Border
+   color resolves to `--color-neutral-500` for ≥3:1 non-text contrast — see §3.1, §9.1.
+9. **Testing.** Assertions target `data-testid`, never CSS selectors, per §5.
 
 ---
 
