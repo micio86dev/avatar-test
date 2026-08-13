@@ -372,6 +372,28 @@ No `sm` or `md` breakpoints are used in production UI (those widths = unsupporte
 
 ## 7. Frontend (Candidate Interview App) — UX Flows
 
+### 7.0 Standalone routes (`NoticeShell`)
+
+The four non-interview routes — root landing, SA-11 gate, interview done,
+interview error — all render through one component,
+`app/components/molecules/NoticeShell.vue`. They exist for four different
+reasons but share one job: tell a candidate in one glance what happened and
+what to do next.
+
+Layout is a two-column grid: a solid `--color-primary` brand band (wordmark +
+tagline) beside a content column holding a tone chip, an `<h1>` and one
+paragraph. Below `lg` it collapses to a single column, which is the SA-11 gate's
+only rendering — that page is the one BEAI surface a phone visitor ever sees.
+
+- `tone` (`info` / `success` / `warning` / `danger`) may change the **icon chip
+  and nothing else**. The moment a tone starts altering copy or structure the
+  four pages stop being one system.
+- The SA-11 gate is `warning`, not `danger`: nothing failed and the candidate
+  did nothing wrong. An error tone there reads as "your assessment broke".
+- No action affordance unless a route passes one in. The root landing must stay
+  free of forms, buttons and contact links — see `tests/unit/root-page.spec.ts`
+  for why each of those is prohibited.
+
 ### 7.1 Entry (SSO / Magic-Link)
 
 The candidate arrives via a signed magic-link JWT. The entry point:
@@ -478,6 +500,69 @@ Content padding: `--spacing-section` horizontal, `--spacing-panel` vertical.
 > `/settings` (Organization profile, API keys, Webhook defaults, Users & roles) are built
 > by this change. **Project detail, the webhook log, and Data management remain unbuilt**
 > — no route, no component — and stay out of scope until a future change picks them up.
+
+### 8.2.1 Settings — section rail (not a tab strip)
+
+`/settings` presents its four sections (Organization profile, API keys, Webhook
+defaults, Users & roles) as a **vertical section rail**, 16 rem wide and sticky,
+with the panel to its right. Each rail item carries an icon, the section label,
+and a one-line description; the same label and description repeat as the panel
+heading, so the nav and the content can never disagree.
+
+A horizontal tab strip is **not** used here, and must not be reintroduced:
+
+- The sections are distinct destinations with different shapes (form, table +
+  dialog, form, table), not peer views of one dataset — which is what a
+  segmented tab strip signals.
+- The labels run 11–28 characters in Italian, so a horizontal strip reflowed
+  unpredictably between 1 280 px and 1 920 px.
+- A rail scales to further sections (C12/C13) without reflowing.
+
+Implementation stays on the reka-ui `Tabs` primitive with
+`orientation="vertical"`, preserving `role="tab"` / `role="tabpanel"`, roving
+arrow-key focus, and lazy panel mounting (only the visible panel is in the DOM).
+Selected state: `bg-primary/10` with a `--color-primary` label and icon. Side
+stripes (`border-left` accents) are **not** an allowed selected-state affordance.
+
+### 8.2.2 Selected state on toggles
+
+`ToggleGroup` / `Toggle` selected state is `--color-primary` fill with
+`--primary-foreground` text (8.2:1, §9.1). The shadcn default `bg-muted` fill is
+`--color-neutral-100` against a `--color-neutral-50` page — roughly 1.05:1, which
+made a selected toggle indistinguishable from an unselected one. Unselected
+toggles sit at `--muted-foreground`, so the state difference is carried by both
+fill and text colour.
+
+### 8.2.3 reka-ui state variants (CSS contract)
+
+reka-ui exposes state as `data-state="active|checked|open|closed"` and axis as
+`data-orientation="vertical|horizontal"`, while vendored shadcn-vue components
+style those states with Tailwind's **bare** `data-active:` / `data-checked:` /
+`data-open:` / `data-vertical:` variants, which compile to attribute-*presence*
+selectors (`[data-active]`). Both Nuxt apps' `main.css` MUST therefore redefine
+those variant names via `@custom-variant` to target the `data-state` /
+`data-orientation` values. Without them every such rule is dead CSS.
+
+### 8.2.4 Contextual help (`HelpSheet`)
+
+Every backoffice route carries a **Help** button in the top nav that opens a
+right-hand sheet scoped to that route: what the page is for, the steps in the
+order they must happen, and a short glossary of the domain words that page uses.
+
+Constraints that make it work, and that a future change must not quietly drop:
+
+- **One topic per route**, keyed on the first path segment (so `/projects/42`
+  and `/projects` share a topic). A help button that opens generic help on a
+  specific page is worse than no help button.
+- **Unknown routes fall back to the overview topic.** New routes are added more
+  often than the topic map is updated; an empty panel is a bug the operator sees.
+- **Steps are an `<ol>`, the glossary is a `<dl>`.** They are an order and a set
+  of definitions respectively, and assistive tech announces them as such.
+- Content lives entirely in `i18n/locales/{en,it}.json` under `help.*`.
+
+The candidate app has the equivalent at its only decision point: `InterviewGuide`
+sits on the consent screen, before consent, because that is the last moment a
+candidate can read at their own pace. Five short lines, no more.
 
 ### 8.3 BARS Report View
 
@@ -747,6 +832,15 @@ Usage:
    `Input`, `Select` trigger, `Button`; `min-height` for `Textarea`); dense contexts
    (table filter rows, inline table actions) use `--spacing-control-sm` (36px). Border
    color resolves to `--color-neutral-500` for ≥3:1 non-text contrast — see §3.1, §9.1.
+
+   **Native `<select>` is excluded from the dense size and always uses the 44px
+   default.** A native select cannot shrink gracefully: its option line box plus
+   the platform's own vertical padding does not fit, and unlike a styled div it
+   clips rather than overflowing visibly. Every native `<select>` and every raw
+   `<input>` that cannot go through the vendored components uses the single
+   `formControlClass` in `app/components/ui/form-control` — four hand-written
+   variants had already drifted across three files, one of them at 32px and
+   visibly cutting its own text.
 9. **Testing.** Assertions target `data-testid`, never CSS selectors, per §5.
 
 ---
