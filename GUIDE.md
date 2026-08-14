@@ -91,37 +91,15 @@ Database\Seeders\RolesAndPermissionsSeeder ...... DONE
 Database\Seeders\FrameworkCatalogSeeder ......... DONE
 ```
 
-### 3.2 Tenant demo
+### 3.2 Organizzazione e admin vero
 
 Non esiste API né schermata per creare un'organizzazione: progetti e partecipanti
 hanno endpoint, le organizzazioni no, e il superadmin di piattaforma nasce con
 `organization_id = null`. Da un database migrato non si arriva quindi in nessun
-modo *via HTTP* a qualcosa in cui fare login.
-
-Per il locale c'è un seeder che monta anche progetto e partecipante:
-
-```bash
-docker compose exec api php artisan db:seed --class=DemoSeeder
-```
-
-```
-+------------------+------------------------------------------------+
-| Organization     | Dev Organization (id=1)                        |
-| Backoffice login | admin@beai.local / password                    |
-| Project          | Demo Project — slug=demo-project, role=ICO     |
-| Participant      | demo-candidate-001 (status=in_attesa)          |
-+------------------+------------------------------------------------+
-```
-
-> Quella password è pubblica: il seeder si rifiuta di girare in produzione.
-> È idempotente, puoi rilanciarlo quando vuoi.
-
-### 3.3 Organizzazione vera (anche in produzione)
-
-Il `DemoSeeder` si rifiuta di girare in produzione, e giustamente: password nota
-e dati finti. Per creare un tenant reale c'è un comando che funziona ovunque, e
-che soprattutto **non chiede niente in input** — quindi gira in un container
-senza terminale, dove `app:create-superadmin` non può andare.
+modo *via HTTP* a qualcosa in cui fare login. Serve un comando, e funziona
+ovunque (anche in produzione: nessuna password nota, nessun dato finto), perché
+**non chiede niente in input** — gira in un container senza terminale, dove
+`app:create-superadmin` non può andare.
 
 ```bash
 php artisan beai:provision-organization \
@@ -179,13 +157,54 @@ Verifica a vuoto prima di scrivere, se vuoi:
 railway ssh --service api "php artisan tinker --execute=\"echo App\\\\Models\\\\Organization::count();\""
 ```
 
+### 3.3 Dati demo
+
+`beai:demo-seed` **non crea mai un utente**, in nessun ambiente: il login resta
+quello creato al §3.2. Quello che porta è un dataset ricco e BARS-valido dentro
+l'organizzazione che hai appena provisionato — progetti, partecipanti in ogni
+stato del ciclo di vita, valutazioni con punteggi calcolati dai motori reali,
+eventi di proctoring. Ogni riga porta il prefisso `beai-demo-`, quindi non si
+confonde mai con dati veri e resta selezionabile per il teardown.
+
+```bash
+docker compose exec api php artisan beai:demo-seed --org=acme-corp
+```
+
+```
+Demo dataset provisioned.
+  | FrameworkVersion | beai-demo-1.0.0 (locked=false)                            |
+  | Avatar templates | 2 (1 active)                                              |
+  | Projects         | 4                                                        |
+  | Participants     | 9 across every lifecycle status                          |
+  | Evaluations      | 5 with computed competency results and indicator scores  |
+  | Snapshots        | 34 objects written to the configured disk                |
+```
+
+> È idempotente: rilanciarlo non duplica nulla. Se il dataset resta a metà (per
+> esempio una riga cancellata a mano) il comando **rifiuta** di procedere invece
+> di indovinare — usa `beai:demo-teardown --org=acme-corp` per ripulire, poi
+> riesegui il seed.
+>
+> In produzione serve `--force-production`: creare un progetto demo blocca
+> (`is_locked=true`) una `FrameworkVersion`, un effetto cross-tenant e
+> permanente — il comando lo stampa prima di scrivere qualunque riga.
+
+Per rimuovere tutto quello che questo comando ha creato, incluse le immagini
+segnaposto su object storage, senza toccare i dati veri della stessa
+organizzazione:
+
+```bash
+docker compose exec api php artisan beai:demo-teardown --org=acme-corp
+```
+
 ---
 
 ## 4. Cosa puoi provare adesso
 
 ### 4.1 Backoffice — http://localhost:3001
 
-Funziona **completamente**. Accedi con `admin@beai.local` / `password`.
+Funziona **completamente**. Accedi con le credenziali stampate al §3.2
+(`admin@acme.com` / la password generata una tantum).
 
 - **Dashboard** — metriche aggregate dell'organizzazione
 - **Partecipanti** — elenco con filtri, e il dettaglio del singolo candidato
@@ -193,8 +212,11 @@ Funziona **completamente**. Accedi con `admin@beai.local` / `password`.
 - **Banner consenso analytics** — compare dopo il login (vedi §6)
 
 I gate di lifecycle sono veri: la trascrizione si apre da `in_valutazione` in
-poi, la valutazione solo su `completato`. Il candidato demo è `in_attesa`, quindi
-entrambe rispondono **409** — non è un errore, è il gate che funziona.
+poi, la valutazione solo su `completato`. Il dataset demo copre tutti e cinque
+gli stati insieme — `beai-demo-c-006` è `in_attesa`, quindi trascrizione e
+valutazione rispondono entrambe **409** per lui; `beai-demo-c-001` è
+`completato` e le espone entrambe. Nessuno dei due è un errore: è il gate che
+funziona.
 
 ### 4.5 Template avatar
 
@@ -226,9 +248,10 @@ default d'ambiente, esattamente come prima che questa funzione esistesse.
 ### 4.2 API — http://localhost:8000
 
 ```bash
+# Usa l'email e la password stampate al §3.2 (beai:provision-organization).
 TOKEN=$(curl -s -X POST http://localhost:8000/api/auth/login \
   -H 'Content-Type: application/json' -H 'Accept: application/json' \
-  -d '{"email":"admin@beai.local","password":"password"}' \
+  -d '{"email":"admin@acme.com","password":"<la password generata al §3.2>"}' \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
 
 curl -s http://localhost:8000/api/auth/me -H "Authorization: Bearer $TOKEN" -H 'Accept: application/json'
@@ -275,8 +298,8 @@ l'avatar non si connette. Senza chiave Anthropic un colloquio completato resta
 Il flusso reale è: il sistema chiamante chiama `POST /api/m2m/sso-link` con una
 chiave M2M, ottiene un token, e manda il candidato su
 `/api/sso/exchange?token=…`. Per farlo in locale devi prima creare un client M2M
-(`POST /api/m2m/clients` con il JWT admin). Il `DemoSeeder` **non** lo fa: minare
-token di ingresso è una cosa che merita un passaggio esplicito.
+(`POST /api/m2m/clients` con il JWT admin). `beai:demo-seed` **non** lo fa:
+minare token di ingresso è una cosa che merita un passaggio esplicito.
 
 ### Il purge GDPR è disattivato
 
@@ -389,7 +412,7 @@ Le tre lacune emerse scrivendo questa guida, tutte reali e nessuna bloccante per
 provare il prodotto:
 
 1. **Nessuna superficie per creare un'organizzazione** — né API né UI. Oggi ci
-   pensa `DemoSeeder`.
+   pensa `beai:provision-organization` (§3.2).
 2. **Il catalogo framework non è raggiungibile dal container** — path relativo al
    wrapper, ora scavalcabile con `FRAMEWORK_CATALOG_PATH`.
 3. **Il colloquio end-to-end richiede credenziali di provider** che nessuno ha
