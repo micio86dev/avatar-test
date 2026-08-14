@@ -264,6 +264,7 @@ Authoritative reference for all pinned versions used in C1. Update this table wh
 | `captainhook/captainhook` | `^5.24` | PHP pre-commit hook runner |
 | `phpstan/phpstan` | `^2.0` | PHP static analysis (required CI step; see D28) |
 | `larastan/larastan` | `^3.0` | PHPStan Laravel extension (Eloquent + facade inference; see D28) |
+| `league/flysystem-aws-s3-v3` | `^3.25.1` | S3-compatible object storage driver (`object-storage-fix`). Not invented: this is the constraint `laravel/framework` itself declares for this package (`composer.lock`), matching the caret style already in use here. Without it, resolving the `s3` disk throws `Class "League\Flysystem\AwsS3V3\PortableVisibilityConverter" not found` before any network call — the S3 driver was never actually installable prior to this change. Resolved to `3.35.2` on PHP 8.5.7 / Laravel 13.8 at apply time. |
 
 ### JS / Bun Packages (`package.json` constraints — both Nuxt apps)
 

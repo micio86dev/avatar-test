@@ -36,3 +36,6 @@ data/
 *.swp
 *.swo
 .gga-sweep/
+
+# Wrangler (Cloudflare CLI) local state
+.wrangler/

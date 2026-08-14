@@ -72,12 +72,53 @@ destroy the audit trail without protecting anybody.
 
 - GIVEN a snapshot older than its retention window
 - WHEN the purge runs
-- THEN the database row is deleted
-- AND the object at its `s3_key` is deleted from the disk
+- THEN the object at its `s3_key` is deleted from the disk FIRST
+- AND the database row is deleted only after the object delete succeeds
 
 Deleting the row alone leaves the image on the disk with nothing pointing at it
 — unreachable through the application and still fully present, which is the
 worst of both outcomes: the data is retained and nobody can find it to prove it.
+This is why the object is deleted before the row, not after.
+
+#### Scenario: A failed object delete leaves the row intact for retry
+
+- GIVEN a snapshot older than its retention window whose object delete fails
+  (network error, 403, already gone)
+- WHEN the purge runs
+- THEN the database row is NOT deleted
+- AND the purge logs a warning and continues to the next row
+- AND the next purge run retries this snapshot
+
+The row is the only pointer that makes the object findable. Deleting the row
+while the object delete failed would orphan the object permanently and
+unfindably — the row surviving is what makes the failure retryable rather than
+silently permanent.
+
+<!-- Coordination note (object-storage-fix, 2026-08-13): the requirement below
+     formalizes the same-disk invariant this artifact-class scenario depends
+     on. It mirrors "Snapshot write and retention purge resolve the same disk
+     by construction" in the object-storage-fix delta for interview-session
+     (openspec/changes/object-storage-fix/specs/interview-session/spec.md).
+     Flag for reconciliation if nfr-hardening's own purge-mechanism work
+     touches this same requirement before either change archives. -->
+
+### Requirement: The purge resolves the storage disk through the same configuration point as the writer
+
+The purge MUST resolve the storage disk for the `snapshot` artifact class through
+the SAME single point the snapshot write path resolves it through — Laravel's own
+default-disk resolution, with no disk name given at either call site. The purge
+MUST NOT contain a hardcoded disk name, and MUST NOT read the underlying config key
+directly: a second resolution point is a second place the purge and the writer could
+diverge. An object purged here MUST be the exact object an earlier write produced, on
+whatever disk is configured.
+
+#### Scenario: Purge and writer never diverge on disk
+
+- GIVEN the purge command's source for the `snapshot` artifact class
+- WHEN it resolves a disk to delete an object from
+- THEN it resolves through the same argument-less call the write path uses, with no
+  literal disk-name string and no direct config-key read, matching the write path's
+  resolution point exactly
 
 #### Scenario: A webhook payload is redacted, the delivery record kept
 
