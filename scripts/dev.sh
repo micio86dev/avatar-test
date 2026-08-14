@@ -280,7 +280,7 @@ api_exec() { dc exec -T api sh -lc "$1"; }
 # somehow missing (RolesAndPermissionsSeeder already made it by this point);
 # it is refused when `APP_ENV=production`.
 ensure_demo_data() {
-  local out
+  local out seed_rc
 
   # beai:demo-seed, NOT `beai:provision-organization`. The two exist for
   # different jobs: the provisioning command mints a REAL tenant and generates
@@ -291,10 +291,11 @@ ensure_demo_data() {
   # events — into the organization that already exists, and is idempotent: a
   # second run writes nothing new.
   #
-  # `|| true` for the same reason as in ensure_secret: under `set -euo pipefail`
-  # an assignment inherits its command substitution's exit status, so a failing
-  # command would kill dev.sh here with its output already captured and never
-  # printed.
+  # The `&& … || …` tail is the same protection ensure_secret gets from
+  # `|| true`: under `set -euo pipefail` an assignment inherits its command
+  # substitution's exit status, so an unguarded failure would kill dev.sh here
+  # with the output already captured and never printed. This form also KEEPS
+  # the status instead of discarding it, which is what the branch below needs.
   out="$(api_exec 'php artisan beai:demo-seed --org=dev-org --create-org' 2>&1)" && seed_rc=0 || seed_rc=$?
 
   # The exit status decides, and the strings only pick the wording. Matching on
@@ -366,12 +367,18 @@ if api_exec 'php artisan --version' >/dev/null 2>&1; then
     # Gated on the migration: seeding a schema we just reported as broken
     # produces a second, downstream error that buries the real cause.
     if [[ $migrate_ok -eq 1 ]]; then
-      if api_exec 'php artisan db:seed --force' >/dev/null 2>&1; then ok "Seeders executed"
+      if api_exec 'php artisan db:seed --force' >/dev/null 2>&1; then
+        ok "Seeders executed"
+        # Same gating reason one level down. beai:demo-seed needs dev-org from
+        # RolesAndPermissionsSeeder and the competency catalog from
+        # FrameworkCatalogSeeder; running it over a failed db:seed reports a
+        # missing-catalog error on top of the real one.
+        ensure_demo_data
       else
         warn "Seeding failed — run manually: docker compose exec api php artisan db:seed"
+        warn "Skipping demo data: it needs the org and the competency catalog db:seed creates."
         FAILED=1
       fi
-      ensure_demo_data
     else
       warn "Skipping seeders: migrations did not apply."
     fi
