@@ -4,7 +4,7 @@
 #
 #   ./scripts/dev.sh              start everything (idempotent, safe to re-run)
 #   ./scripts/dev.sh --build      force a rebuild of the app images
-#   ./scripts/dev.sh --seed       run database seeders, then create a local admin
+#   ./scripts/dev.sh --seed       run database seeders, then provision the demo dataset
 #   ./scripts/dev.sh --fresh      DESTRUCTIVE: wipe volumes and rebuild from zero
 #   ./scripts/dev.sh --no-worker  start without the worker and scheduler services
 #   ./scripts/dev.sh --status     show service health and exit
@@ -51,7 +51,7 @@ BEAI — one-shot local development launcher.
 
   ./scripts/dev.sh              start everything (idempotent, safe to re-run)
   ./scripts/dev.sh --build      force a rebuild of the app images
-  ./scripts/dev.sh --seed       run database seeders, then create a local admin
+  ./scripts/dev.sh --seed       run database seeders, then provision the demo dataset
   ./scripts/dev.sh --fresh      DESTRUCTIVE: wipe volumes and rebuild from zero
   ./scripts/dev.sh --no-worker  start without the worker and scheduler services
   ./scripts/dev.sh --status     show service health and exit
@@ -88,7 +88,15 @@ case "$ACTION" in
     exit 0 ;;
   logs)
     step "Following logs (Ctrl-C to detach)"
-    exec dc logs -f --tail=80 ;;
+    # NOT `exec dc …`. `exec` replaces the shell with an external binary and
+    # never resolves a shell function, and `dc` IS an external binary — the
+    # POSIX arbitrary-precision desk calculator at /usr/bin/dc. So `--logs`
+    # used to exec the calculator, which failed trying to open a file named
+    # "logs" and exited 4. It read like Docker misbehaving, which is why it
+    # survived: every other `dc` call site in this file is a plain call and
+    # works. Call the function, then exit on its status.
+    dc logs -f --tail=80
+    exit $? ;;
   status)
     step "Service status"
     dc ps
@@ -263,44 +271,73 @@ api_exec() { dc exec -T api sh -lc "$1"; }
 # `db:seed` deliberately does NOT create a user. RolesAndPermissionsSeeder makes
 # the `dev-org` organization and FrameworkCatalogSeeder the competency catalog,
 # and that is where the seeders stop — so a seeded database still had zero rows
-# in `users`, and the backoffice answered every login with a correct, useless
-# 401. Seeding an environment you cannot then log into is not seeding it.
+# in anything worth clicking through. Seeding an environment with nothing in it
+# is not seeding it.
 #
-# Minting the administrator stays OUT of the seeders on purpose: they run with
-# --force in CI and inside the production image, and neither has any business
-# creating an account at a known address with a known password. It belongs here,
-# in the local-development launcher, behind --seed.
-#
-# Override with DEV_ADMIN_EMAIL / DEV_ADMIN_ORG / DEV_ADMIN_ORG_SLUG, and pass
-# DEV_ADMIN_PASSWORD to choose the password instead of having one generated.
-ensure_admin() {
-  local out
+# `beai:demo-seed` never creates a user, in ANY environment (a demo lives in an
+# organization's OWN existing account — design decision, not an oversight).
+# `--create-org` only creates the `dev-org` organization itself if it is
+# somehow missing (RolesAndPermissionsSeeder already made it by this point);
+# it is refused when `APP_ENV=production`.
+ensure_demo_data() {
+  local out seed_rc
 
-  # DemoSeeder, NOT `beai:provision-organization`. The two exist for different
-  # jobs and picking the wrong one is not a cosmetic difference: the artisan
-  # command provisions a REAL tenant and generates a random password it prints
-  # exactly once, which is correct for onboarding a customer and useless for a
-  # laptop you re-bootstrap weekly. DemoSeeder converges on a published,
-  # documented password and brings the fixtures — templates, projects,
-  # participants across every lifecycle state, evaluations — with it.
+  # beai:demo-seed, NOT `beai:provision-organization`. The two exist for
+  # different jobs: the provisioning command mints a REAL tenant and generates
+  # a random password it prints exactly once, which is correct for onboarding
+  # a customer and useless for a laptop you re-bootstrap weekly.
+  # `beai:demo-seed` brings a rich, BARS-valid fixture — projects, participants
+  # across every lifecycle status, evaluations with computed scores, proctoring
+  # events — into the organization that already exists, and is idempotent: a
+  # second run writes nothing new.
   #
-  # `|| true` for the same reason as in ensure_secret: under `set -euo pipefail`
-  # an assignment inherits its command substitution's exit status, so a failing
-  # seeder would kill dev.sh here with its output already captured and never
-  # printed.
-  out="$(api_exec 'php artisan db:seed --class=DemoSeeder --force' 2>&1)" || true
+  # The `&& … || …` tail is the same protection ensure_secret gets from
+  # `|| true`: under `set -euo pipefail` an assignment inherits its command
+  # substitution's exit status, so an unguarded failure would kill dev.sh here
+  # with the output already captured and never printed. This form also KEEPS
+  # the status instead of discarding it, which is what the branch below needs.
+  out="$(api_exec 'php artisan beai:demo-seed --org=dev-org --create-org' 2>&1)" && seed_rc=0 || seed_rc=$?
 
-  if printf '%s' "$out" | grep -q 'Demo tenant ready'; then
-    ok "admin: demo tenant ready — ${B}admin@beai.local${N} / ${B}password${N}"
-    # The fixture counts, verbatim. They are the answer to "did the seed
-    # actually put anything in there", which is the only question worth asking
-    # of a seeder that reports success.
-    printf '%s\n' "$out" | grep -E '^\| (Avatar|Projects|Participants|Evaluations)' | sed 's/^/    /'
+  # The exit status decides, and the strings only pick the wording. Matching on
+  # output alone had a hole: the census gate prints "already fully provisioned"
+  # and then lets the run continue, so a writer that threw afterwards left that
+  # phrase in the buffer with no success marker — and the script cheerfully
+  # reported "nothing to do" over a failed seed.
+  if [[ $seed_rc -ne 0 ]]; then
+    warn "demo data: beai:demo-seed exited $seed_rc — showing the last lines:"
+    printf '%s\n' "$out" | tail -8 | sed 's/^/    /' || true
+    FAILED=1
     return 0
   fi
 
-  warn "admin: DemoSeeder failed — showing the last lines:"
-  printf '%s\n' "$out" | tail -8 | sed 's/^/    /'
+  if printf '%s' "$out" | grep -q 'Demo dataset provisioned'; then
+    ok "demo data: dataset provisioned — log in with an account you already have"
+    # The command's WHOLE output, not a grep of the six count rows.
+    #
+    # Filtering to the fixture counts silently dropped three lines their author
+    # wrote to be unmissable: the framework-lock consequence, the assessment-type
+    # gap, and the pre-existing non-demo census — the "am I writing demo rows
+    # next to real client data" signal. A boot script that hides an operator
+    # warning on exactly the path that triggers it is worse than one that prints
+    # too much.
+    #
+    # `|| true`: under `pipefail` a `sed` that matches nothing still exits 0,
+    # but the guard costs nothing and this function has already been bitten once
+    # by an unguarded pipeline under `set -e`.
+    printf '%s\n' "$out" | sed 's/^/    /' || true
+    return 0
+  fi
+
+  if printf '%s' "$out" | grep -q 'already fully provisioned'; then
+    ok "demo data: already provisioned — nothing to do"
+    return 0
+  fi
+
+  warn "demo data: beai:demo-seed failed — showing the last lines:"
+  printf '%s\n' "$out" | tail -8 | sed 's/^/    /' || true
+  # A failed seed is a failed boot. Without this the script prints the green
+  # "BEAI is up" banner and exits 0 over a stack that has no demo data in it.
+  FAILED=1
 }
 
 if api_exec 'php artisan --version' >/dev/null 2>&1; then
@@ -319,12 +356,32 @@ if api_exec 'php artisan --version' >/dev/null 2>&1; then
   else
     warn "Migrations failed — showing the last lines:"
     printf '%s\n' "$migrate_out" | tail -20
+    # A stack whose schema did not apply is not up, whatever the containers say.
+    # Only wait_healthy used to set this, and the one health probe that touches
+    # the schema lives on the worker — which `--no-worker` removes. So a failed
+    # migration could print the green banner and exit 0.
+    FAILED=1
   fi
 
   if [[ $SEED -eq 1 ]]; then
-    if api_exec 'php artisan db:seed --force' >/dev/null 2>&1; then ok "Seeders executed"
-    else warn "Seeding failed — run manually: docker compose exec api php artisan db:seed"; fi
-    ensure_admin
+    # Gated on the migration: seeding a schema we just reported as broken
+    # produces a second, downstream error that buries the real cause.
+    if [[ $migrate_ok -eq 1 ]]; then
+      if api_exec 'php artisan db:seed --force' >/dev/null 2>&1; then
+        ok "Seeders executed"
+        # Same gating reason one level down. beai:demo-seed needs dev-org from
+        # RolesAndPermissionsSeeder and the competency catalog from
+        # FrameworkCatalogSeeder; running it over a failed db:seed reports a
+        # missing-catalog error on top of the real one.
+        ensure_demo_data
+      else
+        warn "Seeding failed — run manually: docker compose exec api php artisan db:seed"
+        warn "Skipping demo data: it needs the org and the competency catalog db:seed creates."
+        FAILED=1
+      fi
+    else
+      warn "Skipping seeders: migrations did not apply."
+    fi
   fi
 else
   warn "Could not reach artisan inside the api container — skipping migrations."

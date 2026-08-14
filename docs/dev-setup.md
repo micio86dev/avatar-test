@@ -170,46 +170,54 @@ Requires only Docker + Docker Compose v2 — no local PHP, Node or Bun.
 | `--logs` | follow logs of all services |
 | `--down` | stop containers, preserving volumes |
 
-**Use `--seed` on the first boot**, because that is what gives you an account:
+**Use `--seed` on the first boot**, because that is what gives you a populated
+tenant to click through:
 
 ```bash
 ./scripts/dev.sh --seed
 ```
 
 Plain `./scripts/dev.sh` migrates but seeds nothing, and `DatabaseSeeder` itself
-creates the `dev-org` organization and the framework catalog **but no user** — so
-an unseeded database leaves you with a backoffice that answers every login with
-a perfectly correct, perfectly useless 401. `--seed` therefore also runs
-`DemoSeeder`, which brings the account and a tenant worth clicking through:
+seeds only the `dev-org` organization and the framework catalog — no
+participants, no projects, no evaluations. `--seed` also runs
+`beai:demo-seed --org=dev-org --create-org`, which brings a rich, BARS-valid
+demo dataset into that organization:
 
 ```
-✓ admin: demo tenant ready — admin@beai.local / password
-  | Avatar templates | 2 (1 active — HeyGen)                          |
-  | Projects         | 3 (standard, potential, draft)                 |
-  | Participants     | 7 across every lifecycle state                 |
-  | Evaluations      | 2 with competency results and indicator scores |
+Demo dataset provisioned.
+  | FrameworkVersion | beai-demo-1.0.0 (locked=false)                            |
+  | Avatar templates | 2 (1 active)                                              |
+  | Projects         | 4                                                        |
+  | Participants     | 9 across every lifecycle status                          |
+  | Evaluations      | 5 with computed competency results and indicator scores  |
+  | Snapshots        | 34 objects written to the configured disk                |
 ```
 
-| | |
-|---|---|
-| **Backoffice login** | `admin@beai.local` / `password` |
-| Organization | Dev Organization (`dev-org`) |
+No account is created by `--seed`, in any environment — `beai:demo-seed`
+**never creates a user**. Log in with an account you already have (or mint one
+with `beai:provision-organization`, below); `--create-org` only creates the
+`dev-org` organization itself if it is somehow missing, and is refused when
+`APP_ENV=production`.
 
-That password is published on purpose and the seeder **converges** on it — an
-account already sitting at that address has its password reset to match, so the
-credentials in this document are always the credentials that work. `DemoSeeder`
-refuses to run when `APP_ENV=production`.
+The whole step is idempotent: a second `--seed` writes nothing new. If the
+dataset is ever left partially seeded (e.g. a row deleted by hand), a re-run
+**refuses** rather than guessing — run `beai:demo-seed`'s teardown counterpart
+first:
 
-The whole step is idempotent, so re-running `--seed` neither duplicates fixtures
-nor disturbs data you added by hand.
+```bash
+docker compose exec api php artisan beai:demo-teardown --org=dev-org
+```
 
-`DemoSeeder` is **not** part of `DatabaseSeeder` and never runs automatically:
-`db:seed` executes with `--force` in CI and inside the production image, and
-neither has any business creating an account at a published password. Run it
-directly with `php artisan db:seed --class=DemoSeeder`.
+`beai:demo-seed` is **not** part of `DatabaseSeeder` and never runs
+automatically: `db:seed` executes with `--force` in CI and inside the
+production image, and a demo dataset has no business appearing there
+unannounced. Every demo row carries the `beai-demo-` prefix (on
+`projects.slug`, `participants.candidate_ref`, `framework_versions.version`,
+`avatar_templates.name`) so it is never mistaken for real client data and is
+always selectable for teardown.
 
 For a **real** tenant — an actual organization with a generated, non-published
-password — use the provisioning command instead:
+password and its own admin account — use the provisioning command instead:
 
 ```bash
 docker compose exec api php artisan beai:provision-organization \
