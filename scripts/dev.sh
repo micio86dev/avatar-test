@@ -295,7 +295,19 @@ ensure_demo_data() {
   # an assignment inherits its command substitution's exit status, so a failing
   # command would kill dev.sh here with its output already captured and never
   # printed.
-  out="$(api_exec 'php artisan beai:demo-seed --org=dev-org --create-org' 2>&1)" || true
+  out="$(api_exec 'php artisan beai:demo-seed --org=dev-org --create-org' 2>&1)" && seed_rc=0 || seed_rc=$?
+
+  # The exit status decides, and the strings only pick the wording. Matching on
+  # output alone had a hole: the census gate prints "already fully provisioned"
+  # and then lets the run continue, so a writer that threw afterwards left that
+  # phrase in the buffer with no success marker — and the script cheerfully
+  # reported "nothing to do" over a failed seed.
+  if [[ $seed_rc -ne 0 ]]; then
+    warn "demo data: beai:demo-seed exited $seed_rc — showing the last lines:"
+    printf '%s\n' "$out" | tail -8 | sed 's/^/    /' || true
+    FAILED=1
+    return 0
+  fi
 
   if printf '%s' "$out" | grep -q 'Demo dataset provisioned'; then
     ok "demo data: dataset provisioned — log in with an account you already have"
