@@ -675,6 +675,8 @@ All text against its background MUST achieve:
 
 > ⚠️ Do NOT use `--color-accent` (`#e45526`) for small text on white — it fails the 4.5:1 AA threshold for normal text (3.7:1). Use `--color-accent-dark` (`#b8431e`, 5.4:1) for text-sized accent elements.
 
+> **Select highlighted-option contrast (form-clarity-and-console-warnings, D-select).** `ui/select/SelectItem.vue`'s `focus:` (highlighted) state pairs white text with `--color-accent-dark`, never plain `--color-accent` — the request to make the highlight text white is legal ONLY on the darker token, because white on `--color-accent` is the 3.7:1 failure two rows up. Backoffice `tests/unit/theme.spec.ts` asserts the 5.4:1 ratio numerically (a small WCAG relative-luminance helper), not by eye, plus a source-level assertion that `SelectItem.vue`'s class list never regresses to `focus:bg-accent focus:text-accent-foreground`.
+
 > ⚠️ Do NOT use `--color-error` (#ef4444) as text on white. Use `#b91c1c` for error text.
 
 > ⚠️ Do NOT use `--color-success` (`#22c55e`) or `--color-warning` (`#f59e0b`) as text/icon color on white or on their own `-light` background — both measure well under 3:1 (a real @axe-core WCAG failure caught this exact pattern for `--color-success` during C11 PR B2's status badges, see `sdd/admin-dashboards/apply-progress`). Use `--color-success-dark`/`--color-warning-dark` for any text-sized or icon-sized success/warning element (BARS `ScoreChip`, `CompetencyMean`).
@@ -883,6 +885,20 @@ Usage:
    variants had already drifted across three files, one of them at 32px and
    visibly cutting its own text.
 9. **Testing.** Assertions target `data-testid`, never CSS selectors, per §5.
+10. **Select highlighted-option contrast (form-clarity-and-console-warnings).** The
+    highlighted option in a `Select` MUST render white text on `--color-accent-dark`
+    (5.4:1), never on plain `--color-accent` (3.7:1, fails 4.5:1 AA) — see §9.1's
+    dedicated note for the numbers and the token pairing. This binds every current
+    and future `focus:`/`hover:`/`data-highlighted:` variant that styles a select
+    highlight, not only `SelectItem.vue`'s existing `focus:` state.
+11. **The `novalidate` + `Field`/`FieldError` contract binds every backoffice form,
+    present and future** (generalised from the four forms that originally wrote
+    §16's rules 3-5), not only forms `login.vue`/`ProjectForm.vue` happened to
+    introduce it on. Enforced mechanically, not by review discipline, by
+    `backoffice/tests/unit/arch/form-contract.spec.ts` — a repo-wide Vitest guard
+    over `app/**/*.vue` (novalidate present, `FieldError` imported, no `catch`
+    that silently drops a server 422 without reaching the shared
+    `applyServerFieldErrors` mapper), mirroring the `api/tests/Arch/**` pattern.
 
 ---
 
