@@ -1,0 +1,65 @@
+# BEAI — framework catalog known gaps (CI control file)
+#
+# One role code per line. Everything from a '#' to end of line is a comment.
+#
+# A role listed here is DECLARED in roles.json but has no bars/{ROLE}.json yet,
+# and the wrapper catalog gate — .github/workflows/wrapper-ci.yml, step (d) —
+# will not fail the build on it.
+#
+# THIS IS NOT A MUTE SWITCH. The gate enforces this list in BOTH directions:
+#
+#   * a role missing its BARS file and NOT listed here  -> CI fails
+#   * a role listed here whose BARS file now EXISTS     -> CI fails
+#
+# The second rule is the one that earns this file its place. An exemption that
+# outlives the gap it excuses is precisely the failure this whole workflow was
+# written against — a note that stayed true-looking after its fact changed, and
+# that nobody re-read. So the exemption cannot outlive the gap: the day
+# SRX.json lands, this file has to change in the same commit or CI goes red.
+# Deleting a line here is the LAST step of authoring a BARS file, not an
+# optional tidy-up afterwards.
+#
+# This list mirrors a gap the RUNTIME already tracks, and deliberately reuses
+# its vocabulary rather than inventing a second one. When
+# FrameworkCatalogSeeder meets a role with no BARS file it does not throw — it
+# records the gap and carries on:
+#
+#   FrameworkGap::updateOrCreate(
+#       ['kind' => 'role_no_bars', 'role_code' => $roleCode, 'competency_code' => null],
+#       ['note' => "No bars file found for role {$roleCode}", 'status' => 'pending_authoring'],
+#   );
+#
+#   — api/database/seeders/FrameworkCatalogSeeder.php:220
+#
+# Same fact, two places it has to be true: the seeder knows at runtime, this
+# file makes CI know at review time. A role here should have a matching
+# framework_gaps row with kind=role_no_bars and status=pending_authoring.
+#
+# Adding a line is a deliberate, reviewable decision about shipping an
+# incomplete binding catalog. It is meant to be an obvious diff. Do not add one
+# to get a red pipeline green.
+
+# ---------------------------------------------------------------------------
+# SRX — Senior Executive.
+#
+# Absent from BOTH trees: docs/app_description/02-domain/framework/bars/ and
+# the vendored api/database/framework/bars/. A parity-only gate stayed green
+# over it for exactly that reason — the two copies agreed, and both were wrong.
+#
+# Size of the debt, so it is not mistaken for a small one. roles.json assigns
+# SRX 18 competencies (docs/app_description/02-domain/01-ruoli-e-competenze.md
+# line 53, the "N. competenze" column). Every BARS file in this catalog carries
+# 3 anchored indicators per competency (the 5/3/1 scale), and ICO is the only
+# role authored to full coverage: 15 competencies, 45 indicators. Authored to
+# that same standard, SRX.json is 18 competencies and 54 indicators of expert
+# assessment content. That is domain work for an assessment specialist, not
+# something a code change can produce.
+#
+# Consequence while this line stands: no participant can be scored as SRX.
+# App\Exceptions\Scoring\RoleNoBarsException is the runtime end of the same
+# gap. The catalog ships knowingly incomplete, not accidentally.
+#
+# Remove this line in the SAME commit that adds bars/SRX.json to the authored
+# source and vendors it into api/database/framework/bars/.
+# ---------------------------------------------------------------------------
+SRX

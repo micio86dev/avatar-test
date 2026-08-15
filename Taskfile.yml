@@ -17,7 +17,24 @@ tasks:
   up:
     desc: "Start local dev infra (postgres, redis, mailpit) in detached mode"
     cmds:
-      - docker compose -f "{{.COMPOSE_FILE}}" up -d
+      # The service list is NOT redundant with the desc — it is what makes the
+      # desc true. Bare `docker compose up -d` starts all EIGHT services in
+      # docker-compose.yml, which means building beai-api:local,
+      # beai-frontend:local and beai-backoffice:local plus running `worker` and
+      # `scheduler`. A task called `up`, documented as starting three infra
+      # containers, was building three application images nobody asked for.
+      #
+      # Infra is the right scope for this task. Everything downstream assumes
+      # it: `test:api` says "requires postgres + redis healthy" and then runs
+      # `php artisan test` on the HOST, and `test:frontend` runs `bun run
+      # test:unit` on the host too. The containerised apps are for compose-level
+      # verification, not for the inner development loop, so paying their build
+      # cost on every `task up` buys nothing and hides the fast path.
+      #
+      # Need the whole stack (app containers, worker, scheduler)? That is a
+      # different intent, so ask for it explicitly:
+      #   docker compose -f docker-compose.yml up -d
+      - docker compose -f "{{.COMPOSE_FILE}}" up -d postgres redis mailpit
 
   down:
     desc: "Stop and remove local dev infra containers (volumes are preserved)"
@@ -147,11 +164,54 @@ tasks:
   # a red `main` — which is exactly how it failed after `GET /m2m/abilities`
   # landed. The frontend calls none of the admin endpoints; it carries the spec
   # because the gate treats all three repos as one contract.
+  #
+  # DB-DRIVER SENSITIVE (generated-client-truth-and-session-safety, apply
+  # verification): `php artisan scramble:export` reads `api/.env`, and this
+  # repo's committed `.env` defaults to `DB_CONNECTION=sqlite`. Running this
+  # task against sqlite produces a WRONG export — SQLite-versus-Postgres JSON
+  # column introspection differs, regressing `AvatarTemplateResource.config`/
+  # `persona` and `Admin/SessionReviewResource`'s integer fields, none of
+  # which this change touched. CI is pinned to Postgres
+  # (`pgvector/pgvector:0.8.0-pg17`) so this cannot ship silently, but a
+  # developer who runs `task openapi:sync` locally against the default `.env`
+  # gets a phantom CI failure on fields this task didn't touch, and can burn
+  # real time chasing it. Before running this task, confirm `DB_CONNECTION`
+  # resolves to `pgsql` for the `api` process — e.g. run it against the same
+  # Postgres service `api/.github/workflows/ci.yml` uses
+  # (`DB_CONNECTION=pgsql DB_HOST=127.0.0.1 DB_PORT=5432
+  # DB_DATABASE=beai_test ... task openapi:sync`), never the default sqlite
+  # `.env` as-is.
   # ---------------------------------------------------------------------------
 
   openapi:sync:
     desc: "Export the API's OpenAPI spec, sync it into frontend and backoffice, and regenerate the typed clients"
     dir: api
+    # A precondition, not a comment. Under sqlite this task produces a WRONG
+    # export — JSON columns introspect differently, so `config`, `persona` and
+    # several integer fields come back with the wrong type — and it does it
+    # silently, leaving three committed snapshots that all agree with each
+    # other and disagree with the API. CI is pinned to Postgres so it cannot
+    # ship, which is exactly what makes it expensive: the failure surfaces as a
+    # phantom CI red on a machine that looked fine. The note above this block
+    # said so already; a note is something you read after losing the hour.
+    #
+    # `config:show`, not `tinker --execute`. Both answer the same question, but
+    # tinker boots a full PsySH REPL to evaluate one expression, and its output
+    # contract is whatever the REPL decides to print — which has moved between
+    # Laravel majors. `config:show` is a first-class command whose entire job is
+    # printing a config key (Laravel 11+; this repo is on laravel/framework
+    # v13.20). Verified on both counts here: it exists, it is measurably cheaper,
+    # and it exits non-zero on a key that does not resolve.
+    #
+    # Matched with a regex rather than an equality test because the command
+    # renders a two-column row — ` database.default .. pgsql ` — whose dot
+    # leader width follows the terminal. `[[:space:].]+` absorbs any leader, and
+    # anchoring the value at end-of-line means `pgsql` has to BE the value, not
+    # merely appear somewhere in it. Confirmed against real output at both the
+    # default and COLUMNS=200 widths.
+    preconditions:
+      - sh: 'php artisan config:show database.default --no-ansi 2>/dev/null | grep -qE "^[[:space:]]*database\.default[[:space:].]+pgsql[[:space:]]*$"'
+        msg: "openapi:sync requires DB_CONNECTION=pgsql — sqlite silently produces a wrong export. Point DB_* at Postgres and retry."
     cmds:
       - php artisan scramble:export
       - cp "{{.ROOT_DIR}}/api/openapi.json" "{{.ROOT_DIR}}/frontend/openapi.json"
