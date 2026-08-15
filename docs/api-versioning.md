@@ -52,3 +52,17 @@ Each Nuxt repo updates its API client independently:
 3. Run the full test suite green.
 4. Release a new version.
 5. The wrapper's submodule pointer is bumped only after step 4.
+
+Steps 1-2 are automated by `task openapi:sync` at the wrapper root — **but
+that task is DB-driver sensitive**. `php artisan scramble:export` (step 0,
+implicit in the task) reads `api/.env`, which defaults to
+`DB_CONNECTION=sqlite`. Exporting against sqlite silently produces a WRONG
+`openapi.json` for fields whose Scramble-visible type depends on JSON/jsonb
+column introspection (observed: `AvatarTemplateResource.config`/`persona`,
+`Admin/SessionReviewResource`'s integer fields) — the CI job is pinned to
+Postgres so a bad export can't merge, but a developer running the task
+locally against the default `.env` gets a CI failure on fields they never
+touched. Point `DB_CONNECTION` at a real Postgres instance (matching
+`api/.github/workflows/ci.yml`'s `pgvector/pgvector:0.8.0-pg17` service)
+before running `task openapi:sync`; see the task's own comment in
+`Taskfile.yml` for the exact invocation.

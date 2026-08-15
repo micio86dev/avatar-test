@@ -11,10 +11,27 @@
 # existed for a long time, and the note outliving that fact is why nobody
 # noticed the openapi gate below had never once run.
 #
-# This workflow validates:
-#   (a) docker compose config parses without errors
+# This workflow validates, in the order the steps run:
+#   (a) docker compose config parses, and every image tag — compose services
+#       and Dockerfile bases alike — is pinned
 #   (b) the committed openapi.json is semantically identical across api/frontend/backoffice
 #   (c) each app's check-client-drift.sh exits 0 (generated TS client matches openapi.json)
+#   (d) the framework catalog matches its authored source, and every declared
+#       role has BARS or a committed entry in scripts/framework-known-gaps.txt
+#   (e) every submodule pointer is reachable from a published remote ref
+#   (f) the self-test: each guard above still rejects a known-bad fixture
+#   (g) no stale stack tokens (MySQL, Laravel 12, Sanctum, Horizon, npm/pnpm/yarn)
+#
+# That list said "(a) compose (b) openapi (c) drift" long after (d) through (g)
+# were added, and two orphaned banner blocks for (d) and (e) sat stacked above
+# a step that was neither. In a file whose whole thesis is that a note
+# outliving its fact is why nobody noticed, the index has to be maintained like
+# a gate. Renumber it when you add a step.
+#
+# The GUARD MECHANISMS themselves are not in this file. They live in
+# scripts/ci-guards.sh, which both the real gates and the self-test in (f)
+# source. See the header of that file for why: a self-test holding its own copy
+# of the thing under test proves the copy works.
 #
 # Triggers: develop, main, release/** and hotfix/**.
 #
@@ -57,35 +74,58 @@ jobs:
           # artifact in a three-repository setup, has never once run.
           submodules: recursive
           # Full history, not the default depth-1. That depth applies to
-          # submodules too, and in a shallow clone `merge-base --is-ancestor`
-          # cannot see the ancestry chain — so the pointer check below reports a
-          # perfectly good pin as unreachable the moment a submodule's develop
-          # advances past it, which is the NORMAL state of a wrapper between
-          # bumps. It is green today only because all three pointers happen to
-          # equal their branch tips.
+          # submodules too, and in a shallow clone the pointer check below
+          # cannot see the ancestry chain — so it reports a perfectly good pin
+          # as unreachable the moment a submodule's branch advances past it,
+          # which is the NORMAL state of a wrapper between bumps.
           fetch-depth: 0
 
       # -----------------------------------------------------------------------
       # (a) docker compose config — validates the compose file parses cleanly
-      #     with all 6 services defined (postgres, redis, mailpit + api, frontend, backoffice).
+      #     and defines exactly 8 services: postgres, redis and mailpit, the
+      #     three app services api, frontend and backoffice, and worker +
+      #     scheduler.
+      #
+      #     This comment said 6 and named six. worker and scheduler are the two
+      #     that actually run `queue:work` and `schedule:work` — which is the
+      #     entire reason Horizon could be deferred, a decision guard (g) below
+      #     exists to keep. Leaving them out of the count leaves the
+      #     justification out of the file that depends on it.
+      #
+      #     And the count is now ASSERTED rather than claimed. `config -q`
+      #     proves the file parses, not that anything is in it: delete
+      #     `scheduler` and this step stayed green while the comment above it
+      #     promised coverage. The expected set lives in
+      #     scripts/ci-guards.sh (CI_EXPECTED_COMPOSE_SERVICES) so the self-test
+      #     can run the same comparison against a deliberately broken list.
       # -----------------------------------------------------------------------
       - name: Validate docker compose config
         run: |
+          . ./scripts/ci-guards.sh
+
           docker compose config -q
+
+          ACTUAL_SERVICES=$(docker compose config --services)
+          if ! compose_service_diff "$ACTUAL_SERVICES"; then
+            echo "ERROR: docker-compose.yml does not define the expected service set."
+            echo "  Guard (g) keeps Horizon deferred on the grounds that 'worker' and"
+            echo "  'scheduler' exist and run queue:work / schedule:work. If that set has"
+            echo "  legitimately changed, update CI_EXPECTED_COMPOSE_SERVICES in"
+            echo "  scripts/ci-guards.sh in the same commit, and re-read (g)'s rationale."
+            exit 1
+          fi
+          echo "All 8 compose services present: $ACTUAL_SERVICES" | tr '\n' ' '
+          echo
+
           echo "Checking all pinned image tags (no 'latest' or bare-major allowed):"
           docker compose config | grep 'image:' | grep -v '#'
-          # The SAME tag rule the Dockerfile check below uses. Two different
-          # pinning rules in one file is how one of them drifts — and this one
-          # had: it accepted any tag containing a dot anywhere, so
-          # `node:24-alpine3.19` passed on the variant's version while the major
-          # floated across every patch.
-          #
-          # The tag is everything after the last colon, and it must START with a
-          # dotted version, or be `local`.
+
+          # `tag_pinned` comes from scripts/ci-guards.sh — the SAME function the
+          # Dockerfile loop below and the self-test in (f) call. It used to be
+          # typed out here and typed out AGAIN in the self-test, which is how a
+          # rule ends up with two implementations and only one of them right.
           docker compose config | grep -E '^\s*image:' | while read -r _ REF; do
-            case "$REF" in *:*) ;; *) echo "UNPINNED:$REF"; continue ;; esac
-            TAG=${REF##*:}
-            printf '%s' "$TAG" | grep -qE '^v?[0-9]+\.[0-9]+|^local$' || echo "UNPINNED:$REF"
+            tag_pinned "$REF" || echo "UNPINNED:$REF"
           done > /tmp/unpinned.txt
           if [ -s /tmp/unpinned.txt ]; then
             echo "ERROR: floating image tag(s) in docker-compose — pin per D24/D25:"
@@ -94,43 +134,18 @@ jobs:
           fi
           echo "All compose image tags are pinned."
 
-          # Deliberately small. Earlier versions parsed stage names and refs by
-          # hand and kept breaking on real syntax — `FROM builder AS runtime`,
-          # `FROM --platform=$BUILDPLATFORM node:24`, lowercase `from`. Each fix
-          # grew the parser and revealed another case, which is the signal that
-          # the medium is wrong: it was a Dockerfile parser written in bash.
-          #
-          # It asks one question per LINE. Per line, not over a flattened token
-          # list — an earlier version broke out after the first registry
-          # reference, so a pinned builder stage hid a floating runtime stage
-          # entirely, and the test matrix missed it because its multi-stage
-          # fixture used a stage reference rather than a second image.
-          #
-          # A registry reference contains ':' or '/'; a bare word is a stage
-          # name and is skipped. The TAG — everything after the last colon —
-          # must start with a dotted version, or be `local`.
-          #
-          # Known limit, stated rather than parsed around: `FROM ubuntu`, with
-          # no tag at all, reads as a stage name and passes. Distinguishing it
-          # needs the declared-stage tracking this deliberately does not do.
+          # Same rule, applied to the Dockerfile bases. `df_guard` prints the
+          # first offending reference and exits non-zero; a file it cannot read
+          # is a failure, not a pass.
           for DF in api/Dockerfile frontend/Dockerfile backoffice/Dockerfile; do
             if [ ! -f "$DF" ]; then
               echo "ERROR: $DF not found. The base-image check cannot verify what it cannot read."
               exit 1
             fi
-
-            while IFS= read -r LINE; do
-              REF=$(printf '%s' "$LINE" \
-                | sed 's/^[[:space:]]*[Ff][Rr][Oo][Mm][[:space:]]\{1,\}//' \
-                | tr ' \t' '\n\n' | grep -v '^--' | grep -v '^$' | head -1)
-              [ -n "$REF" ] || continue
-              case "$REF" in *:*|*/*) ;; *) continue ;; esac
-              TAG=${REF##*:}
-              if ! printf '%s' "$TAG" | grep -qE '^v?[0-9]+\.[0-9]+|^local$'; then
-                echo "ERROR: $DF uses a floating base image: $REF. Pin it per D24/D25."
-                exit 1
-              fi
-            done < <(grep -iE '^[[:space:]]*from[[:space:]]' "$DF")
+            if ! OFFENDER=$(df_guard "$DF"); then
+              echo "ERROR: $DF uses a floating base image: $OFFENDER. Pin it per D24/D25."
+              exit 1
+            fi
           done
 
           echo "All image tags are pinned — compose services and Dockerfile bases."
@@ -139,67 +154,72 @@ jobs:
       # (b) openapi.json cross-repo consistency check
       #     The committed openapi.json in api/, frontend/, and backoffice/ MUST
       #     be semantically identical (same parsed JSON, whitespace-agnostic).
+      #
+      #     Mutual equality is NOT freshness (generated-client-truth-and-
+      #     session-safety D2). All three copies can be identical and all
+      #     three can be stale relative to the current `api` code — this
+      #     check only proves the three agree with EACH OTHER, never that any
+      #     one of them matches a live `scramble:export`. That is exactly the
+      #     failure mode that let ten mistyped resources and a
+      #     `ProfileResource.locale` staleness ship undetected: this gate was
+      #     green throughout. Only `api/.github/workflows/ci.yml`'s
+      #     `git diff --exit-code openapi.json` (run immediately after a
+      #     fresh `scramble:export`) can catch that all three are stale at
+      #     once — this job does not attempt to, and should not be read as if
+      #     it does.
       # -----------------------------------------------------------------------
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: '1.3'
+          # Pinned to the patch, matching what frontend/Dockerfile and
+          # backoffice/Dockerfile actually build with (`oven/bun:1.3.14`).
+          #
+          # Stated carefully, because the obvious argument for this is wrong.
+          # '1.3' is NOT a violation of the rule step (a) enforces: `tag_pinned`
+          # accepts a tag starting with a dotted version, so `oven/bun:1.3`
+          # passes it, exactly as `axllent/mailpit:v1.22` does. Nor does it
+          # contradict D25, whose catalog entry is literally `oven/bun:1.3`.
+          #
+          # The real gap is narrower and is about WHERE the patch gets fixed.
+          # D25 says "exact patch locked in bun.lock" — but bun.lock pins the
+          # app's DEPENDENCIES, not the Bun binary that reads it. So nothing was
+          # fixing the Bun patch in this job, while both Dockerfiles fix theirs
+          # at 1.3.14. The wrapper could therefore install deps and run codegen
+          # under a different Bun than the image the apps are actually built in,
+          # and step (c) — which compares generated TS clients — is precisely
+          # where such a difference would surface, attributed to client drift.
+          #
+          # Tightening, never loosening (D37). If Bun moves, move both
+          # Dockerfiles and this line together, and revisit the D25 entry.
+          bun-version: '1.3.14'
 
       - name: Verify openapi.json is identical across api/frontend/backoffice
         run: |
-          # Bun, not Python. Python is not in the required toolchain
-          # (docs/dev-setup.md: PHP, Composer, Bun, Node, Docker, Playwright,
-          # go-task, git, k6), and installing a whole language runtime to do a
-          # JSON.parse and an equality check is a D37 dependency question rather
-          # than a style preference — especially in a job that already pins Bun.
-          bun --eval '
-            const files = {
-              "api/openapi.json": "api",
-              "frontend/openapi.json": "frontend",
-              "backoffice/openapi.json": "backoffice",
-            };
+          . ./scripts/ci-guards.sh
 
-            const loaded = {};
-            for (const [path, label] of Object.entries(files)) {
-              loaded[label] = JSON.parse(await Bun.file(path).text());
-            }
+          # `json_canonical_equal` from scripts/ci-guards.sh — one canonicaliser,
+          # shared with the catalog gate in (d) and exercised by the self-test in
+          # (f). Compared pairwise against api/, which is the producer: the two
+          # consumers are copies of it, so naming it as the reference makes the
+          # failure message point at the file that has to change.
+          FAIL=0
+          for APP in frontend backoffice; do
+            if json_canonical_equal api/openapi.json "$APP/openapi.json"; then
+              echo "  ok — $APP/openapi.json is semantically identical to api/openapi.json"
+            else
+              echo "  $APP/openapi.json differs from api/openapi.json"
+              FAIL=1
+            fi
+          done
 
-            // Compared as PARSED JSON with keys sorted RECURSIVELY, not as bytes:
-            // prettier reformats these files in the Nuxt repos, so a byte
-            // comparison fails on whitespace while the contract is identical.
-            //
-            // The obvious-looking JSON.stringify(v, Object.keys(v).sort()) does
-            // NOT do this. That second argument is a replacer ARRAY: it FILTERS
-            // properties by name, at every level, so almost the whole document
-            // drops out of the comparison. Written that way this gate reported
-            // "identical" against a deliberately corrupted spec — verified, and
-            // it is why the failure path is now part of the check itself.
-            const canonical = (v) => {
-              if (Array.isArray(v)) return v.map(canonical);
-              if (v === null || typeof v !== "object") return v;
-              return Object.fromEntries(
-                Object.keys(v).sort().map((k) => [k, canonical(v[k])]),
-              );
-            };
+          if [ "$FAIL" -ne 0 ]; then
+            echo "ERROR: openapi.json cross-repo drift detected!"
+            echo "The committed openapi.json must be identical in api/, frontend/, and backoffice/."
+            echo "To fix: re-export from api (php artisan scramble:export), copy to frontend/ and backoffice/, regenerate typed clients, run full test suites green, commit."
+            exit 1
+          fi
 
-            const serialize = (v) => JSON.stringify(canonical(v));
-            const reference = serialize(loaded.api);
-
-            const errors = Object.entries(loaded)
-              .filter(([label]) => label !== "api")
-              .filter(([, content]) => serialize(content) !== reference)
-              .map(([label]) => `  ${label}/openapi.json differs from api/openapi.json`);
-
-            if (errors.length > 0) {
-              console.log("ERROR: openapi.json cross-repo drift detected!");
-              console.log("The committed openapi.json must be identical in api/, frontend/, and backoffice/.");
-              console.log("To fix: re-export from api (php artisan scramble:export), copy to frontend/ and backoffice/, regenerate typed clients, run full test suites green, commit.");
-              errors.forEach((e) => console.log(e));
-              process.exit(1);
-            }
-
-            console.log("openapi.json is semantically identical across all 3 repos.");
-          '
+          echo "openapi.json is semantically identical across all 3 repos."
 
       # -----------------------------------------------------------------------
       # (c) TS client drift check — each app's check-client-drift.sh must exit 0.
@@ -222,36 +242,8 @@ jobs:
         run: bash scripts/check-client-drift.sh
 
       # -----------------------------------------------------------------------
-      # (d) Stack-consistency grep: confirm no stale stack tokens exist
-      #     (MySQL, Laravel 12, Sanctum in non-design contexts, pnpm/yarn/npm
-      #     in Nuxt apps, etc.)
-      # -----------------------------------------------------------------------
-      # -----------------------------------------------------------------------
-      # (e) Self-test: prove the guards can FAIL.
-      #
-      # Every defect fixed in this file was the same shape — a check whose text
-      # stated the rule while its mechanism excluded the violation. Reading
-      # cannot find those. Only running the guard against a deliberately broken
-      # input can, and that is what this step does.
-      #
-      # A guard with no red test is a guard trusted on faith. Three of them
-      # here had never once gone red, and all three were broken.
-      # -----------------------------------------------------------------------
-      # -----------------------------------------------------------------------
-      # Submodule pointers: is every pinned commit actually reachable?
-      #
-      # This was the gap the header named and left open, and adding release/**
-      # and hotfix/** to the triggers made it sharper rather than smaller —
-      # those are precisely the branches where pointers get bumped to release
-      # tags. A trigger was added for the branch while the only check that
-      # branch specifically needs was missing.
-      #
-      # A pointer to a commit that exists only on somebody's laptop clones as a
-      # detached, unfetchable SHA: `git submodule update` fails for everyone
-      # else, and nothing here would have said so.
-      # -----------------------------------------------------------------------
-      # -----------------------------------------------------------------------
-      # The framework catalog exists in two places, and must not drift.
+      # (d) The framework catalog exists in two places, and must not drift —
+      #     and must not be incomplete.
       #
       # docs/app_description/02-domain/framework is the AUTHORED source — a
       # human edits it, CLAUDE.md marks it binding. api/database/framework is a
@@ -263,12 +255,24 @@ jobs:
       # Two copies of a binding artifact is a drift risk, so it gets the same
       # treatment openapi.json already has: compared here, not trusted to
       # discipline.
+      #
+      # Parity is only half the question, though, and this gate used to ask only
+      # that half. See the completeness block inside the step — it is EXPECTED
+      # to turn CI red until SRX.json is authored.
       # -----------------------------------------------------------------------
-      - name: Verify the framework catalog matches its authored source
+      - name: Verify the framework catalog matches its authored source and is complete
         run: |
+          . ./scripts/ci-guards.sh
+
           SRC=docs/app_description/02-domain/framework
           VENDORED=api/database/framework
           FAIL=0
+          # Loops below read from a redirected FILE, not `< <(...)`. Process
+          # substitution is a bashism, and this step is held to the same POSIX
+          # standard as scripts/ci-guards.sh — see that file's header. A plain
+          # pipe would not do: the loop body sets FAIL, and the right-hand side
+          # of a pipe is a subshell whose assignments are discarded.
+          LIST=$(mktemp)
 
           for D in "$SRC" "$VENDORED"; do
             if [ ! -d "$D" ]; then
@@ -278,75 +282,257 @@ jobs:
           done
 
           # Compared as PARSED JSON, like openapi.json: formatting is not the
-          # contract, content is.
+          # contract, content is. `json_canonical_equal` is the shared
+          # canonicaliser from scripts/ci-guards.sh, which also handles the
+          # export-versus-assign trap that made the first version of this gate
+          # report every single file as differing.
+          (cd "$SRC" && find . -name '*.json' | sed 's|^\./||') > "$LIST"
           while IFS= read -r REL; do
-            # EXPORTED. bun's process.env cannot see a shell variable that is
-            # merely assigned — the first version of this gate omitted the
-            # export, so every file threw inside the script and every file was
-            # reported as differing. It failed loudly rather than silently,
-            # which is the only reason it was caught; the identical-content row
-            # in the self-test below is what makes that guaranteed.
-            export A="$SRC/$REL"
-            export B="$VENDORED/$REL"
-            if [ ! -f "$B" ]; then
+            if [ ! -f "$VENDORED/$REL" ]; then
               echo "ERROR: $REL exists in the authored source but not in $VENDORED."
               FAIL=1
               continue
             fi
-            if ! bun --eval '
-              const canonical = (v) => {
-                if (Array.isArray(v)) return v.map(canonical);
-                if (v === null || typeof v !== "object") return v;
-                return Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonical(v[k])]));
-              };
-              const s = async (p) => JSON.stringify(canonical(JSON.parse(await Bun.file(p).text())));
-              process.exit((await s(process.env.A)) === (await s(process.env.B)) ? 0 : 1);
-            ' 2>/dev/null; then
+            if ! json_canonical_equal "$SRC/$REL" "$VENDORED/$REL"; then
               echo "ERROR: $REL differs between the authored source and $VENDORED."
               FAIL=1
             fi
-          done < <(cd "$SRC" && find . -name '*.json' | sed 's|^\./||')
+          done < "$LIST"
 
           # And the reverse: a file vendored but no longer authored.
+          (cd "$VENDORED" && find . -name '*.json' | sed 's|^\./||') > "$LIST"
           while IFS= read -r REL; do
             if [ ! -f "$SRC/$REL" ]; then
               echo "ERROR: $REL exists in $VENDORED but not in the authored source."
               FAIL=1
             fi
-          done < <(cd "$VENDORED" && find . -name '*.json' | sed 's|^\./||')
+          done < "$LIST"
 
+          # ------------------------------------------------------------------
+          # COMPLETENESS — a different question from parity, and the one the
+          # gate was blind to.
+          #
+          # Everything above proves the two copies AGREE. Both can be equally
+          # wrong, and both are: roles.json declares FIVE roles (ICO, FLL, MLL,
+          # BUL, SRX) while bars/ carries FOUR files. SRX.json is absent from
+          # BOTH trees, so a parity-only gate stayed green over a catalog
+          # missing an entire role. Nobody can be scored as SRX, and nothing
+          # said so.
+          #
+          # Asserted against scripts/framework-known-gaps.txt rather than
+          # absolutely, because both absolutes are wrong here. Failing
+          # unconditionally leaves CI permanently red over 54 indicators of
+          # expert assessment content nobody in a code change can author, and a
+          # gate that cannot go green gets deleted — then it protects nothing,
+          # which is the openapi gate's story repeated. Warning only is how the
+          # incomplete catalog got here.
+          #
+          # So the list is enforced in BOTH directions, and the second one is
+          # what keeps it from rotting:
+          #
+          #   a role missing BARS and NOT on the list  -> fail
+          #   a role ON the list whose BARS now EXISTS -> fail
+          #
+          # An exemption that outlives its gap is a note outliving its fact,
+          # which is this file's entire thesis. The day SRX.json lands, the
+          # known-gaps entry must go in the same commit.
+          #
+          # The vocabulary is the runtime's own: FrameworkCatalogSeeder already
+          # records this as FrameworkGap kind=role_no_bars,
+          # status=pending_authoring. One fact, one name for it.
+          # ------------------------------------------------------------------
+          for TREE in "$SRC" "$VENDORED"; do
+            if [ ! -f "$TREE/roles.json" ]; then
+              echo "ERROR: $TREE/roles.json not found. The completeness check has no role list to assert against."
+              FAIL=1
+              continue
+            fi
+
+            # Existence was already checked above, but existence is not
+            # PARSEABILITY, and this branch is the difference. A non-zero return
+            # means the role list could not be read at all — malformed JSON, a
+            # shape that is not an object, no bun on PATH. That is not an empty
+            # list and must never be reported as a clean catalog: the guard did
+            # not pass, it failed to RUN. It used to fall straight through to
+            # the success message.
+            if catalog_unexpected_missing_bars "$TREE" > "$LIST"; then
+              while IFS= read -r ROLE; do
+                [ -n "$ROLE" ] || continue
+                echo "ERROR: roles.json declares role '$ROLE' but $TREE/bars/$ROLE.json does not exist,"
+                echo "  and '$ROLE' is not listed in scripts/framework-known-gaps.txt."
+                echo "  A role with no BARS file has no behavioural anchors, so nobody can be scored on it."
+                echo "  Author the file, or add '$ROLE' to the known-gaps list with the reason written beside it."
+                FAIL=1
+              done < "$LIST"
+            else
+              echo "ERROR: the completeness check could not read $TREE/roles.json."
+              echo "  This is a guard that FAILED TO RUN, not a catalog that passed. See the"
+              echo "  ci-guards message above for the cause (malformed JSON, wrong shape, or no bun)."
+              FAIL=1
+            fi
+
+            # The exemption must not outlive the gap.
+            catalog_stale_gap_exemptions "$TREE" > "$LIST"
+            while IFS= read -r ROLE; do
+              [ -n "$ROLE" ] || continue
+              echo "ERROR: '$ROLE' is listed in scripts/framework-known-gaps.txt, but $TREE/bars/$ROLE.json EXISTS."
+              echo "  The gap is closed and the exemption is now a false statement about the catalog."
+              echo "  Delete the '$ROLE' entry from scripts/framework-known-gaps.txt."
+              FAIL=1
+            done < "$LIST"
+          done
+
+          rm -f "$LIST"
           [ "$FAIL" -eq 0 ] || {
-            echo "To fix: cp -R docs/app_description/02-domain/framework/* api/database/framework/"
+            echo "To fix drift: cp -R docs/app_description/02-domain/framework/* api/database/framework/"
+            echo "To fix a missing BARS file: author it under the AUTHORED source first, then vendor it."
             exit 1
           }
-          echo "The framework catalog matches its authored source."
+          echo "The framework catalog matches its authored source; every declared role has BARS or a committed known gap."
 
-      - name: Verify submodule pointers are reachable on their tracking branches
+      # -----------------------------------------------------------------------
+      # (e) Submodule pointers: is every pinned commit actually reachable?
+      #
+      # This was the gap the header named and left open, and adding release/**
+      # and hotfix/** to the triggers made it sharper rather than smaller —
+      # those are precisely the branches where pointers get bumped to release
+      # tags. A trigger was added for the branch while the only check that
+      # branch specifically needs was missing.
+      #
+      # A pointer to a commit that exists only on somebody's laptop clones as a
+      # detached, unfetchable SHA: `git submodule update` fails for everyone
+      # else, and nothing here would have said so.
+      #
+      # Reachable from ANY published remote ref — NOT from the tracking branch.
+      # .gitmodules names `develop` for all three submodules, and this gate used
+      # to demand ancestry of exactly origin/<that branch>. But on release/**
+      # and hotfix/** the pointers are bumped to release TAGS, which live on the
+      # submodule's `main`; a hotfix commit on main that has not yet been merged
+      # back to develop is not an ancestor of origin/develop. The branch-locked
+      # rule failed the very branches it was widened to protect.
+      #
+      # The cost is already in this repo's history: `git log` carries commits
+      # titled "release: merge main back into develop so the tag is an
+      # ancestor". The release process was reshaped to satisfy a gate. A hotfix
+      # ships straight to main under pressure and cannot afford that reordering,
+      # and making it the price of a green pipeline is how a gate gets disabled
+      # rather than fixed.
+      #
+      # So ask the question the failure mode actually poses — can everybody else
+      # FETCH this commit? — and nothing more. Reachability from any published
+      # ref answers exactly that, on develop, on main, on a release tag's
+      # branch, and on a hotfix.
+      #
+      # TAGS ARE READ, not merely fetched. The first version of this fix pulled
+      # tags down with `--tags` and then asked `git branch -r --contains`, which
+      # lists remote-tracking BRANCHES and nothing else — so the tags arrived
+      # and were never consulted, while the comment beside it claimed they were.
+      # A pointer at a tagged commit that is not an ancestor of any remote head
+      # would have been reported unreachable: the release case this step was
+      # widened for, failing again, one layer down.
+      #
+      # Both namespaces are fetched into refs/remotes/ci-verify/, and the
+      # reachability question is asked of that namespace alone. Everything under
+      # it demonstrably arrived from origin during THIS run, which is what makes
+      # the answer mean what it says. Asking `refs/tags` directly would have
+      # counted a purely local tag — one nobody else can fetch — as proof that
+      # everybody else can fetch it.
+      # -----------------------------------------------------------------------
+      - name: Verify submodule pointers are reachable from a published remote ref
         run: |
+          . ./scripts/ci-guards.sh
+
           FAIL=0
+          SUBMODULES=$(mktemp)
+          FETCH_ERR=$(mktemp)
+          CONTAINS=$(mktemp)
+          git submodule status | sed 's/^[[:space:]]*//' > "$SUBMODULES"
+
           while read -r SHA P _; do
             SHA=${SHA#[-+U]}
-            BRANCH=$(git config -f .gitmodules "submodule.$P.branch" 2>/dev/null || echo develop)
-            git -C "$P" fetch -q origin "$BRANCH" 2>/dev/null || true
-            if git -C "$P" merge-base --is-ancestor "$SHA" "origin/$BRANCH" 2>/dev/null; then
-              echo "  ok — $P at ${SHA:0:8}, reachable from origin/$BRANCH"
+            SHORT=$(printf '%.8s' "$SHA")
+
+            # A fetch failure is NOT an unreachable pointer, and reporting it as
+            # one sends whoever is on call looking for a bad submodule commit
+            # when the actual fault is the network or the credentials. The two
+            # outcomes get two messages. `|| true` used to collapse them into
+            # the same red.
+            if ! submodule_fetch_published_refs "$P" 2>"$FETCH_ERR"; then
+              echo "ERROR: could not fetch $P from origin — reachability is UNVERIFIED, not disproven."
+              echo "  This is an infrastructure failure (network, credentials, or a renamed remote),"
+              echo "  NOT evidence that the pinned commit is bad. Do not go looking for a bad pointer."
+              sed 's/^/    /' "$FETCH_ERR"
+              FAIL=1
+              continue
+            fi
+
+            # The predicate itself lives in scripts/ci-guards.sh, where the
+            # self-test in (f) can run it against a throwaway repo. It used to
+            # be written out here, which is why (f) had no reachability row at
+            # all — the one guard in this file with no way to go red.
+            if commit_reachable_from_remote "$P" "$SHA" > "$CONTAINS"; then
+              REACHABLE=yes
             else
-              echo "ERROR: $P is pinned at $SHA, which is NOT reachable from origin/$BRANCH."
+              REACHABLE=no
+            fi
+            CONTAINED=$(tr '\n' ' ' < "$CONTAINS")
+
+            submodule_clear_verify_refs "$P"
+
+            if [ "$REACHABLE" = yes ]; then
+              echo "  ok — $P at $SHORT, reachable from: $CONTAINED"
+            else
+              echo "ERROR: $P is pinned at $SHA, which is NOT reachable from any remote branch or tag."
               echo "  The pointer references a commit nobody else can fetch."
               FAIL=1
             fi
-          done < <(git submodule status | sed 's/^[[:space:]]*//')
+          done < "$SUBMODULES"
+
+          rm -f "$SUBMODULES" "$FETCH_ERR" "$CONTAINS"
           [ "$FAIL" -eq 0 ] || exit 1
           echo "All submodule pointers are reachable."
 
+      # -----------------------------------------------------------------------
+      # (f) Self-test: prove the guards can FAIL.
+      #
+      # Every defect fixed in this file was the same shape — a check whose text
+      # stated the rule while its mechanism excluded the violation. Reading
+      # cannot find those. Only running the guard against a deliberately broken
+      # input can, and that is what this step does.
+      #
+      # A guard with no red test is a guard trusted on faith. Three of them
+      # here had never once gone red, and all three were broken.
+      #
+      # It sources scripts/ci-guards.sh — the SAME file every real gate above
+      # sources. It used to re-type `tag_pinned`, the Dockerfile guard, the
+      # Bun-only regex, the Sanctum pipeline and the JSON canonicaliser, so what
+      # it proved was that the COPIES could fail. Change a real gate, or
+      # fat-finger it, and this step stayed green over the broken original —
+      # the exact "text stated the rule while its mechanism excluded the
+      # violation" shape, reintroduced by the fix for it. A self-test that owns
+      # a private copy of the thing under test is not a self-test.
+      # -----------------------------------------------------------------------
       - name: Self-test — each guard must reject a known-bad fixture
         run: |
+          # shellcheck disable=SC2016,SC2026,SC2059
+          # All three are deliberate, and all three are about CONSTRUCTING
+          # fixtures rather than running anything. SC2016: `$BUILDPLATFORM` and
+          # a backticked `npm install` must reach the fixture LITERALLY, so
+          # single quotes are the point. SC2026: the '"'"' dance is how a single
+          # quote gets embedded in a single-quoted string. SC2059: `printf "$3"`
+          # is intentional — the fixture argument IS the format string, because
+          # it carries the \n escapes that turn one argument into a multi-line
+          # Dockerfile. With these silenced, `shellcheck -s sh` is clean on this
+          # block, which is what lets the POSIX claim in scripts/ci-guards.sh be
+          # checked rather than asserted.
           set -e
+          . ./scripts/ci-guards.sh
+
           FIXTURE=$(mktemp -d)
           FAILED=0
 
           expect_caught() {
-            # $1 = what is being tested, $2 = grep output (non-empty means caught)
+            # $1 = what is being tested, $2 = scan output (non-empty means caught)
             if [ -z "$2" ]; then
               echo "SELF-TEST FAILED: the $1 guard did NOT reject its known-bad fixture."
               echo "  The guard is decorative: it cannot detect the thing it exists to detect."
@@ -356,16 +542,36 @@ jobs:
             fi
           }
 
-          # Bun-only: a real command, and a runner invocation.
-          mkdir -p "$FIXTURE/app"
-          printf 'npm install\nnpx nuxi typecheck\n' > "$FIXTURE/app/README.md"
-          HIT=$(grep -rn -E --include="*.md" "(^|[^a-z-])((npm|pnpm|yarn)[[:space:]]+(install|run|add|exec|create|dlx|ci|test|build|dev|start|link|update|why|list)|(npx|pnpx)[[:space:]]+[a-zA-Z@])" "$FIXTURE" 2>/dev/null || true)
-          expect_caught "Bun-only" "$HIT"
+          # Each scanner fixture gets its OWN directory. The scanners carry the
+          # real --include lists now rather than a self-test-local narrowing, so
+          # a violating README dropped beside a clean NOTES.md would be found by
+          # the false-positive row and fail it for the wrong reason.
+          mkdir -p "$FIXTURE/bun-bad" "$FIXTURE/bun-heading" "$FIXTURE/bun-docker" \
+                   "$FIXTURE/bun-prose" "$FIXTURE/bun-yaml-comment" \
+                   "$FIXTURE/sanctum-bad" "$FIXTURE/sanctum-prose"
 
-          # Bun-only must NOT reject a line documenting the prohibition, nor a
-          # comment. Both were false positives this file actually produced.
-          printf '# was `npm install -g bun`\nnpm, pnpm and yarn are not used here.\n' > "$FIXTURE/app/NOTES.md"
-          FALSE=$(grep -rn -E --include="NOTES.md" "(^|[^a-z-])((npm|pnpm|yarn)[[:space:]]+(install|run|add|exec|create|dlx|ci|test|build|dev|start|link|update|why|list)|(npx|pnpx)[[:space:]]+[a-zA-Z@])" "$FIXTURE" 2>/dev/null | grep -v -E "^[^:]*:[0-9]+:[[:space:]]*#" || true)
+          # Bun-only: a real command, and a runner invocation.
+          printf 'npm install\nnpx nuxi typecheck\n' > "$FIXTURE/bun-bad/README.md"
+          expect_caught "Bun-only" "$(scan_bun_only "$FIXTURE/bun-bad")"
+
+          # A MARKDOWN HEADING that instructs the reader to run npm. This is the
+          # row that was missing while the guard was silently dropping it: the
+          # comment filter treated a leading '#' as a comment in every file
+          # type, but in Markdown it opens a heading. Markdown was added to this
+          # guard precisely because both READMEs once shipped `npm install` as
+          # their first instruction — the exact shape that was being deleted.
+          printf '# npm install\n\nThen run the dev server.\n' > "$FIXTURE/bun-heading/README.md"
+          expect_caught "Bun-only (Markdown heading)" "$(scan_bun_only "$FIXTURE/bun-heading")"
+
+          # Dockerfiles ARE the install and build path for both Nuxt apps, and
+          # they were not in the file list at all while the comment beside the
+          # real gate read "No carve-outs."
+          printf 'FROM oven/bun:1.3.14 AS builder\nRUN npm ci\n' > "$FIXTURE/bun-docker/Dockerfile"
+          expect_caught "Bun-only (Dockerfile)" "$(scan_bun_only "$FIXTURE/bun-docker")"
+
+          # Bun-only must NOT reject prose that merely NAMES the banned tools.
+          printf 'npm, pnpm and yarn are not used here. Use bun.\n' > "$FIXTURE/bun-prose/NOTES.md"
+          FALSE=$(scan_bun_only "$FIXTURE/bun-prose")
           if [ -n "$FALSE" ]; then
             echo "SELF-TEST FAILED: the Bun-only guard rejects prose that merely NAMES the banned tools:"
             echo "$FALSE"
@@ -374,58 +580,62 @@ jobs:
             echo "  ok — Bun-only guard tolerates documentation of the rule"
           fi
 
-          # Compose image pinning — the same tag rule, asserted on the two forms
-          # that used to slip through: a bare major with a suffix, and a variant
-          # that carries its own version.
-          tag_pinned() {
-            case "$1" in *:*) ;; *) return 1 ;; esac
-            printf '%s' "${1##*:}" | grep -qE '^v?[0-9]+\.[0-9]+|^local$'
-          }
-          for BAD in redis:8-alpine node:24-alpine3.19 postgres:17 nginx:latest; do
-            if tag_pinned "$BAD"; then
-              echo "SELF-TEST FAILED: the compose image-pin rule accepted $BAD."
-              FAILED=1
-            fi
-          done
-          for GOOD in redis:8.0-alpine pgvector/pgvector:0.8.0-pg17 axllent/mailpit:v1.22 beai-api:local; do
-            if ! tag_pinned "$GOOD"; then
-              echo "SELF-TEST FAILED: the compose image-pin rule rejected $GOOD."
-              FAILED=1
-            fi
-          done
-          echo "  ok — compose image-pin rule: 4 rejected, 4 accepted"
+          # ...and must still tolerate a real COMMENT, in a file type where '#'
+          # really is one. This is the hit the exemption was added for: the
+          # comment in each submodule's CI explaining why it STOPPED using npm.
+          printf 'steps:\n  # was `npm install -g bun`, now setup-bun\n  - uses: oven-sh/setup-bun@v2\n' \
+            > "$FIXTURE/bun-yaml-comment/ci.yml"
+          FALSE=$(scan_bun_only "$FIXTURE/bun-yaml-comment")
+          if [ -n "$FALSE" ]; then
+            echo "SELF-TEST FAILED: the Bun-only guard rejects a commented-out command in YAML:"
+            echo "$FALSE"
+            FAILED=1
+          else
+            echo "  ok — Bun-only guard tolerates a YAML comment describing the old command"
+          fi
 
-          # openapi drift: a single changed value anywhere in the document.
+          # Image pinning — the same `tag_pinned` the compose gate and the
+          # Dockerfile guard call, asserted on the forms that used to slip
+          # through: a bare major with a suffix, and a variant that carries its
+          # own version. Plus digests, which it used to REJECT.
+          for BAD in redis:8-alpine node:24-alpine3.19 postgres:17 nginx:latest node; do
+            if tag_pinned "$BAD"; then
+              echo "SELF-TEST FAILED: the image-pin rule accepted $BAD."
+              FAILED=1
+            fi
+          done
+          for GOOD in redis:8.0-alpine pgvector/pgvector:0.8.0-pg17 axllent/mailpit:v1.22 beai-api:local \
+                      node@sha256:9a1f2c3d4e5b6a7889900aabbccddeeff00112233445566778899aabbccddeeff \
+                      node:24.11-slim@sha256:9a1f2c3d4e5b6a7889900aabbccddeeff00112233445566778899aabbccddeeff; do
+            if ! tag_pinned "$GOOD"; then
+              echo "SELF-TEST FAILED: the image-pin rule rejected $GOOD."
+              FAILED=1
+            fi
+          done
+          echo "  ok — image-pin rule: 5 rejected, 6 accepted (digests included)"
+
+          # openapi drift: a single changed value anywhere in the document,
+          # through the same `json_canonical_equal` the real gate uses.
           mkdir -p "$FIXTURE/a" "$FIXTURE/b"
           printf '{"paths":{"/x":{"get":{"summary":"one"}}}}' > "$FIXTURE/a/openapi.json"
           printf '{"paths":{"/x":{"get":{"summary":"two"}}}}' > "$FIXTURE/b/openapi.json"
-          # EXPORTED, not passed as argv. `bun --eval 'script' FIXTURE=...` puts
-          # that in argv, where process.env cannot see it — which is how the
-          # self-test caught its own sub-test being broken on the first run.
-          export FIXTURE
-          DRIFT=$(bun --eval '
-            const canonical = (v) => {
-              if (Array.isArray(v)) return v.map(canonical);
-              if (v === null || typeof v !== "object") return v;
-              return Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonical(v[k])]));
-            };
-            const s = async (p) => JSON.stringify(canonical(JSON.parse(await Bun.file(p).text())));
-            const dir = process.env.FIXTURE;
-            console.log((await s(dir + "/a/openapi.json")) === (await s(dir + "/b/openapi.json")) ? "" : "differs");
-          ' 2>/dev/null || true)
-          expect_caught "openapi-drift" "$DRIFT"
+          if json_canonical_equal "$FIXTURE/a/openapi.json" "$FIXTURE/b/openapi.json"; then
+            echo "SELF-TEST FAILED: the openapi-drift guard called two different documents identical."
+            FAILED=1
+          else
+            echo "  ok — openapi-drift guard rejects a known violation"
+          fi
 
-          # Sanctum — the sharpest rule in the standards ("JWT, NOT Sanctum") and
-          # the most fragile mechanism in this file: a -l pass piped through
+          # Sanctum — the sharpest rule in the standards ("JWT, NOT Sanctum")
+          # and the most fragile mechanism in this repo: a -l pass piped through
           # xargs into a second grep. Untested, it was one pipe away from
           # silently passing everything.
-          printf 'laravel/sanctum: ^4.0\n' > "$FIXTURE/composer.json"
-          HIT=$(grep -rl --include="composer.json" "Sanctum\|sanctum" "$FIXTURE" 2>/dev/null | xargs -r grep -H "Sanctum\|sanctum" | grep -v "NOT Sanctum\|not Sanctum\|not use Sanctum" || true)
-          expect_caught "Sanctum" "$HIT"
+          printf '{"require":{"laravel/sanctum":"^4.0"}}\n' > "$FIXTURE/sanctum-bad/composer.json"
+          expect_caught "Sanctum" "$(scan_sanctum "$FIXTURE/sanctum-bad")"
 
           # ...and must still tolerate the phrasing the standards themselves use.
-          printf 'Auth is JWT — NOT Sanctum.\n' > "$FIXTURE/composer.json"
-          FALSE=$(grep -rl --include="composer.json" "Sanctum\|sanctum" "$FIXTURE" 2>/dev/null | xargs -r grep -H "Sanctum\|sanctum" | grep -v "NOT Sanctum\|not Sanctum\|not use Sanctum" || true)
+          printf 'Auth is JWT — NOT Sanctum.\n' > "$FIXTURE/sanctum-prose/composer.json"
+          FALSE=$(scan_sanctum "$FIXTURE/sanctum-prose")
           if [ -n "$FALSE" ]; then
             echo "SELF-TEST FAILED: the Sanctum guard rejects the standards' own wording:"
             echo "$FALSE"
@@ -434,24 +644,85 @@ jobs:
             echo "  ok — Sanctum guard tolerates 'NOT Sanctum'"
           fi
 
-          # MySQL/MariaDB.
-          printf "'"'"'mysql'"'"' => ['"'"'driver'"'"' => '"'"'mysql'"'"'],\n" > "$FIXTURE/db.php"
-          HIT=$(grep -rl --include="*.php" "mysql\|mariadb" "$FIXTURE" 2>/dev/null || true)
-          expect_caught "MySQL/MariaDB" "$HIT"
+          # MySQL/MariaDB — via `scan_mysql`, which carries the real six
+          # --include patterns, three --exclude-dir and five path filters. The
+          # copy that used to live here was `grep -rl --include="*.php"`: adding
+          # `--exclude-dir=api` to the real gate would have left this row green
+          # over a guard that no longer looked at the API at all.
+          mkdir -p "$FIXTURE/mysql-bad" "$FIXTURE/mysql-ok/api/config"
+          printf "'"'"'mysql'"'"' => ['"'"'driver'"'"' => '"'"'mysql'"'"'],\n" > "$FIXTURE/mysql-bad/db.php"
+          expect_caught "MySQL/MariaDB" "$(scan_mysql "$FIXTURE/mysql-bad")"
 
-          # Laravel 12 (we are on 13).
-          printf 'Laravel 12\n' > "$FIXTURE/notes.md"
-          HIT=$(grep -rl --include="*.md" "Laravel 12\|laravel/laravel:^12" "$FIXTURE" 2>/dev/null || true)
-          expect_caught "Laravel-12" "$HIT"
+          # ...and must NOT flag the legitimate hit it excludes by path.
+          # Laravel's stock config ships a block for every driver it supports.
+          printf "'"'"'mysql'"'"' => ['"'"'driver'"'"' => '"'"'mysql'"'"'],\n" \
+            > "$FIXTURE/mysql-ok/api/config/database.php"
+          FALSE=$(scan_mysql "$FIXTURE/mysql-ok")
+          if [ -n "$FALSE" ]; then
+            echo "SELF-TEST FAILED: the MySQL guard flags api/config/database.php, which it excludes by path:"
+            echo "$FALSE"
+            FAILED=1
+          else
+            echo "  ok — MySQL guard tolerates Laravel's stock multi-driver config"
+          fi
+
+          # Laravel 12 (we are on 13) — via `scan_laravel12`. The copy here used
+          # `--include="notes.md"`, which is not a rule anybody wrote; it was a
+          # fixture filename standing in for three real include patterns.
+          mkdir -p "$FIXTURE/l12-bad" "$FIXTURE/l12-ok/legacy-demo"
+          printf 'Laravel 12\n' > "$FIXTURE/l12-bad/notes.md"
+          expect_caught "Laravel-12" "$(scan_laravel12 "$FIXTURE/l12-bad")"
+
+          printf 'Laravel 12\n' > "$FIXTURE/l12-ok/legacy-demo/notes.md"
+          FALSE=$(scan_laravel12 "$FIXTURE/l12-ok")
+          if [ -n "$FALSE" ]; then
+            echo "SELF-TEST FAILED: the Laravel-12 guard flags legacy-demo, which it excludes by path:"
+            echo "$FALSE"
+            FAILED=1
+          else
+            echo "  ok — Laravel-12 guard tolerates the excluded legacy-demo tree"
+          fi
 
           # The pgsql pin — a POSITIVE assertion, so its failure mode is the
-          # line being absent rather than present.
-          printf 'services:\n  api:\n    environment:\n      DB_CONNECTION: mysql\n' > "$FIXTURE/compose.yml"
-          if grep -q "DB_CONNECTION: pgsql" "$FIXTURE/compose.yml"; then
+          # line being ABSENT rather than present, and BOTH directions have to
+          # be asserted. The row here used to check that a grep for
+          # "DB_CONNECTION: pgsql" failed on a fixture that had never contained
+          # the string. Of course it did. That exercised no mechanism at all and
+          # would have stayed green with the guard deleted.
+          printf 'services:\n  api:\n    environment:\n      DB_CONNECTION: mysql\n' \
+            > "$FIXTURE/compose-wrong.yml"
+          printf 'services:\n  api:\n    environment:\n      DB_CONNECTION: pgsql\n' \
+            > "$FIXTURE/compose-right.yml"
+          if compose_pins_pgsql "$FIXTURE/compose-wrong.yml"; then
             echo "SELF-TEST FAILED: the pgsql-pin check passed a compose file pinning mysql."
             FAILED=1
           else
             echo "  ok — pgsql-pin check rejects a compose file that pins another driver"
+          fi
+          if compose_pins_pgsql "$FIXTURE/compose-right.yml"; then
+            echo "  ok — pgsql-pin check accepts a compose file that pins pgsql"
+          else
+            echo "SELF-TEST FAILED: the pgsql-pin check rejected a compose file that DOES pin pgsql."
+            echo "  Inverted or dead: it cannot tell the two apart."
+            FAILED=1
+          fi
+
+          # The compose service SET. `docker compose config -q` proves the file
+          # parses and nothing more, so the "all 8 services" claim was asserted
+          # by nothing — and guard (g) keeps Horizon deferred on the grounds
+          # that two of those eight exist.
+          if compose_service_diff "$CI_EXPECTED_COMPOSE_SERVICES" >/dev/null; then
+            echo "  ok — compose service-set check accepts the expected set"
+          else
+            echo "SELF-TEST FAILED: the compose service-set check rejected its own expected set."
+            FAILED=1
+          fi
+          BROKEN=$(printf '%s' "$CI_EXPECTED_COMPOSE_SERVICES" | sed 's/ scheduler//')
+          if compose_service_diff "$BROKEN" >/dev/null; then
+            echo "SELF-TEST FAILED: the compose service-set check accepted a set with 'scheduler' deleted."
+            FAILED=1
+          else
+            echo "  ok — compose service-set check rejects a set with a service deleted"
           fi
 
           # The Dockerfile base-image guard, against every real Dockerfile idiom.
@@ -459,30 +730,13 @@ jobs:
           # wrong — the multi-stage reference, the BuildKit --platform flag, and
           # lowercase `from` all broke CI or slipped through, and only running
           # them showed it.
-          df_guard() {
-            local DF="$1"
-            [ -f "$DF" ] || return 1
-            while IFS= read -r LINE; do
-              local REF TAG
-              REF=$(printf '%s' "$LINE" \
-                | sed 's/^[[:space:]]*[Ff][Rr][Oo][Mm][[:space:]]\{1,\}//' \
-                | tr ' \t' '\n\n' | grep -v '^--' | grep -v '^$' | head -1)
-              [ -n "$REF" ] || continue
-              case "$REF" in *:*|*/*) ;; *) continue ;; esac
-              TAG=${REF##*:}
-              printf '%s' "$TAG" | grep -qE '^v?[0-9]+\.[0-9]+|^local$' || return 1
-            done < <(grep -iE '^[[:space:]]*from[[:space:]]' "$DF")
-            return 0
-          }
-
           df_case() {
             printf "$3" > "$FIXTURE/Dockerfile.case"
-            local GOT
-            if df_guard "$FIXTURE/Dockerfile.case"; then GOT=pass; else GOT=fail; fi
+            if OFFENDER=$(df_guard "$FIXTURE/Dockerfile.case"); then GOT=pass; else GOT=fail; fi
             if [ "$GOT" = "$2" ]; then
               echo "  ok — Dockerfile guard: $1"
             else
-              echo "SELF-TEST FAILED: Dockerfile guard on '$1' expected $2, got $GOT."
+              echo "SELF-TEST FAILED: Dockerfile guard on '$1' expected $2, got $GOT (offender: ${OFFENDER:-none})."
               FAILED=1
             fi
           }
@@ -496,9 +750,26 @@ jobs:
           df_case "lowercase from"             fail 'from node:24-slim as runtime\n'
           df_case "a versioned VARIANT"        fail 'FROM node:24-alpine3.19\n'
           df_case "the :local convention"      pass 'FROM beai-api:local\n'
+          # The row that was missing, and the hole it left open: `FROM node` has
+          # no colon and no slash, so the old skip rule read it as a stage name
+          # and waved it through. `FROM node` IS `node:latest` — the guard's
+          # primary defect class, passing.
+          df_case "an UNTAGGED base"           fail 'FROM node\n'
+          df_case "untagged, stage declared later" fail 'FROM ubuntu\nFROM node:24.11-slim AS runtime\n'
+          # ...while a bare word that IS a declared stage must still pass, which
+          # is the whole reason the old rule existed. Case-insensitively,
+          # because Docker lowercases stage names.
+          df_case "a stage referenced by name" pass 'FROM node:24.11-slim AS Builder\nFROM builder AS runtime\n'
+          # A digest is the strongest pin there is. Both guards used to call it
+          # floating, because "the tag" was read as everything after the last
+          # colon and a digest's hex has no dots in it.
+          df_case "a digest pin"               pass 'FROM node@sha256:9a1f2c3d4e5b6a7889900aabbccddeeff00112233445566778899aabbccddeeff AS runtime\n'
+          # `scratch` is Docker's reserved empty base, not an image reference.
+          # It has no tag and cannot float.
+          df_case "the scratch base"           pass 'FROM node:24.11-slim AS b\nFROM scratch AS runtime\n'
 
           # A missing file must FAIL, not pass quietly.
-          if df_guard "$FIXTURE/Dockerfile.absent"; then
+          if df_guard "$FIXTURE/Dockerfile.absent" >/dev/null; then
             echo "SELF-TEST FAILED: the Dockerfile guard passed on a file that does not exist."
             FAILED=1
           else
@@ -510,41 +781,247 @@ jobs:
           # row is not padding — the first version of this gate reported every
           # file as differing because it never exported its variables, and only
           # a same-content fixture proves the comparison actually compares.
-          catalog_same() {
-            export A="$1" B="$2"
-            bun --eval '
-              const canonical = (v) => {
-                if (Array.isArray(v)) return v.map(canonical);
-                if (v === null || typeof v !== "object") return v;
-                return Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonical(v[k])]));
-              };
-              const s = async (p) => JSON.stringify(canonical(JSON.parse(await Bun.file(p).text())));
-              process.exit((await s(process.env.A)) === (await s(process.env.B)) ? 0 : 1);
-            ' 2>/dev/null
-          }
-
           printf '{"ICO":{"name":"Contributor"}}' > "$FIXTURE/cat-a.json"
           printf '{ "ICO" : { "name" : "Contributor" } }\n' > "$FIXTURE/cat-b.json"
           printf '{"ICO":{"name":"CHANGED"}}' > "$FIXTURE/cat-c.json"
 
-          if catalog_same "$FIXTURE/cat-a.json" "$FIXTURE/cat-b.json"; then
+          if json_canonical_equal "$FIXTURE/cat-a.json" "$FIXTURE/cat-b.json"; then
             echo "  ok — catalog gate ignores formatting"
           else
             echo "SELF-TEST FAILED: the catalog gate reported identical content as drift."
             FAILED=1
           fi
 
-          if catalog_same "$FIXTURE/cat-a.json" "$FIXTURE/cat-c.json"; then
+          if json_canonical_equal "$FIXTURE/cat-a.json" "$FIXTURE/cat-c.json"; then
             echo "SELF-TEST FAILED: the catalog gate accepted a real content change."
             FAILED=1
           else
             echo "  ok — catalog gate rejects a real content change"
           fi
 
+          # Catalog COMPLETENESS, which parity cannot see: a role declared with
+          # no BARS file behind it. This is the row that would have caught the
+          # missing SRX.json years of green pipelines did not.
+          #
+          # Three branches, because the gate has three answers and only proving
+          # one of them is how a known-gaps list turns into a mute switch. The
+          # fixture list stands in for scripts/framework-known-gaps.txt via
+          # CI_KNOWN_GAPS_FILE, so this exercises the SAME functions the real
+          # gate calls, against a list whose contents this step controls.
+          mkdir -p "$FIXTURE/cat-complete/bars" "$FIXTURE/cat-incomplete/bars" \
+                   "$FIXTURE/cat-closed-gap/bars"
+          printf '{"ICO":{"name":"Contributor"},"SRX":{"name":"Senior Executive"}}' \
+            > "$FIXTURE/cat-complete/roles.json"
+          printf '{}' > "$FIXTURE/cat-complete/bars/ICO.json"
+          printf '{}' > "$FIXTURE/cat-complete/bars/SRX.json"
+          cp "$FIXTURE/cat-complete/roles.json" "$FIXTURE/cat-incomplete/roles.json"
+          printf '{}' > "$FIXTURE/cat-incomplete/bars/ICO.json"
+          # Same list, but the exempted role's file has since been authored.
+          cp "$FIXTURE/cat-complete/roles.json" "$FIXTURE/cat-closed-gap/roles.json"
+          printf '{}' > "$FIXTURE/cat-closed-gap/bars/ICO.json"
+          printf '{}' > "$FIXTURE/cat-closed-gap/bars/SRX.json"
+
+          printf '# fixture list\nSRX   trailing comment must not be parsed\n' \
+            > "$FIXTURE/known-gaps.txt"
+          REAL_KNOWN_GAPS_FILE="$CI_KNOWN_GAPS_FILE"
+          CI_KNOWN_GAPS_FILE="$FIXTURE/known-gaps.txt"
+          export CI_KNOWN_GAPS_FILE
+
+          # Branch 1 — a role missing BARS that is NOT on the list. Must fail.
+          # BUL is not exempted anywhere, so adding it to roles.json is a
+          # brand-new undeclared gap.
+          printf '{"ICO":{"name":"Contributor"},"SRX":{"name":"Senior Executive"},"BUL":{"name":"Business Unit Leader"}}' \
+            > "$FIXTURE/cat-incomplete/roles.json"
+          expect_caught "unexempted-missing-BARS" "$(catalog_unexpected_missing_bars "$FIXTURE/cat-incomplete")"
+
+          # Branch 2 — the exempted role alone. Must PASS: this is the state the
+          # repository is actually in, and the gate has to be able to go green
+          # in it or it will be deleted rather than obeyed.
+          printf '{"ICO":{"name":"Contributor"},"SRX":{"name":"Senior Executive"}}' \
+            > "$FIXTURE/cat-incomplete/roles.json"
+          UNEXEMPTED=$(catalog_unexpected_missing_bars "$FIXTURE/cat-incomplete")
+          if [ -n "$UNEXEMPTED" ]; then
+            echo "SELF-TEST FAILED: the completeness check rejected a role covered by the known-gaps list: $UNEXEMPTED"
+            FAILED=1
+          else
+            echo "  ok — completeness check accepts a role on the known-gaps list"
+          fi
+
+          # Branch 3 — the exemption outliving its gap. Must fail, or the list
+          # accumulates permanent lies about the catalog.
+          expect_caught "stale-gap-exemption" "$(catalog_stale_gap_exemptions "$FIXTURE/cat-closed-gap")"
+
+          # ...and a fully authored catalog with nothing exempted must be clean
+          # on both counts at once.
+          printf '# fixture list, no entries\n' > "$FIXTURE/known-gaps.txt"
+          MISSING="$(catalog_unexpected_missing_bars "$FIXTURE/cat-complete")$(catalog_stale_gap_exemptions "$FIXTURE/cat-complete")"
+          if [ -n "$MISSING" ]; then
+            echo "SELF-TEST FAILED: the completeness check flagged a complete catalog with an empty list: $MISSING"
+            FAILED=1
+          else
+            echo "  ok — completeness check passes a complete catalog with an empty known-gaps list"
+          fi
+
+          # Point back at the committed list. Restored rather than unset,
+          # because unsetting it would leave the functions reading an empty
+          # path — a list with no entries, which is exactly the silently
+          # permissive state this self-test exists to rule out.
+          CI_KNOWN_GAPS_FILE="$REAL_KNOWN_GAPS_FILE"
+          export CI_KNOWN_GAPS_FILE
+
+          # The COMMITTED list must parse, and must not have rotted against the
+          # real tree. Running it here as well as in (d) means a stale entry is
+          # reported by the step whose job is proving guards work, not only by
+          # the gate it would turn red.
+          for TREE in docs/app_description/02-domain/framework api/database/framework; do
+            STALE=$(catalog_stale_gap_exemptions "$TREE")
+            if [ -n "$STALE" ]; then
+              echo "SELF-TEST FAILED: scripts/framework-known-gaps.txt exempts $STALE, but $TREE/bars/ now has the file."
+              FAILED=1
+            fi
+          done
+          echo "  ok — the committed known-gaps list has no entry that has outlived its gap"
+
+          # ------------------------------------------------------------------
+          # Guard (e): submodule pointer reachability.
+          #
+          # This guard had NO row here at all, while two statements in this
+          # repository promised it did. It is the newest and most intricate
+          # guard in the file and the one added specifically for release and
+          # hotfix branches — exactly the profile of the three that "had never
+          # once gone red, and all three were broken".
+          #
+          # A throwaway bare repo plays origin, so nothing here touches the
+          # network or the real submodules.
+          # ------------------------------------------------------------------
+          REACH="$FIXTURE/reach"
+          mkdir -p "$REACH"
+          git init -q --bare "$REACH/origin.git"
+          git clone -q "$REACH/origin.git" "$REACH/work" 2>/dev/null || true
+          git -C "$REACH/work" checkout -q -b main
+          git -C "$REACH/work" -c user.email=ci@beai -c user.name=ci \
+            commit -q --allow-empty -m "published"
+          PUBLISHED=$(git -C "$REACH/work" rev-parse HEAD)
+          git -C "$REACH/work" push -q origin main
+          # A release tag on a commit that main then moves off: reachable ONLY
+          # via the tag. This is the case `git branch -r --contains` missed
+          # while the comment beside it claimed tags were consulted.
+          git -C "$REACH/work" -c user.email=ci@beai -c user.name=ci \
+            commit -q --allow-empty -m "tagged release"
+          TAGGED=$(git -C "$REACH/work" rev-parse HEAD)
+          git -C "$REACH/work" tag ci-selftest-1.0.0
+          git -C "$REACH/work" push -q origin ci-selftest-1.0.0
+          git -C "$REACH/work" reset -q --hard "$PUBLISHED"
+          # And a commit that was never pushed — but which DOES sit on a local
+          # branch and a local tag. That detail is the whole test. An orphan on
+          # no ref at all is rejected by any implementation, including a broken
+          # one, so it cannot tell them apart: dropping the
+          # refs/remotes/ci-verify argument would still have looked correct.
+          # A commit on a LOCAL ref is the case that separates "published" from
+          # "present on this disk", and it is the realistic one — a developer
+          # with an unpushed feature branch, or a tag they made and forgot.
+          git -C "$REACH/work" checkout -q -b ci-selftest-local-only
+          git -C "$REACH/work" -c user.email=ci@beai -c user.name=ci \
+            commit -q --allow-empty -m "never pushed"
+          ORPHAN=$(git -C "$REACH/work" rev-parse HEAD)
+          git -C "$REACH/work" tag ci-selftest-local-tag
+          git -C "$REACH/work" checkout -q main
+
+          if submodule_fetch_published_refs "$REACH/work" 2>/dev/null; then
+            echo "  ok — reachability guard fetches published refs"
+          else
+            echo "SELF-TEST FAILED: the reachability guard could not fetch from a working origin."
+            FAILED=1
+          fi
+
+          if commit_reachable_from_remote "$REACH/work" "$PUBLISHED" >/dev/null; then
+            echo "  ok — reachability guard accepts a commit on a published branch"
+          else
+            echo "SELF-TEST FAILED: the reachability guard rejected a commit that IS on a published branch."
+            FAILED=1
+          fi
+
+          if commit_reachable_from_remote "$REACH/work" "$TAGGED" >/dev/null; then
+            echo "  ok — reachability guard accepts a commit reachable only via a published TAG"
+          else
+            echo "SELF-TEST FAILED: the reachability guard rejected a commit on a published tag."
+            echo "  This is the release-pointer case the guard exists for: tags fetched but never read."
+            FAILED=1
+          fi
+
+          if commit_reachable_from_remote "$REACH/work" "$ORPHAN" >/dev/null; then
+            echo "SELF-TEST FAILED: the reachability guard ACCEPTED a commit that exists only on"
+            echo "  LOCAL refs (branch ci-selftest-local-only, tag ci-selftest-local-tag)."
+            echo "  A pointer at that commit clones as an unfetchable SHA for everybody else."
+            echo "  Check that the question is still being asked of $CI_VERIFY_REFS and not of every ref."
+            FAILED=1
+          else
+            echo "  ok — reachability guard rejects a commit that is only on local refs"
+          fi
+
+          submodule_clear_verify_refs "$REACH/work"
+          if [ -n "$(git -C "$REACH/work" for-each-ref "$CI_VERIFY_REFS")" ]; then
+            echo "SELF-TEST FAILED: the reachability guard left its verification refs behind."
+            FAILED=1
+          else
+            echo "  ok — reachability guard cleans up its verification refs"
+          fi
+
+          # ------------------------------------------------------------------
+          # The catalog completeness guard must FAIL CLOSED.
+          #
+          # It used to fail open: role_keys ran bun and dropped the exit status,
+          # so malformed JSON — or no bun at all — produced an empty role list,
+          # and an empty list reads as "nothing missing". A one-character
+          # corruption in a binding artifact silently disabled the half of the
+          # gate that exists because SRX.json was missing.
+          # ------------------------------------------------------------------
+          mkdir -p "$FIXTURE/cat-malformed/bars" "$FIXTURE/cat-array/bars"
+          printf '{"ICO":{"name":"Contributor"},' > "$FIXTURE/cat-malformed/roles.json"
+          printf '["ICO","SRX"]' > "$FIXTURE/cat-array/roles.json"
+
+          if catalog_missing_bars "$FIXTURE/cat-malformed" >/dev/null 2>&1; then
+            echo "SELF-TEST FAILED: the completeness guard reported SUCCESS on unparseable roles.json."
+            echo "  Fail-open: a corrupt binding artifact would read as a complete catalog."
+            FAILED=1
+          else
+            echo "  ok — completeness guard fails closed on unparseable roles.json"
+          fi
+
+          if catalog_missing_bars "$FIXTURE/cat-array" >/dev/null 2>&1; then
+            echo "SELF-TEST FAILED: the completeness guard accepted an ARRAY as roles.json."
+            echo "  Object.keys would emit 0,1,2 and send it hunting for bars/0.json."
+            FAILED=1
+          else
+            echo "  ok — completeness guard rejects roles.json that is not an object"
+          fi
+
+          if catalog_missing_bars "$FIXTURE/cat-absent" >/dev/null 2>&1; then
+            echo "SELF-TEST FAILED: the completeness guard reported SUCCESS on a missing roles.json."
+            FAILED=1
+          else
+            echo "  ok — completeness guard fails closed on a missing roles.json"
+          fi
+
+          # ...and the same failure must reach the CALLER the real gate uses,
+          # not be absorbed one layer up.
+          if catalog_unexpected_missing_bars "$FIXTURE/cat-malformed" >/dev/null 2>&1; then
+            echo "SELF-TEST FAILED: catalog_unexpected_missing_bars swallowed an unreadable role list."
+            FAILED=1
+          else
+            echo "  ok — the read failure propagates to the function step (d) calls"
+          fi
+
           # Horizon: present is a violation, a mention in prose is not.
-          printf '{"require":{"laravel/horizon":"^5.0"}}' > "$FIXTURE/composer.json"
-          HIT=$(grep -rl --include="composer.json" "laravel/horizon" "$FIXTURE" 2>/dev/null || true)
-          expect_caught "Horizon" "$HIT"
+          # BOTH manifests, because the real gate reads both and the copy here
+          # read only composer.json — so it proved half the rule. composer.json
+          # is what somebody edits; composer.lock is where a transitive pull-in
+          # shows up, and that is the case nobody would notice by reading.
+          mkdir -p "$FIXTURE/hz-json" "$FIXTURE/hz-lock"
+          printf '{"require":{"laravel/horizon":"^5.0"}}' > "$FIXTURE/hz-json/composer.json"
+          expect_caught "Horizon (composer.json)" "$(scan_horizon "$FIXTURE/hz-json")"
+          printf '{"packages":[{"name":"laravel/horizon","version":"v5.30.0"}]}' > "$FIXTURE/hz-lock/composer.lock"
+          expect_caught "Horizon (composer.lock)" "$(scan_horizon "$FIXTURE/hz-lock")"
 
           rm -rf "$FIXTURE"
 
@@ -553,23 +1030,24 @@ jobs:
           fi
           echo "Every guard rejected its known-bad fixture."
 
+      # -----------------------------------------------------------------------
+      # (g) Stack-consistency grep: confirm no stale stack tokens exist
+      #     (MySQL, Laravel 12, Sanctum in non-design contexts, Horizon,
+      #     pnpm/yarn/npm in the Nuxt apps).
+      # -----------------------------------------------------------------------
       - name: Stack token consistency check
         run: |
+          . ./scripts/ci-guards.sh
+
           echo "Checking for stale stack tokens..."
           FAIL=0
 
-          # MySQL/MariaDB outside design.md (where it's mentioned as rejected alternative)
-          # Three exclusions, each for a hit that is legitimate rather than a
-          # violation. Found by running this — it had never executed, because the
-          # openapi step above died on missing submodules before reaching it.
-          #
-          #   this workflow      — contains the search pattern itself, so the
-          #                        guard flagged its own source on every run
-          #   config/database.php — Laravel ships a connection block for every
-          #                        driver it supports; what matters is which one
-          #                        is SELECTED, asserted separately below
-          #   the Pulse migration — vendor-published, multi-driver by design
-          HITS=$(grep -r --include="*.php" --include="*.ts" --include="*.vue" --include="*.json" --include="*.yml" --include="*.yaml" -l "mysql\|mariadb" --exclude-dir=vendor --exclude-dir=node_modules --exclude-dir=.nuxt . 2>/dev/null | grep -v "design.md" | grep -v "openspec/changes" | grep -v ".github/workflows/wrapper-ci.yml" | grep -v "api/config/database.php" | grep -v "create_pulse_tables.php" || true)
+          # MySQL/MariaDB outside design.md (where it's mentioned as rejected
+          # alternative). `scan_mysql` from scripts/ci-guards.sh carries the
+          # include list, the exclude-dirs and the legitimate-hit filters, so the
+          # self-test in (f) exercises the rule as written rather than a
+          # one-include shorthand of it.
+          HITS=$(scan_mysql .)
           if [ -n "$HITS" ]; then
             echo "ERROR: MySQL/MariaDB reference found outside design.md:"
             echo "$HITS"
@@ -580,28 +1058,31 @@ jobs:
           # stack actually SELECTS. Grepping for a forbidden word says nothing
           # about configuration — Laravel's stock config mentions every driver
           # it supports and always will.
-          if ! grep -q "DB_CONNECTION: pgsql" docker-compose.yml; then
+          if ! compose_pins_pgsql docker-compose.yml; then
             echo "ERROR: docker-compose.yml does not pin DB_CONNECTION to pgsql."
             FAIL=1
           fi
 
-          # Laravel 12 (we're on 13)
-          # -l, so the exclusions below filter PATHS. Without it the output is
-          # path:line and a genuine violation whose LINE TEXT happens to mention
-          # design.md is silently swallowed.
-          HITS=$(grep -rl --include="*.php" --include="*.json" --include="*.md" "Laravel 12\|laravel/laravel:^12" --exclude-dir=vendor --exclude-dir=node_modules . 2>/dev/null | grep -v "design.md" | grep -v "openspec/" | grep -v "legacy-demo" || true)
+          # Laravel 12 (we're on 13). `scan_laravel12` from
+          # scripts/ci-guards.sh — it uses -l so the exclusions filter PATHS,
+          # which the self-test's old copy did not reproduce.
+          HITS=$(scan_laravel12 .)
           if [ -n "$HITS" ]; then
             echo "ERROR: Laravel 12 reference found:"
             echo "$HITS"
             FAIL=1
           fi
 
-          # Sanctum — only allowed as "NOT Sanctum" in design/docs
-          # composer.json/lock included deliberately: the dependency manifest is the ONE
-          # place laravel/sanctum would ever actually appear, and it was excluded — so the
-          # strongest auth rule in the standards had a guard blind to the only file that
-          # could break it.
-          HITS=$(grep -rl --include="*.php" --include="*.ts" --include="*.vue" --include="composer.json" --include="composer.lock" "Sanctum\|sanctum" --exclude-dir=vendor --exclude-dir=node_modules . 2>/dev/null | grep -v "design.md\|openspec/" | xargs -r grep -H "Sanctum\|sanctum" | grep -v "NOT Sanctum\|not Sanctum\|not use Sanctum" || true)
+          # Sanctum — only allowed as "NOT Sanctum" in design/docs.
+          # `scan_sanctum` from scripts/ci-guards.sh, exercised by (f) above in
+          # both directions: it must catch the manifest and must tolerate the
+          # standards' own wording.
+          #
+          # composer.json/lock are included deliberately: the dependency manifest
+          # is the ONE place laravel/sanctum would ever actually appear, and it
+          # was excluded — so the strongest auth rule in the standards had a
+          # guard blind to the only file that could break it.
+          HITS=$(scan_sanctum .)
           if [ -n "$HITS" ]; then
             echo "ERROR: Sanctum reference found outside 'NOT Sanctum' contexts:"
             echo "$HITS"
@@ -609,44 +1090,35 @@ jobs:
           fi
 
           # Horizon stays uninstalled. Ratified 2026-07-28 and stated in CLAUDE.md:
-          # workers run Laravel's native queue:work + schedule:work, and Horizon
-          # "is deferred, NOT installed — do not assume it exists".
+          # workers run Laravel's native queue:work + schedule:work — the compose
+          # `worker` and `scheduler` services named in (a) — and Horizon "is
+          # deferred, NOT installed — do not assume it exists".
           #
           # Guarded because it is the kind of decision that gets quietly undone:
           # somebody reaches for a queue dashboard, composer require succeeds,
           # and a ratified architectural choice is reversed by a convenience.
           # Adopting it later is an additive change with a proposal, not a
           # dependency somebody added on a Tuesday.
-          HITS=$(grep -rl --include="composer.json" --include="composer.lock" "laravel/horizon" --exclude-dir=vendor . 2>/dev/null || true)
+          HITS=$(scan_horizon .)
           if [ -n "$HITS" ]; then
             echo "ERROR: laravel/horizon is installed. It is DEFERRED by ratified decision (CLAUDE.md)."
             echo "$HITS"
             FAIL=1
           fi
 
-          # Bun-only, in the Nuxt apps. (legacy-demo keeps its npm toolchain and is
-          # excluded by not being listed.)
+          # Bun-only, in the Nuxt apps. (legacy-demo keeps its npm toolchain and
+          # is excluded by not being passed in.)
           #
-          # This searched for "pnpm\|yarn" — two of the five banned tools — and never
-          # looked at Markdown. Both READMEs shipped `npm install` as the first
-          # instruction a new developer read, while this check stayed green.
+          # `scan_bun_only` from scripts/ci-guards.sh. It searched for
+          # "pnpm\|yarn" — two of the five banned tools — and never looked at
+          # Markdown. Both READMEs shipped `npm install` as the first instruction
+          # a new developer read, while this check stayed green.
           #
-          # Matched as COMMANDS rather than bare words, so a line documenting the
-          # prohibition ("npm, pnpm and yarn are not used") is not itself a violation.
           # No carve-outs. The one hit this found was `npm install -g bun` in the
           # submodules' own CI, and the right answer was to fix that — they now
           # use oven-sh/setup-bun@v2, as this workflow already did. Excluding a
           # violation by name protects nothing and leaves a hole open.
-          # --exclude-dir, not a post-filter. `grep -v node_modules` matched the
-          # whole `path:line:text` string, so a README line that merely MENTIONED
-          # node_modules was dropped along with the directory — the same
-          # filter-the-text-not-the-path bug fixed above.
-          #
-          # Comment lines are skipped: a commented-out command does not run, and
-          # without this the guard flagged the comment in each submodule's CI
-          # explaining why it STOPPED using npm. A check that cannot tell code
-          # from an explanation of the fix will keep reporting the fix.
-          HITS=$(grep -rn -E --include="*.yml" --include="*.yaml" --include="*.json" --include="*.sh" --include="*.md" --exclude-dir=node_modules --exclude-dir=.nuxt --exclude-dir=.output "(^|[^a-z-])((npm|pnpm|yarn)[[:space:]]+(install|run|add|exec|create|dlx|ci|test|build|dev|start|link|update|why|list)|(npx|pnpx)[[:space:]]+[a-zA-Z@])" frontend/ backoffice/ 2>/dev/null | grep -v -E "^[^:]*:[0-9]+:[[:space:]]*#" || true)
+          HITS=$(scan_bun_only frontend/ backoffice/)
           if [ -n "$HITS" ]; then
             echo "ERROR: non-Bun package manager command in frontend/backoffice (Bun-only projects):"
             echo "$HITS"
@@ -658,5 +1130,3 @@ jobs:
           else
             exit 1
           fi
-
-      # -----------------------------------------------------------------------
