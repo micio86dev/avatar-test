@@ -1,0 +1,86 @@
+# BEAI — framework catalog known gaps, PER role×competency PAIR (CI control file)
+#
+# One "ROLE:COMP" pair per line. Everything from a '#' to end of line is a
+# comment. A pair listed here is a competency ASSIGNED to a role in
+# roles.json with no matching entry in that role's bars/{ROLE}.json, and the
+# wrapper catalog gate — .github/workflows/wrapper-ci.yml, step (d) — will
+# not fail the build on it.
+#
+# A SECOND file, not an extension of scripts/framework-known-gaps.txt.
+# known_gap_roles() (scripts/ci-guards.sh) reads the FIRST whitespace field of
+# each line as a ROLE CODE; a "FLL:PRS" line there would be read as a role
+# code named "FLL:PRS" and silently corrupt that gate. Two questions
+# (role-level completeness, pair-level completeness), two files.
+#
+# THIS IS NOT A MUTE SWITCH. The gate enforces this list in BOTH directions:
+#
+#   * a pair missing anchors and NOT listed here      -> CI fails
+#   * a pair listed here whose anchors now EXIST,      -> CI fails
+#     or that no longer appears in roles.json at all
+#
+# The second rule is the one that earns this file its place: an exemption
+# that outlives the gap it excuses is the failure this whole workflow was
+# written against. Deleting a line here is the LAST step of authoring a
+# pair's anchors, not an optional tidy-up afterwards.
+#
+# ONLY covers roles whose bars/{ROLE}.json EXISTS. A role with no file at
+# all — SRX today — stays scripts/framework-known-gaps.txt's business.
+# Declaring SRX's 18 pairs here too would put SRX in both control files, and
+# the day bars/SRX.json lands would be a 19-line deletion here instead of a
+# clean red on the role-level gate. Composition, verified against roles.json
+# and the four partial bars/*.json files: ICO 0, FLL 10, MLL 10, BUL 6,
+# SRX 0 (role-level exemption, not here) = 26.
+#
+# Reuses the runtime's own vocabulary — FrameworkCatalogSeeder already
+# records this exact gap as FrameworkGap kind=competency_no_bars,
+# status=pending_authoring. A pair here should have a matching framework_gaps
+# row with that kind and status.
+#
+# GENERATED, NOT TYPED. Produced by, and reviewed against:
+#   . ./scripts/ci-guards.sh
+#   catalog_missing_bars_pairs docs/app_description/02-domain/framework
+# Committed verbatim — do not hand-edit the pair list, only the comments.
+# Grouped by role, then by competency, in roles.json's own declaration order
+# (the order an authoring specialist works through a role) — no counts in
+# the per-role headers, because the count is the number of lines under it,
+# which cannot disagree with itself.
+
+# ---------------------------------------------------------------------------
+# FLL — Front Line Leader. 8 of 18 assigned competencies anchored today
+# (STG INN CSF OPX INS INF RES LRN); these 10 are not yet.
+# ---------------------------------------------------------------------------
+FLL:PRS
+FLL:JDG
+FLL:DRV
+FLL:SLF
+FLL:TMG
+FLL:COM
+FLL:COL
+FLL:NET
+FLL:ITG
+FLL:INC
+
+# ---------------------------------------------------------------------------
+# MLL — Mid-Level Leader. Same 8-of-18 anchored set as FLL; these 10 are not.
+# ---------------------------------------------------------------------------
+MLL:PRS
+MLL:JDG
+MLL:DRV
+MLL:SLF
+MLL:TMG
+MLL:COM
+MLL:COL
+MLL:NET
+MLL:ITG
+MLL:INC
+
+# ---------------------------------------------------------------------------
+# BUL — Business Unit Leader. 8 of 14 assigned competencies anchored today
+# (same set as FLL/MLL, minus the two BUL does not assign); these 6 are not.
+# ---------------------------------------------------------------------------
+BUL:PRS
+BUL:JDG
+BUL:DRV
+BUL:TMG
+BUL:COL
+BUL:NET

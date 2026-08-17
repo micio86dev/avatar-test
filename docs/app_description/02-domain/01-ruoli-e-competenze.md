@@ -75,7 +75,12 @@ Esempio (estratto ICO / PRS):
 |------------|-----------|-----------|-----------|
 | Recognizes symptoms that indicate problems | Utilizza sintomi e pattern come indizi delle cause profonde | Riconosce sintomi e differenzia problemi da sintomi | Si concentra sui sintomi superficiali |
 
-File completi: `framework/bars/ICO.json`, `FLL.json`, `MLL.json`, `BUL.json`.
+**Copertura BARS.** Non tutte le coppie ruolo×competenza dichiarate in `roles.json` hanno ancore
+comportamentali. L'elenco esatto è nei due file di controllo CI — `scripts/framework-known-gaps.txt`
+(ruoli senza alcun file BARS) e `scripts/framework-competency-gaps.txt` (coppie ruolo×competenza senza
+ancore) — mantenuti esatti in entrambe le direzioni dallo step (d) di `.github/workflows/wrapper-ci.yml`:
+una coppia scoperta e non elencata fa fallire la CI, e un'esenzione la cui lacuna è stata colmata fa
+fallire la CI finché non viene rimossa.
 
 ## Regole di configurazione progetto
 
