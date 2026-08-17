@@ -1,12 +1,14 @@
-# Interview Session
+# Delta: interview-session — session start sends the active avatar template to the provider
 
-## Purpose
+Before this change, `POST /api/candidate/interview/start` sent HeyGen and Tavus
+a body containing only `competency_code`, `question_index`, and (per C8) an
+optional `system_prompt`. No avatar id, voice id, language, quality, encoding,
+or voice tuning was ever sent — whatever the provider account happened to
+default to is what every candidate of every organization received. This delta
+is the part of `avatar-provider-templates` (C14) that makes an operator's
+template choice reach a real interview session.
 
-Defines the interview session initiation and provider template integration. When a candidate starts an interview, the system MUST resolve and apply the organization's active avatar template configuration to the provider session payload.
-
----
-
-## Requirements
+## ADDED Requirements
 
 ### Requirement: POST /start merges the organization's active avatar template into the provider payload
 
@@ -47,39 +49,32 @@ and every existing `/start` scenario are unchanged by this delta.
 #### Scenario: An organization's active template configures the Tavus session
 
 - GIVEN organization O has an active template with `provider = 'tavus'` and
-  `config = {faceId: 'face-123', palId: 'pal-456', llmModel: 'gpt-4'}`
+  `config = {faceId: 'r_abc', palId: 'p_xyz'}`
 - WHEN a candidate of organization O calls `POST /start`
-- THEN the outbound Tavus conversation-initiation request body carries the
-  configured face, PAL, and LLM settings (via the persona-level mapping), in
-  addition to the existing `competency_code` and `question_index` fields
+- THEN the outbound Tavus `POST /conversations` request body carries
+  `replica_id = 'r_abc'` and `persona_id = 'p_xyz'`
 
-#### Scenario: An organization with no active template sends empty config
+#### Scenario: An organization with no active template gets the pre-template request body
 
-- GIVEN organization O has no active template
+- GIVEN organization O has no active avatar template
 - WHEN a candidate of organization O calls `POST /start`
-- THEN the outbound provider request body contains only the interview-specific
-  fields (`competency_code`, `question_index`, `system_prompt`); no template
-  config is merged
+- THEN the outbound provider request body is unchanged from the body sent
+  before this capability existed — only `competency_code`, `question_index`,
+  and (when composed) the system prompt
 
-#### Scenario: Template resolution error degrades to empty config
+#### Scenario: The template cannot override the interview fields
 
-- GIVEN `ActiveTemplateResolver::resolve()` throws an exception (e.g., database error)
+- GIVEN organization O has an active template
+- WHEN `POST /start` issues a provider session
+- THEN `competency_code`, `question_index`, and the composed system prompt in
+  the outbound request always reflect the interview being started, never a
+  value sourced from the template's config
+
+#### Scenario: A template-resolution failure degrades silently, session start still succeeds
+
+- GIVEN resolving or mapping the organization's active template raises an
+  unexpected error
 - WHEN `POST /start` is called
-- THEN the exception is caught and an empty payload fragment is used (fallback);
-  the `/start` request succeeds; no template config is sent to the provider
-
-#### Scenario: Template mapping error degrades to empty config
-
-- GIVEN an organization's active template has a config that cannot be mapped
-  (e.g., an unrecognized provider type)
-- WHEN `POST /start` is called
-- THEN the mapping error is caught and an empty payload fragment is used (fallback);
-  the `/start` request succeeds; the session begins with the provider's account defaults
-
-#### Scenario: Interview-specific fields are never overridden by template
-
-- GIVEN an organization's template config is `{competency_code: 'WRONG', question_index: 999}`
-  (malformed)
-- WHEN `POST /start` is called for competency code PRS at question_index 0
-- THEN the outbound request body carries `competency_code: 'PRS'` and
-  `question_index: 0` (interview values take precedence)
+- THEN the provider session is still issued, using an empty template payload
+  fragment, and the existing `/start` failure matrix (429/502/500) is governed
+  only by the provider's own response — not by the template resolution error
