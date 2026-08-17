@@ -47,7 +47,8 @@ transaction, so a failure leaves nothing behind.
 
 ## Impact
 
-- New: `app/Console/Commands/ProvisionOrganizationCommand.php`
-- New: `tests/Feature/Provisioning/ProvisionOrganizationCommandTest.php`
-- Touched: `tests/Pest.php` (wire `Feature/Provisioning` to `RefreshDatabase`)
-- Touched: `docs/dev-setup.md`, `GUIDE.md` (document the bootstrap step)
+- New: `api/app/Console/Commands/ProvisionOrganizationCommand.php`
+- New: `api/tests/Feature/Provisioning/ProvisionOrganizationCommandTest.php`
+- Touched: `api/tests/Pest.php` (wire `Feature/Provisioning` to `RefreshDatabase`)
+- Touched: `docs/dev-setup.md`, `GUIDE.md` (superproject root, not `api/` — document
+  the bootstrap step)
