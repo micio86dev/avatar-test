@@ -599,3 +599,376 @@ catalog_stale_gap_exemptions() {
     fi
   done
 }
+
+# ---------------------------------------------------------------------------
+# The per-pair coverage gate (bars-coverage-visibility).
+#
+# One level finer than everything above. `catalog_missing_bars` and its two
+# callers ask "does bars/<ROLE>.json EXIST" — a question with only two
+# answers, yes or no. A file can exist and still be PARTIAL: FLL, MLL and BUL
+# each anchor 8 of their 18 assigned competencies, and the role-level gate is
+# structurally blind to that — the file is there, so it passes.
+#
+# Deliberately asks its question ONLY of roles whose bars file EXISTS. A role
+# with no file at all is the role-level gate's business
+# (scripts/framework-known-gaps.txt); this gate would otherwise declare the
+# same absence twice, in two different vocabularies, and disagree with itself
+# about which file is authoritative for it.
+#
+# CI_COMPETENCY_GAPS_FILE mirrors CI_KNOWN_GAPS_FILE's override seam so the
+# self-test can point these functions at a fixture list without touching the
+# committed one.
+# ---------------------------------------------------------------------------
+CI_COMPETENCY_GAPS_FILE="${CI_COMPETENCY_GAPS_FILE:-scripts/framework-competency-gaps.txt}"
+
+# The ROLE:COMP pairs on the list, one per line. Same parsing discipline as
+# known_gap_roles: '#' to end of line is a comment, blank lines dropped, only
+# the first whitespace field is read so a trailing comment cannot corrupt it.
+known_gap_pairs() {
+  [ -f "$CI_COMPETENCY_GAPS_FILE" ] || return 0
+  sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]].*$//' "$CI_COMPETENCY_GAPS_FILE" \
+    | grep -v '^$' || true
+}
+
+# Every ROLE:COMP pair `<tree>/roles.json` declares, one per line, in the
+# file's own role and competency order.
+#
+# FAILS LOUDLY on exactly the shapes catalog_missing_bars's role_keys already
+# guards against (not an object, empty, keys that are not role codes), plus
+# the shape this function additionally depends on: each role's `competencies`
+# must be an ARRAY of role-code-shaped strings. A role whose competencies
+# field is a bare string (or missing) would otherwise iterate that string's
+# CHARACTERS in JavaScript — a wrong question asked silently confident.
+#
+# Returns non-zero, printing nothing to stdout, when the file could not be
+# read or does not have this shape — the caller must treat that as "the guard
+# failed to run", never as "nothing to report".
+# ---------------------------------------------------------------------------
+# shellcheck disable=SC2016
+# Same reason as CI_ROLE_KEYS_SCRIPT above: this is a JavaScript template
+# literal that must reach bun untouched.
+CI_ROLE_COMPETENCY_PAIRS_SCRIPT='
+  const path = process.env.CI_ROLES_FILE;
+  let roles;
+  try {
+    roles = JSON.parse(await Bun.file(path).text());
+  } catch (e) {
+    console.error(`ci-guards: cannot read or parse ${path}: ${e.message}`);
+    process.exit(1);
+  }
+  if (roles === null || typeof roles !== "object" || Array.isArray(roles)) {
+    const got = Array.isArray(roles) ? "an array" : roles === null ? "null" : typeof roles;
+    console.error(`ci-guards: ${path} must be a JSON OBJECT keyed by role code, got ${got}.`);
+    process.exit(1);
+  }
+  const roleKeys = Object.keys(roles);
+  if (roleKeys.length === 0) {
+    console.error(`ci-guards: ${path} declares no roles at all.`);
+    process.exit(1);
+  }
+  const codeRe = /^[A-Z][A-Z0-9_]{1,15}$/;
+  const badRoles = roleKeys.filter((k) => !codeRe.test(k));
+  if (badRoles.length > 0) {
+    console.error(`ci-guards: ${path} has keys that are not role codes: ${badRoles.join(", ")}`);
+    process.exit(1);
+  }
+  const lines = [];
+  for (const role of roleKeys) {
+    const entry = roles[role];
+    const comps = entry ? entry.competencies : undefined;
+    if (!Array.isArray(comps)) {
+      console.error(`ci-guards: ${path} role "${role}" has no competencies ARRAY.`);
+      process.exit(1);
+    }
+    for (const comp of comps) {
+      if (typeof comp !== "string" || !codeRe.test(comp)) {
+        console.error(`ci-guards: ${path} role "${role}" has a competency that is not a role-code-shaped string: ${JSON.stringify(comp)}`);
+        process.exit(1);
+      }
+      lines.push(role + ":" + comp);
+    }
+  }
+  console.log(lines.join("\n"));
+'
+
+role_competency_pairs() {
+  CI_ROLES_FILE="$1/roles.json"
+  export CI_ROLES_FILE
+  if [ ! -f "$CI_ROLES_FILE" ]; then
+    echo "ci-guards: $CI_ROLES_FILE does not exist." >&2
+    return 1
+  fi
+  bun --eval "$CI_ROLE_COMPETENCY_PAIRS_SCRIPT"
+}
+
+# The competency codes actually ANCHORED in `<tree>/bars/<ROLE>.json>`, one
+# per line — a key whose value is a non-empty array. An empty array
+# (`"PRS": []`) is a stub, not an anchor set, and is deliberately EXCLUDED
+# from this output: the cheapest way to green this gate must not be stubbing
+# the key.
+#
+# FAILS LOUDLY when the file is missing, unparseable, not a JSON object, or
+# has a non-array value for any key — the same "a guard that cannot read its
+# subject must never pass it" rule as everything else in this file.
+# ---------------------------------------------------------------------------
+# shellcheck disable=SC2016
+CI_BARS_COMPETENCY_KEYS_SCRIPT='
+  const path = process.env.CI_BARS_FILE;
+  let bars;
+  try {
+    bars = JSON.parse(await Bun.file(path).text());
+  } catch (e) {
+    console.error(`ci-guards: cannot read or parse ${path}: ${e.message}`);
+    process.exit(1);
+  }
+  if (bars === null || typeof bars !== "object" || Array.isArray(bars)) {
+    const got = Array.isArray(bars) ? "an array" : bars === null ? "null" : typeof bars;
+    console.error(`ci-guards: ${path} must be a JSON OBJECT keyed by competency code, got ${got}.`);
+    process.exit(1);
+  }
+  const keys = Object.keys(bars);
+  const badKeys = keys.filter((k) => !Array.isArray(bars[k]));
+  if (badKeys.length > 0) {
+    console.error(`ci-guards: ${path} has a non-ARRAY value for: ${badKeys.join(", ")}`);
+    process.exit(1);
+  }
+  const covered = keys.filter((k) => bars[k].length > 0);
+  console.log(covered.join("\n"));
+'
+
+bars_competency_keys() {
+  CI_BARS_FILE="$1/bars/$2.json"
+  export CI_BARS_FILE
+  if [ ! -f "$CI_BARS_FILE" ]; then
+    echo "ci-guards: $CI_BARS_FILE does not exist." >&2
+    return 1
+  fi
+  bun --eval "$CI_BARS_COMPETENCY_KEYS_SCRIPT"
+}
+
+# Role×competency pairs with NO anchors, for every role whose bars file
+# EXISTS — printed as ROLE:COMP, one per line. Empty output means every role
+# that HAS a file is fully anchored (a role with no file at all is silently
+# skipped here on purpose, see the section header above).
+#
+# The role list is captured to a FILE before the loop that reads it, not
+# piped into `while` — the exact fix `catalog_missing_bars` needed,
+# generalised: the right-hand side of a pipe is a subshell, and a
+# failure flag assigned inside one is discarded the moment the pipe closes.
+# A per-role bars-file read failure (malformed JSON, wrong shape) sets
+# CI_CMBP_FAIL in the loop that reads `< "$CI_CMBP_ROLES"` — a redirected
+# file, run in the CURRENT shell — so it survives to the `return` below.
+#
+# Returns non-zero, on ANY read failure anywhere in the tree — role list or
+# any individual bars file — printing whatever pairs it could still determine
+# to stdout regardless. The caller decides what to do with a partial list
+# under a non-zero exit; today's only caller propagates the failure outright.
+catalog_missing_bars_pairs() {
+  CI_CMBP_TREE="$1"
+  CI_CMBP_PAIRS=$(mktemp)
+  CI_CMBP_ROLES_RAW=$(mktemp)
+  CI_CMBP_ROLES=$(mktemp)
+
+  if ! role_competency_pairs "$CI_CMBP_TREE" > "$CI_CMBP_PAIRS"; then
+    rm -f "$CI_CMBP_PAIRS" "$CI_CMBP_ROLES_RAW" "$CI_CMBP_ROLES"
+    return 1
+  fi
+
+  sed 's/:.*//' "$CI_CMBP_PAIRS" > "$CI_CMBP_ROLES_RAW"
+
+  # Distinct roles, first-seen order preserved (no `sort -u`, which would
+  # alphabetise and lose roles.json's own declaration order — the order the
+  # generated gaps file is meant to inherit).
+  CI_CMBP_SEEN=""
+  while IFS= read -r CI_CMBP_ROLE; do
+    [ -n "$CI_CMBP_ROLE" ] || continue
+    case " $CI_CMBP_SEEN " in
+      *" $CI_CMBP_ROLE "*) continue ;;
+    esac
+    CI_CMBP_SEEN="$CI_CMBP_SEEN $CI_CMBP_ROLE"
+    printf '%s\n' "$CI_CMBP_ROLE"
+  done < "$CI_CMBP_ROLES_RAW" > "$CI_CMBP_ROLES"
+
+  CI_CMBP_FAIL=0
+  while IFS= read -r CI_CMBP_ROLE; do
+    [ -n "$CI_CMBP_ROLE" ] || continue
+    [ -f "$CI_CMBP_TREE/bars/$CI_CMBP_ROLE.json" ] || continue
+
+    if ! CI_CMBP_COVERED=$(bars_competency_keys "$CI_CMBP_TREE" "$CI_CMBP_ROLE"); then
+      CI_CMBP_FAIL=1
+      continue
+    fi
+
+    grep "^$CI_CMBP_ROLE:" "$CI_CMBP_PAIRS" | while IFS= read -r CI_CMBP_PAIR; do
+      CI_CMBP_COMP=${CI_CMBP_PAIR#*:}
+      printf '%s\n' "$CI_CMBP_COVERED" | grep -qxF "$CI_CMBP_COMP" && continue
+      printf '%s\n' "$CI_CMBP_PAIR"
+    done
+  done < "$CI_CMBP_ROLES"
+
+  rm -f "$CI_CMBP_PAIRS" "$CI_CMBP_ROLES_RAW" "$CI_CMBP_ROLES"
+  [ "$CI_CMBP_FAIL" -eq 0 ]
+}
+
+# Pairs missing anchors with NO committed exemption. Any output is a build
+# failure — mirrors catalog_unexpected_missing_bars exactly, one level down.
+#
+# Propagates catalog_missing_bars_pairs's failure rather than absorbing it —
+# the same rule role_no_bars's caller obeys, checked directly by the
+# pair-malformed self-test row: a bars file that is the wrong shape must
+# reach THIS function's exit status, not be swallowed one layer up.
+catalog_unexpected_missing_bars_pairs() {
+  CI_CUMBP_KNOWN=$(known_gap_pairs)
+  CI_CUMBP_MISSING=$(catalog_missing_bars_pairs "$1") || return 1
+  printf '%s\n' "$CI_CUMBP_MISSING" | while IFS= read -r CI_CUMBP_PAIR; do
+    [ -n "$CI_CUMBP_PAIR" ] || continue
+    printf '%s\n' "$CI_CUMBP_KNOWN" | grep -qxF "$CI_CUMBP_PAIR" && continue
+    printf '%s\n' "$CI_CUMBP_PAIR"
+  done
+}
+
+# Pairs on the known-gaps list that no longer describe a real gap. Two
+# directions, both build failures — the half that keeps the list honest:
+#
+#   * the anchors have SINCE been authored (bars/<ROLE>.json now covers it)
+#   * the pair no longer exists at all (roles.json dropped the competency
+#     from the role, or dropped the role) — an exemption excusing a pair that
+#     is not there is the same note-outliving-its-fact defect as the first
+#     direction, just reached from the other side
+#
+# Direction 2 needs role_competency_pairs to succeed; when it does not, this
+# function still reports every direction-1 hit it found (those do not depend
+# on roles.json parsing at all) and returns non-zero at the end rather than
+# silently skipping the second direction.
+# A THIRD shape, caught by neither direction until this fix — verified
+# independently and stated precisely so it cannot regress unnoticed: a pair
+# naming a role that IS declared in roles.json but has NO bars/<ROLE>.json
+# file at ALL (SRX's shape, today). `catalog_missing_bars_pairs` skips such a
+# role BY DESIGN (`[ -f ... ] || continue` — the pair-level gate is not this
+# role's business, the role-level gate is); Direction 1 below requires the
+# file to exist and so never runs; Direction 2 finds the pair legitimately
+# declared in roles.json and so never fires either. Net effect before this
+# fix: a line shaped like "SRX:PRS" is accepted onto the per-pair list,
+# produces NO error in either existing direction, and stays mute FOREVER —
+# until the day bars/SRX.json is authored, at which point it fires in a
+# commit that has nothing to do with it. The file's own header already
+# states the POLICY ("SRX's pairs stay under the role-level list, not here");
+# Direction 3 below is what enforces it mechanically instead of by hoping
+# nobody adds one.
+catalog_stale_competency_gap_exemptions() {
+  CI_CSCGE_TREE="$1"
+  CI_CSCGE_DECLARED=$(mktemp)
+  role_competency_pairs "$CI_CSCGE_TREE" > "$CI_CSCGE_DECLARED" 2>/dev/null
+  CI_CSCGE_STATUS=$?
+
+  known_gap_pairs | while IFS= read -r CI_CSCGE_PAIR; do
+    [ -n "$CI_CSCGE_PAIR" ] || continue
+    CI_CSCGE_ROLE=${CI_CSCGE_PAIR%%:*}
+    CI_CSCGE_COMP=${CI_CSCGE_PAIR#*:}
+
+    CI_CSCGE_PAIR_DECLARED=0
+    if [ "$CI_CSCGE_STATUS" -eq 0 ] && grep -qxF "$CI_CSCGE_PAIR" "$CI_CSCGE_DECLARED"; then
+      CI_CSCGE_PAIR_DECLARED=1
+    fi
+
+    if [ -f "$CI_CSCGE_TREE/bars/$CI_CSCGE_ROLE.json" ]; then
+      # Direction 1 — anchored since the exemption was written.
+      CI_CSCGE_COVERED=$(bars_competency_keys "$CI_CSCGE_TREE" "$CI_CSCGE_ROLE" 2>/dev/null)
+      if printf '%s\n' "$CI_CSCGE_COVERED" | grep -qxF "$CI_CSCGE_COMP"; then
+        printf '%s\n' "$CI_CSCGE_PAIR"
+        continue
+      fi
+    elif [ "$CI_CSCGE_PAIR_DECLARED" -eq 1 ]; then
+      # Direction 3 (the SRX shape) — declared in roles.json, but the role
+      # has no bars file at all. Belongs on the role-level list instead.
+      printf '%s\n' "$CI_CSCGE_PAIR"
+      continue
+    fi
+
+    # Direction 2 — the pair itself no longer exists (wrong role entirely,
+    # or the role exists but no longer assigns this competency).
+    if [ "$CI_CSCGE_STATUS" -eq 0 ] && [ "$CI_CSCGE_PAIR_DECLARED" -eq 0 ]; then
+      printf '%s\n' "$CI_CSCGE_PAIR"
+    fi
+  done
+
+  rm -f "$CI_CSCGE_DECLARED"
+  [ "$CI_CSCGE_STATUS" -eq 0 ]
+}
+
+# Distinguishes the THREE stale-exemption shapes for a single PAIR — same
+# tree, same known-gaps entry — so a caller can print a diagnostic naming the
+# SPECIFIC shape instead of one message trying to describe all three at
+# once. Prints exactly one of:
+#   "anchored"   — Direction 1: the anchors now exist
+#   "role-level" — Direction 3: the role has no bars file at all; this
+#                  exemption belongs on scripts/framework-known-gaps.txt
+#   "orphaned"   — Direction 2: the pair no longer exists in roles.json,
+#                  either because the role does not or because the role no
+#                  longer assigns this competency
+# Prints nothing when the pair is not actually stale — the caller should not
+# have asked.
+stale_competency_gap_exemption_reason() {
+  CI_SCGER_TREE="$1"
+  CI_SCGER_PAIR="$2"
+  CI_SCGER_ROLE=${CI_SCGER_PAIR%%:*}
+  CI_SCGER_COMP=${CI_SCGER_PAIR#*:}
+
+  if [ -f "$CI_SCGER_TREE/bars/$CI_SCGER_ROLE.json" ]; then
+    CI_SCGER_COVERED=$(bars_competency_keys "$CI_SCGER_TREE" "$CI_SCGER_ROLE" 2>/dev/null)
+    if printf '%s\n' "$CI_SCGER_COVERED" | grep -qxF "$CI_SCGER_COMP"; then
+      echo "anchored"
+      return 0
+    fi
+    echo "orphaned"
+    return 0
+  fi
+
+  if role_competency_pairs "$CI_SCGER_TREE" 2>/dev/null | grep -qxF "$CI_SCGER_PAIR"; then
+    echo "role-level"
+    return 0
+  fi
+
+  echo "orphaned"
+}
+
+# ---------------------------------------------------------------------------
+# "Entries are grouped by role" — ci-pipeline spec's own reviewability
+# requirement for the per-pair known-gaps file, previously true only by
+# INSPECTION (no automated check anywhere). Makes it mechanical.
+#
+# Prints every role code that reappears NON-contiguously in
+# CI_COMPETENCY_GAPS_FILE — i.e. a role's lines are interrupted by a
+# DIFFERENT role's lines and then resume. Empty output means every role's
+# entries are one unbroken block, which is what "roles are not interleaved"
+# (the spec's own scenario) means. A role appearing only once is trivially
+# grouped and never printed.
+#
+# Reads via known_gap_pairs, not the raw file — same parsing discipline
+# (comments/blank lines dropped) as every other consumer of this file, so a
+# comment line between two blocks of the SAME role does not itself count as
+# "a different role interrupting it".
+# ---------------------------------------------------------------------------
+competency_gaps_role_order_violations() {
+  CI_CGRO_FILE=$(mktemp)
+  known_gap_pairs > "$CI_CGRO_FILE"
+
+  CI_CGRO_SEEN=""
+  CI_CGRO_LAST=""
+  while IFS= read -r CI_CGRO_PAIR; do
+    [ -n "$CI_CGRO_PAIR" ] || continue
+    CI_CGRO_ROLE=${CI_CGRO_PAIR%%:*}
+
+    if [ "$CI_CGRO_ROLE" = "$CI_CGRO_LAST" ]; then
+      continue
+    fi
+
+    case " $CI_CGRO_SEEN " in
+      *" $CI_CGRO_ROLE "*) printf '%s\n' "$CI_CGRO_ROLE" ;;
+    esac
+    CI_CGRO_SEEN="$CI_CGRO_SEEN $CI_CGRO_ROLE"
+    CI_CGRO_LAST="$CI_CGRO_ROLE"
+  done < "$CI_CGRO_FILE"
+
+  rm -f "$CI_CGRO_FILE"
+}
