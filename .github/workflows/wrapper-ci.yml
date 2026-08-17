@@ -17,9 +17,14 @@
 #   (b) the committed openapi.json is semantically identical across api/frontend/backoffice
 #   (c) each app's check-client-drift.sh exits 0 (generated TS client matches openapi.json)
 #   (d) the framework catalog matches its authored source, and every declared
-#       role has BARS or a committed entry in scripts/framework-known-gaps.txt
+#       role has BARS or a committed entry in scripts/framework-known-gaps.txt,
+#       and every declared role×competency PAIR has BARS or a committed entry
+#       in scripts/framework-competency-gaps.txt
 #   (e) every submodule pointer is reachable from a published remote ref
-#   (f) the self-test: each guard above still rejects a known-bad fixture
+#   (f) the self-test: every guard in this file still rejects a known-bad
+#       fixture. NOT "each guard above" — it also covers the six scan_* guards
+#       used by (g), which runs after it. The index has to be maintained like a
+#       gate, and that includes this line.
 #   (g) no stale stack tokens (MySQL, Laravel 12, Sanctum, Horizon, npm/pnpm/yarn)
 #
 # That list said "(a) compose (b) openapi (c) drift" long after (d) through (g)
@@ -114,11 +119,25 @@ jobs:
             echo "  scripts/ci-guards.sh in the same commit, and re-read (g)'s rationale."
             exit 1
           fi
-          echo "All 8 compose services present: $ACTUAL_SERVICES" | tr '\n' ' '
+          # Derived from CI_EXPECTED_COMPOSE_SERVICES, not hardcoded — a
+          # count asserted by a comment is exactly the defect this step's own
+          # header paragraph argues against; the count above it is CHECKED
+          # (compose_service_diff), this line only reports how many.
+          EXPECTED_COUNT=$(printf '%s\n' "$CI_EXPECTED_COMPOSE_SERVICES" | wc -w | tr -d ' ')
+          echo "All $EXPECTED_COUNT compose services present: $ACTUAL_SERVICES" | tr '\n' ' '
           echo
 
           echo "Checking all pinned image tags (no 'latest' or bare-major allowed):"
-          docker compose config | grep 'image:' | grep -v '#'
+          # `|| true` on a DISPLAY-only line. Actions runs every `run:` under
+          # `bash -e`, so a grep that matches nothing returns 1 and kills the
+          # step right here — before the real pinning assertion below ever
+          # executes. Masked today only because compose emits six `image:`
+          # lines; it stops being masked the moment every service is build-only
+          # or the images move behind a comment, and then this is a red
+          # pipeline with no reason printed. Same hazard step (d) already
+          # guards, so it gets guarded here too — a rule that binds in one step
+          # and not the next is a preference, not a rule.
+          docker compose config | grep 'image:' | grep -v '#' || true
 
           # `tag_pinned` comes from scripts/ci-guards.sh — the SAME function the
           # Dockerfile loop below and the self-test in (f) call. It used to be
@@ -150,24 +169,6 @@ jobs:
 
           echo "All image tags are pinned — compose services and Dockerfile bases."
 
-      # -----------------------------------------------------------------------
-      # (b) openapi.json cross-repo consistency check
-      #     The committed openapi.json in api/, frontend/, and backoffice/ MUST
-      #     be semantically identical (same parsed JSON, whitespace-agnostic).
-      #
-      #     Mutual equality is NOT freshness (generated-client-truth-and-
-      #     session-safety D2). All three copies can be identical and all
-      #     three can be stale relative to the current `api` code — this
-      #     check only proves the three agree with EACH OTHER, never that any
-      #     one of them matches a live `scramble:export`. That is exactly the
-      #     failure mode that let ten mistyped resources and a
-      #     `ProfileResource.locale` staleness ship undetected: this gate was
-      #     green throughout. Only `api/.github/workflows/ci.yml`'s
-      #     `git diff --exit-code openapi.json` (run immediately after a
-      #     fresh `scramble:export`) can catch that all three are stale at
-      #     once — this job does not attempt to, and should not be read as if
-      #     it does.
-      # -----------------------------------------------------------------------
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
@@ -193,6 +194,24 @@ jobs:
           # Dockerfiles and this line together, and revisit the D25 entry.
           bun-version: '1.3.14'
 
+      # -----------------------------------------------------------------------
+      # (b) openapi.json cross-repo consistency check
+      #     The committed openapi.json in api/, frontend/, and backoffice/ MUST
+      #     be semantically identical (same parsed JSON, whitespace-agnostic).
+      #
+      #     Mutual equality is NOT freshness (generated-client-truth-and-
+      #     session-safety D2). All three copies can be identical and all
+      #     three can be stale relative to the current `api` code — this
+      #     check only proves the three agree with EACH OTHER, never that any
+      #     one of them matches a live `scramble:export`. That is exactly the
+      #     failure mode that let ten mistyped resources and a
+      #     `ProfileResource.locale` staleness ship undetected: this gate was
+      #     green throughout. Only `api/.github/workflows/ci.yml`'s
+      #     `git diff --exit-code openapi.json` (run immediately after a
+      #     fresh `scramble:export`) can catch that all three are stale at
+      #     once — this job does not attempt to, and should not be read as if
+      #     it does.
+      # -----------------------------------------------------------------------
       - name: Verify openapi.json is identical across api/frontend/backoffice
         run: |
           . ./scripts/ci-guards.sh
@@ -203,8 +222,17 @@ jobs:
           # consumers are copies of it, so naming it as the reference makes the
           # failure message point at the file that has to change.
           FAIL=0
+          # "Cannot read" and "differs" are separated here for the same reason
+          # (a), (d) and (e) separate them: a missing frontend/openapi.json
+          # otherwise prints "differs from api/openapi.json" and sends whoever
+          # is on call hunting for drift in a file that is not there. Still
+          # red either way — but red pointing at the right thing.
           for APP in frontend backoffice; do
-            if json_canonical_equal api/openapi.json "$APP/openapi.json"; then
+            if [ ! -f "$APP/openapi.json" ]; then
+              echo "  ERROR: $APP/openapi.json does not exist."
+              echo "    This is a file that could not be READ, not a snapshot that drifted."
+              FAIL=1
+            elif json_canonical_equal api/openapi.json "$APP/openapi.json"; then
               echo "  ok — $APP/openapi.json is semantically identical to api/openapi.json"
             else
               echo "  $APP/openapi.json differs from api/openapi.json"
@@ -382,13 +410,90 @@ jobs:
             done < "$LIST"
           done
 
+          # ------------------------------------------------------------------
+          # PER-PAIR completeness (bars-coverage-visibility) — one level
+          # finer than the role check just above. A role's BARS file can
+          # exist and still be PARTIAL: FLL, MLL and BUL each anchor 8 of
+          # their 18 assigned competencies, and the check above is blind to
+          # that — the file is there, so it passes.
+          #
+          # Asks its question ONLY of roles whose bars file EXISTS. SRX has
+          # none at all and stays the role-level check's business above, via
+          # scripts/framework-known-gaps.txt — declaring SRX's 18 pairs here
+          # too would put it in both control files and turn the day SRX.json
+          # lands into a 19-line deletion instead of a clean red.
+          #
+          # scripts/framework-competency-gaps.txt is a SECOND file, not an
+          # extension of the role-level list: known_gap_roles() reads the
+          # FIRST whitespace field of a line, so a "FLL:PRS" entry there would
+          # parse as a role code named "FLL:PRS" and corrupt that gate.
+          #
+          # Same two directions, same vocabulary discipline (competency_no_bars
+          # — FrameworkCatalogSeeder's own name for this gap).
+          # ------------------------------------------------------------------
+          for TREE in "$SRC" "$VENDORED"; do
+            if catalog_unexpected_missing_bars_pairs "$TREE" > "$LIST"; then
+              while IFS= read -r PAIR; do
+                [ -n "$PAIR" ] || continue
+                echo "ERROR: $TREE declares role×competency pair '$PAIR' (roles.json), but its BARS file has no anchors for it,"
+                echo "  and '$PAIR' is not listed in scripts/framework-competency-gaps.txt."
+                echo "  A competency with no anchors for this role has no behavioural basis to be scored on."
+                echo "  Author the anchors, or add '$PAIR' to the per-pair known-gaps list with the reason written beside it."
+                FAIL=1
+              done < "$LIST"
+            else
+              echo "ERROR: the per-pair completeness check could not read $TREE/roles.json or one of its bars files."
+              echo "  This is a guard that FAILED TO RUN, not a catalog that passed. See the"
+              echo "  ci-guards message above for the cause (malformed JSON, wrong shape, or no bun)."
+              FAIL=1
+            fi
+
+            # The exemption must not outlive the gap, in any of its THREE
+            # directions: the anchors were authored, the pair no longer
+            # exists at all, or (the SRX shape) the role has no bars file at
+            # all and the exemption belongs on the role-level list instead.
+            # Guarded, like its sibling above. ci-guards.sh documents this
+            # return value as meaningful — "the guard failed to run", never
+            # "nothing to report" — and this caller ignored it. Under Actions'
+            # `bash -e` an unparseable roles.json killed the step right here
+            # with ZERO output: hits already written to $LIST were never
+            # printed and the fix instructions never ran. Red with no reason is
+            # the shape this file exists to prevent.
+            if ! catalog_stale_competency_gap_exemptions "$TREE" > "$LIST"; then
+              echo "ERROR: the stale-exemption check could not read $TREE/roles.json."
+              echo "  This is a guard that FAILED TO RUN, not a catalog that passed."
+              FAIL=1
+            fi
+            while IFS= read -r PAIR; do
+              [ -n "$PAIR" ] || continue
+              REASON=$(stale_competency_gap_exemption_reason "$TREE" "$PAIR")
+              case "$REASON" in
+                role-level)
+                  echo "ERROR: '$PAIR' is listed in scripts/framework-competency-gaps.txt, but its role has no BARS file at all in $TREE."
+                  echo "  A role with no bars file is the ROLE-level gate's business (scripts/framework-known-gaps.txt), not this list's."
+                  echo "  Move '$PAIR' — and every other pair for the same role — off scripts/framework-competency-gaps.txt; the role"
+                  echo "  belongs on scripts/framework-known-gaps.txt instead (or already is)."
+                  ;;
+                anchored)
+                  echo "ERROR: '$PAIR' is listed in scripts/framework-competency-gaps.txt, but its BARS anchors now exist in $TREE."
+                  echo "  Delete the '$PAIR' entry from scripts/framework-competency-gaps.txt."
+                  ;;
+                *)
+                  echo "ERROR: '$PAIR' is listed in scripts/framework-competency-gaps.txt, but roles.json in $TREE no longer assigns that competency to that role."
+                  echo "  Delete the '$PAIR' entry from scripts/framework-competency-gaps.txt."
+                  ;;
+              esac
+              FAIL=1
+            done < "$LIST"
+          done
+
           rm -f "$LIST"
           [ "$FAIL" -eq 0 ] || {
             echo "To fix drift: cp -R docs/app_description/02-domain/framework/* api/database/framework/"
             echo "To fix a missing BARS file: author it under the AUTHORED source first, then vendor it."
             exit 1
           }
-          echo "The framework catalog matches its authored source; every declared role has BARS or a committed known gap."
+          echo "The framework catalog matches its authored source; every declared role AND every declared role×competency pair has BARS or a committed, non-stale known gap."
 
       # -----------------------------------------------------------------------
       # (e) Submodule pointers: is every pinned commit actually reachable?
@@ -447,6 +552,18 @@ jobs:
           FETCH_ERR=$(mktemp)
           CONTAINS=$(mktemp)
           git submodule status | sed 's/^[[:space:]]*//' > "$SUBMODULES"
+
+          # An empty list would walk the loop zero times and print "All
+          # submodule pointers are reachable" having verified nothing — a green
+          # gate over no evidence, which is the shape this whole file exists to
+          # refuse. Not reproducible by deleting .gitmodules (git still reads
+          # the index gitlinks), so this is the fail-closed doctrine applied
+          # defensively rather than a demonstrated bug.
+          if [ ! -s "$SUBMODULES" ]; then
+            echo "ERROR: git submodule status returned nothing."
+            echo "  There is no evidence to check here, so this is a guard that FAILED TO RUN."
+            exit 1
+          fi
 
           while read -r SHA P _; do
             SHA=${SHA#[-+U]}
@@ -881,6 +998,212 @@ jobs:
             fi
           done
           echo "  ok — the committed known-gaps list has no entry that has outlived its gap"
+
+          # ------------------------------------------------------------------
+          # The per-pair competency coverage gate (bars-coverage-visibility).
+          #
+          # One level finer than the role-level fixtures above: a role's BARS
+          # file can exist and still be PARTIAL (FLL/MLL/BUL anchor 8 of 18
+          # assigned competencies each), which the role-level check cannot
+          # see — the file is there, so it passes.
+          #
+          # Every row below is required — "a guard nobody has watched fail is
+          # not a guard".
+          # ------------------------------------------------------------------
+          mkdir -p "$FIXTURE/pair-incomplete/bars" "$FIXTURE/pair-closed-gap/bars" \
+                   "$FIXTURE/pair-empty-anchor/bars" "$FIXTURE/pair-orphan/bars" \
+                   "$FIXTURE/pair-no-file/bars" "$FIXTURE/pair-malformed-bars/bars" \
+                   "$FIXTURE/pair-malformed-comp/bars"
+
+          REAL_COMPETENCY_GAPS_FILE="$CI_COMPETENCY_GAPS_FILE"
+
+          # pair-incomplete: FLL declares [STG, PRS]; bars has STG only; the
+          # fixture list exempts FLL:PRS. This is the state the real tree is
+          # actually in for its partial-file roles, and the gate has to be
+          # ABLE to go green in it or it will be deleted, not obeyed.
+          printf '{"FLL":{"name":"Front Line Leader","competencies":["STG","PRS"]}}' \
+            > "$FIXTURE/pair-incomplete/roles.json"
+          printf '{"STG":["a","b","c"]}' > "$FIXTURE/pair-incomplete/bars/FLL.json"
+          printf 'FLL:PRS\n' > "$FIXTURE/pair-gaps.txt"
+          CI_COMPETENCY_GAPS_FILE="$FIXTURE/pair-gaps.txt"
+          export CI_COMPETENCY_GAPS_FILE
+
+          UNEXEMPTED=$(catalog_unexpected_missing_bars_pairs "$FIXTURE/pair-incomplete")
+          if [ -n "$UNEXEMPTED" ]; then
+            echo "SELF-TEST FAILED: the pair gate rejected a pair covered by the per-pair known-gaps list: $UNEXEMPTED"
+            FAILED=1
+          else
+            echo "  ok — pair gate accepts a partial-file pair covered by the known-gaps list"
+          fi
+
+          # ...same tree, the list emptied: FLL:PRS is now an UNDECLARED gap.
+          printf '# empty\n' > "$FIXTURE/pair-gaps.txt"
+          expect_caught "pair-incomplete (list emptied)" \
+            "$(catalog_unexpected_missing_bars_pairs "$FIXTURE/pair-incomplete")"
+
+          # pair-closed-gap: the anchors have SINCE been authored, but the
+          # exemption was never deleted.
+          printf '{"FLL":{"name":"Front Line Leader","competencies":["STG","PRS"]}}' \
+            > "$FIXTURE/pair-closed-gap/roles.json"
+          printf '{"STG":["a","b","c"],"PRS":["d","e","f"]}' \
+            > "$FIXTURE/pair-closed-gap/bars/FLL.json"
+          printf 'FLL:PRS\n' > "$FIXTURE/pair-gaps.txt"
+          expect_caught "pair-closed-gap" \
+            "$(catalog_stale_competency_gap_exemptions "$FIXTURE/pair-closed-gap")"
+
+          # pair-empty-anchor: "PRS": [] is a stub, not coverage — proves the
+          # empty-array rule. No exemption listed, so it must be caught as a
+          # plain undeclared gap, not silently accepted as covered.
+          printf '{"FLL":{"name":"Front Line Leader","competencies":["STG","PRS"]}}' \
+            > "$FIXTURE/pair-empty-anchor/roles.json"
+          printf '{"STG":["a","b","c"],"PRS":[]}' > "$FIXTURE/pair-empty-anchor/bars/FLL.json"
+          printf '# empty\n' > "$FIXTURE/pair-gaps.txt"
+          expect_caught "pair-empty-anchor" \
+            "$(catalog_unexpected_missing_bars_pairs "$FIXTURE/pair-empty-anchor")"
+
+          # pair-orphan: roles.json no longer assigns PRS to FLL at all, but
+          # the exemption was never deleted — proves the stale check's SECOND
+          # direction (the pair itself is gone, not just anchored).
+          printf '{"FLL":{"name":"Front Line Leader","competencies":["STG"]}}' \
+            > "$FIXTURE/pair-orphan/roles.json"
+          printf '{"STG":["a","b","c"]}' > "$FIXTURE/pair-orphan/bars/FLL.json"
+          printf 'FLL:PRS\n' > "$FIXTURE/pair-gaps.txt"
+          expect_caught "pair-orphan" \
+            "$(catalog_stale_competency_gap_exemptions "$FIXTURE/pair-orphan")"
+
+          # pair-role-no-file-exemption: the THIRD stale shape, caught by
+          # NEITHER of the first two directions before this fix — a pair
+          # naming a role that IS declared in roles.json (with the
+          # competency assigned) but has NO bars/<ROLE>.json at all (SRX's
+          # actual shape today). Proved BY CONSTRUCTION, all three cases in
+          # one fixture: the mute case now caught, and the two already-caught
+          # shapes stay caught.
+          #   SRX:PRS -> role declared, competency assigned, no bars file at
+          #              all -> the exact mute case. Must now be CAUGHT.
+          #   ZZZ:PRS -> role does not exist in roles.json at all -> already
+          #              caught (Direction 2, pair not declared).
+          #   FLL     -> malformed line (no ':'), matches no declared pair
+          #              -> already caught (Direction 2).
+          mkdir -p "$FIXTURE/pair-role-no-file-exemption/bars"
+          printf '{"SRX":{"name":"Senior Executive","competencies":["PRS"]}}' \
+            > "$FIXTURE/pair-role-no-file-exemption/roles.json"
+          printf 'SRX:PRS\nZZZ:PRS\nFLL\n' > "$FIXTURE/pair-gaps.txt"
+          SRX_SHAPE_STALE=$(catalog_stale_competency_gap_exemptions "$FIXTURE/pair-role-no-file-exemption")
+          if printf '%s\n' "$SRX_SHAPE_STALE" | grep -qxF 'SRX:PRS' \
+            && printf '%s\n' "$SRX_SHAPE_STALE" | grep -qxF 'ZZZ:PRS' \
+            && printf '%s\n' "$SRX_SHAPE_STALE" | grep -qxF 'FLL'; then
+            echo "  ok — stale-exemption guard catches a role-declared-but-no-bars-file exemption (SRX's shape), and still catches a nonexistent-role and a malformed-line entry in the same file"
+          else
+            echo "SELF-TEST FAILED: the stale-exemption guard did not catch all three shapes (SRX:PRS role-with-no-bars-file, ZZZ:PRS nonexistent-role, FLL malformed-line)."
+            echo "  Got: $SRX_SHAPE_STALE"
+            FAILED=1
+          fi
+          # ...and the pair-level MISSING gate must still stay silent on it —
+          # this is a STALE-exemption defect, not an undeclared-gap one.
+          SRX_SHAPE_UNEXPECTED=$(catalog_unexpected_missing_bars_pairs "$FIXTURE/pair-role-no-file-exemption")
+          if [ -n "$SRX_SHAPE_UNEXPECTED" ]; then
+            echo "SELF-TEST FAILED: the pair-level missing-bars gate reported a role with no bars file at all: $SRX_SHAPE_UNEXPECTED"
+            FAILED=1
+          else
+            echo "  ok — the pair-level missing-bars gate stays silent on a role with no bars file (role-level gate's business, per pair-no-file below)"
+          fi
+          expect_caught "stale_competency_gap_exemption_reason names the role-level shape" \
+            "$(stale_competency_gap_exemption_reason "$FIXTURE/pair-role-no-file-exemption" 'SRX:PRS' 2>/dev/null | grep -x 'role-level')"
+
+          # pair-no-file: a role with NO bars file at all. The pair gate must
+          # emit NOTHING for it — that absence is the role-level gate's
+          # question, and reporting it twice in two vocabularies is its own
+          # defect, not extra safety.
+          printf '{"SRX":{"name":"Senior Executive","competencies":["STG"]}}' \
+            > "$FIXTURE/pair-no-file/roles.json"
+          printf '# empty\n' > "$FIXTURE/pair-gaps.txt"
+          NOFILE=$(catalog_missing_bars_pairs "$FIXTURE/pair-no-file")
+          if [ -n "$NOFILE" ]; then
+            echo "SELF-TEST FAILED: the pair gate reported pairs for a role with no bars file at all: $NOFILE"
+            echo "  That absence is the role-level gate's question, not this one's."
+            FAILED=1
+          else
+            echo "  ok — pair gate stays silent on a role with no bars file (role-level gate's business)"
+          fi
+
+          # pair-malformed — bars/<ROLE>.json itself is an ARRAY, not an
+          # object keyed by competency code. Must be non-zero, and the
+          # failure must reach catalog_unexpected_missing_bars_pairs, not be
+          # absorbed one layer up — mirrors the role-level `catalog_missing_bars`
+          # / `catalog_unexpected_missing_bars` fail-closed rows below in this
+          # same step (named, not line-numbered: numbers drift, names do not).
+          printf '{"FLL":{"name":"Front Line Leader","competencies":["STG"]}}' \
+            > "$FIXTURE/pair-malformed-bars/roles.json"
+          printf '["not","an","object"]' > "$FIXTURE/pair-malformed-bars/bars/FLL.json"
+          if catalog_missing_bars_pairs "$FIXTURE/pair-malformed-bars" >/dev/null 2>&1; then
+            echo "SELF-TEST FAILED: the pair gate reported SUCCESS on a bars file that is an ARRAY."
+            FAILED=1
+          else
+            echo "  ok — pair gate fails closed when a bars file is not an object"
+          fi
+          if catalog_unexpected_missing_bars_pairs "$FIXTURE/pair-malformed-bars" >/dev/null 2>&1; then
+            echo "SELF-TEST FAILED: catalog_unexpected_missing_bars_pairs swallowed a malformed bars file."
+            FAILED=1
+          else
+            echo "  ok — the malformed-bars-file failure propagates to the function step (d) calls"
+          fi
+
+          # pair-malformed — roles.json's "competencies" is a STRING, not an
+          # array. Must be non-zero.
+          printf '{"FLL":{"name":"Front Line Leader","competencies":"STG"}}' \
+            > "$FIXTURE/pair-malformed-comp/roles.json"
+          if catalog_missing_bars_pairs "$FIXTURE/pair-malformed-comp" >/dev/null 2>&1; then
+            echo "SELF-TEST FAILED: the pair gate reported SUCCESS when a role's competencies field is not an ARRAY."
+            FAILED=1
+          else
+            echo "  ok — pair gate fails closed when roles.json's competencies field is not an array"
+          fi
+
+          CI_COMPETENCY_GAPS_FILE="$REAL_COMPETENCY_GAPS_FILE"
+          export CI_COMPETENCY_GAPS_FILE
+
+          # The COMMITTED per-pair list must parse and must not have rotted
+          # against the real tree, in both directions, on both trees — same
+          # discipline as the role-level list just above.
+          for TREE in docs/app_description/02-domain/framework api/database/framework; do
+            STALE=$(catalog_stale_competency_gap_exemptions "$TREE")
+            if [ -n "$STALE" ]; then
+              echo "SELF-TEST FAILED: scripts/framework-competency-gaps.txt exempts $STALE, but $TREE now covers it (or no longer declares it)."
+              FAILED=1
+            fi
+            UNDECLARED=$(catalog_unexpected_missing_bars_pairs "$TREE")
+            if [ -n "$UNDECLARED" ]; then
+              echo "SELF-TEST FAILED: $TREE has an undeclared role×competency gap not on scripts/framework-competency-gaps.txt: $UNDECLARED"
+              FAILED=1
+            fi
+          done
+          echo "  ok — the committed per-pair known-gaps list matches the real tree in both directions"
+
+          # ------------------------------------------------------------------
+          # "Entries are grouped by role" (ci-pipeline spec's own
+          # reviewability requirement) — previously true only by INSPECTION,
+          # with no automated check anywhere. A fixture with roles
+          # deliberately INTERLEAVED (FLL, then MLL, then back to FLL) proves
+          # the guard actually detects the violation, then the COMMITTED file
+          # is asserted clean the same way every other control-file property
+          # above is.
+          # ------------------------------------------------------------------
+          printf 'FLL:PRS\nMLL:PRS\nFLL:JDG\n' > "$FIXTURE/pair-gaps.txt"
+          CI_COMPETENCY_GAPS_FILE="$FIXTURE/pair-gaps.txt"
+          export CI_COMPETENCY_GAPS_FILE
+          expect_caught "per-pair known-gaps role grouping" \
+            "$(competency_gaps_role_order_violations)"
+
+          CI_COMPETENCY_GAPS_FILE="$REAL_COMPETENCY_GAPS_FILE"
+          export CI_COMPETENCY_GAPS_FILE
+          GROUPING_VIOLATIONS=$(competency_gaps_role_order_violations)
+          if [ -n "$GROUPING_VIOLATIONS" ]; then
+            echo "SELF-TEST FAILED: scripts/framework-competency-gaps.txt interleaves role(s): $GROUPING_VIOLATIONS"
+            echo "  Every role's entries must be one contiguous block (ci-pipeline spec: 'entries are grouped by role')."
+            FAILED=1
+          else
+            echo "  ok — the committed per-pair known-gaps list groups every role's entries contiguously"
+          fi
 
           # ------------------------------------------------------------------
           # Guard (e): submodule pointer reachability.
