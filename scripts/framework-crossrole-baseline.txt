@@ -1,0 +1,50 @@
+# BEAI — framework catalog cross-role anchor-identity baseline (CI control file)
+#
+# One "ROLE_A:ROLE_B:COMP:FIELD" entry per line. Everything from a '#' to end
+# of line is a comment. An entry names two roles that share a byte-identical
+# `indicator` or anchor (`scale.5`/`scale.3`/`scale.1`, printed as
+# `anchor_5`/`anchor_3`/`anchor_1`) string for the SAME competency —
+# `catalog_crossrole_duplicates` (scripts/ci-guards.sh) is the mechanism, and
+# .github/workflows/wrapper-ci.yml step (d) is the caller.
+#
+# THIS IS NOT A MUTE SWITCH — same doctrine, same both-direction enforcement,
+# as scripts/framework-known-gaps.txt and scripts/framework-competency-gaps.txt:
+#
+#   * a cross-role duplicate found and NOT listed here        -> CI fails
+#   * an entry listed here whose duplicate is no longer real  -> CI fails
+#
+# bars-catalogue-completion authors 132 NEW indicators specifically to close
+# the "FLL's PRS is MLL's PRS with different words" failure mode (per-pair
+# scope-shift tables, authored before prose, rejected on an identical row).
+# So this baseline is CLOSED: it exists ONLY to record the two duplicates
+# that predate the mechanical check, in the 39 pairs already authored before
+# this change and explicitly left un-retouched (retro-review is a deferred,
+# separate decision — see the change proposal, Question 2). NEW pairs may
+# add ZERO entries here. A new duplicate is a real defect in the new content
+# and must be fixed by rewording, not exempted by editing this file.
+#
+# GENERATED, NOT TYPED. Produced by, and reviewed against:
+#   . ./scripts/ci-guards.sh
+#   catalog_crossrole_duplicates docs/app_description/02-domain/framework
+# Committed verbatim — do not hand-edit the entry list, only the comments.
+# Run against the catalogue as it stood immediately BEFORE bars-catalogue-
+# completion's Phase 3 (JDG/TMG) began authoring, so it captures exactly what
+# existed, nothing this change itself introduced.
+
+# ---------------------------------------------------------------------------
+# INF — Influence. MLL and BUL's second INF indicator ("Identify the motives
+# and objectives of the interlocutors and use them to argue own positions")
+# is the same sentence in both files — MLL.json and BUL.json, each at the
+# `"indicator"` line inside their INF block. The three anchor texts beneath
+# it differ per role; only the indicator itself is identical.
+# ---------------------------------------------------------------------------
+BUL:MLL:INF:indicator
+
+# ---------------------------------------------------------------------------
+# RES — Resilience. FLL and MLL's second RES indicator ("Constructively
+# handle mistakes, accepting responsibility and learning from experience")
+# is the same sentence in both files — FLL.json and MLL.json, each at the
+# `"indicator"` line inside their RES block. Same shape as the INF case
+# above: the anchors differ, the indicator does not.
+# ---------------------------------------------------------------------------
+FLL:MLL:RES:indicator

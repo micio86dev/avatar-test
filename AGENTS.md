@@ -87,7 +87,7 @@ covered by dedicated tests. A tenant must never see another tenant's data.
 ## Autonomous implementation guardrails
 
 These rules govern any autonomous (loop-mode) implementation session. The pinned
-version catalog is the single source of truth: `openspec/changes/project-skeleton-ci/design.md`
+version catalog is the single source of truth: `openspec/changes/archive/2026-07-16-project-skeleton-ci/design.md`
 (**D25**). This stack table and D25 MUST never diverge.
 
 **Dependency Resolution Policy (hard stop).** All runtime, framework, and library
@@ -209,7 +209,7 @@ table and dependencies.
 - `docs/app_description/03-ux-reference/esempio-report-valutazione.json` — evaluation output shape (C9).
 - `docs/dev-setup.md` — required local toolchain + Dependency Resolution Policy (D37/D38). See this before any `composer install` / `bun install` in a new environment.
 - `docs/git-flow.md` — Git Flow ×4 + SemVer M.m.p release flow for all four repos.
-- `openspec/changes/project-skeleton-ci/design.md` — D25 Version Catalog (single source of truth for all pinned versions), D37 Dependency Resolution Policy.
+- `openspec/changes/archive/2026-07-16-project-skeleton-ci/design.md` — D25 Version Catalog (single source of truth for all pinned versions), D37 Dependency Resolution Policy.
 
 ---
 

@@ -24,12 +24,23 @@
 # pair's anchors, not an optional tidy-up afterwards.
 #
 # ONLY covers roles whose bars/{ROLE}.json EXISTS. A role with no file at
-# all — SRX today — stays scripts/framework-known-gaps.txt's business.
-# Declaring SRX's 18 pairs here too would put SRX in both control files, and
-# the day bars/SRX.json lands would be a 19-line deletion here instead of a
-# clean red on the role-level gate. Composition, verified against roles.json
-# and the four partial bars/*.json files: ICO 0, FLL 10, MLL 10, BUL 6,
-# SRX 0 (role-level exemption, not here) = 26.
+# all was scripts/framework-known-gaps.txt's business instead — SRX was that
+# role, until bars-catalogue-completion Phase 6 authored bars/SRX.json.
+# Declaring SRX's 18 pairs here too would have put SRX in both control
+# files, and the day bars/SRX.json landed would have been a 19-line deletion
+# here instead of a clean role-level resolution on the other file.
+# Composition, verified against roles.json and all five bars/*.json files:
+# ICO 0, FLL 0, MLL 0, BUL 0, SRX 0 = 0. FLL:JDG, FLL:TMG, MLL:JDG, MLL:TMG,
+# BUL:JDG and BUL:TMG were removed here in the commit that added those six
+# pairs' anchors (bars-catalogue-completion Phase 3); the remaining
+# FLL:{PRS,DRV,SLF,COM,COL,NET,ITG,INC},
+# MLL:{PRS,DRV,SLF,COM,COL,NET,ITG,INC} and BUL:{PRS,DRV,COL,NET} — the last
+# 20 pair-level gaps this file ever held — were removed in the commit that
+# added their anchors (bars-catalogue-completion Phase 4). FLL, MLL and BUL
+# reached full pair-level coverage in Phase 4; SRX reached full role-level
+# coverage in Phase 6 (the other control file, now also empty). All 83
+# declared role×competency pairs are anchored; neither control file has any
+# gap left to list.
 #
 # Reuses the runtime's own vocabulary — FrameworkCatalogSeeder already
 # records this exact gap as FrameworkGap kind=competency_no_bars,
@@ -44,43 +55,8 @@
 # (the order an authoring specialist works through a role) — no counts in
 # the per-role headers, because the count is the number of lines under it,
 # which cannot disagree with itself.
-
-# ---------------------------------------------------------------------------
-# FLL — Front Line Leader. 8 of 18 assigned competencies anchored today
-# (STG INN CSF OPX INS INF RES LRN); these 10 are not yet.
-# ---------------------------------------------------------------------------
-FLL:PRS
-FLL:JDG
-FLL:DRV
-FLL:SLF
-FLL:TMG
-FLL:COM
-FLL:COL
-FLL:NET
-FLL:ITG
-FLL:INC
-
-# ---------------------------------------------------------------------------
-# MLL — Mid-Level Leader. Same 8-of-18 anchored set as FLL; these 10 are not.
-# ---------------------------------------------------------------------------
-MLL:PRS
-MLL:JDG
-MLL:DRV
-MLL:SLF
-MLL:TMG
-MLL:COM
-MLL:COL
-MLL:NET
-MLL:ITG
-MLL:INC
-
-# ---------------------------------------------------------------------------
-# BUL — Business Unit Leader. 8 of 14 assigned competencies anchored today
-# (same set as FLL/MLL, minus the two BUL does not assign); these 6 are not.
-# ---------------------------------------------------------------------------
-BUL:PRS
-BUL:JDG
-BUL:DRV
-BUL:TMG
-BUL:COL
-BUL:NET
+#
+# Empty today — no lines below this comment. An empty pair list is not a
+# stale file: the both-direction enforcement above still runs on every build
+# and still fails if a real gap ever reappears without a line here to excuse
+# it.

@@ -368,7 +368,7 @@ and a test asserts that pin still holds.
 
 ## References
 
-- Version Catalog: `openspec/changes/project-skeleton-ci/design.md` — section D25
+- Version Catalog: `openspec/changes/archive/2026-07-16-project-skeleton-ci/design.md` — section D25
 - Dependency Resolution Policy: design.md D37
 - Toolchain contract: design.md D38
 - Git Flow: `docs/git-flow.md`

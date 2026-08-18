@@ -339,6 +339,30 @@ compose_service_diff() {
 }
 
 # ---------------------------------------------------------------------------
+# Minimum-evidence guard for the compose image-pin check.
+#
+# `docker compose config | grep -E '^\s*image:' | while read -r _ REF; do ...`
+# matching ZERO lines walks that loop zero times, prints nothing to
+# /tmp/unpinned.txt, and the step announced "All compose image tags are
+# pinned" having examined NOTHING. Same shape guard (e) already refuses for
+# submodule pointers ("An empty list would walk the loop zero times ... a
+# green gate over no evidence") — a rule that binds one gate and not the next
+# is a preference, not a rule. Triggers: a compose format change, a service
+# becoming build-only, or the `image:` key moving.
+#
+# Extracted (rather than left inline in the workflow step) for the same
+# reason `tag_pinned` and `compose_service_diff` are: so the self-test in (f)
+# exercises the SAME predicate the real gate calls, not a private copy of it.
+#
+# $1 is the count of `image:` lines matched (an integer, e.g. from
+# `grep -cE '^\s*image:'`). Exit 0 when at least one was found — there is
+# evidence to check — 1 otherwise.
+# ---------------------------------------------------------------------------
+compose_image_refs_present() {
+  [ "$1" -ge 1 ] 2>/dev/null
+}
+
+# ---------------------------------------------------------------------------
 # Submodule pointer reachability — can everybody else FETCH this commit?
 #
 # Lives here rather than inline in step (e) because it was inline in step (e),
@@ -419,8 +443,27 @@ submodule_clear_verify_refs() {
 # installing a whole language runtime to do a JSON.parse and an equality check
 # is a D37 dependency question rather than a style preference.
 #
-# Exit 0 when both files parse to the same document, 1 otherwise — including
-# when either file is missing or is not valid JSON.
+# Exit 0 when both files parse to the same document, 1 when both parse but
+# differ, 2 when either file is missing, unreadable, or is not valid JSON.
+#
+# 1 and 2 are DELIBERATELY different exit codes, not the same "nonzero" —
+# this file's own doctrine, applied to itself. "Could not be read" and
+# "differs" are separated everywhere else a guard in this repo touches a file
+# it did not author (step (a)'s missing-Dockerfile check, step (e)'s
+# fetch-failure-versus-unreachable-pointer split, and the comment above step
+# (b)'s call site here) — before this fix `json_canonical_equal` did the
+# separation in every OTHER caller's intent but not in its own mechanism: an
+# uncaught JSON.parse throw and a real content mismatch both exited 1, so a
+# genuinely malformed file was reported with the exact same wording as real
+# drift ("differs from api/openapi.json"), sending the next operator hunting
+# for a content change in a file that was never parseable to begin with.
+#
+# The stderr write on the exit-2 path is INTENTIONAL and NOT discarded —
+# `2>/dev/null` used to swallow bun's own parse-error trace here, which is
+# exactly what buried this distinction. Callers that want the reason
+# (both real gates below do) capture stderr themselves; callers that only
+# care about the boolean (the self-test's "identical"/"differs" rows) are
+# unaffected, because this path only ever writes when it is about to exit 2.
 # ---------------------------------------------------------------------------
 CI_JSON_CANONICAL_SCRIPT='
   const canonical = (v) => {
@@ -428,15 +471,50 @@ CI_JSON_CANONICAL_SCRIPT='
     if (v === null || typeof v !== "object") return v;
     return Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonical(v[k])]));
   };
-  const s = async (p) => JSON.stringify(canonical(JSON.parse(await Bun.file(p).text())));
-  process.exit((await s(process.env.CI_JSON_A)) === (await s(process.env.CI_JSON_B)) ? 0 : 1);
+  const load = async (p) => {
+    try {
+      return JSON.stringify(canonical(JSON.parse(await Bun.file(p).text())));
+    } catch (e) {
+      process.stderr.write("CI_JSON_UNREADABLE: " + p + " is missing or is not valid JSON (" + e.message + ")\n");
+      process.exit(2);
+    }
+  };
+  const a = await load(process.env.CI_JSON_A);
+  const b = await load(process.env.CI_JSON_B);
+  process.exit(a === b ? 0 : 1);
 '
 
 json_canonical_equal() {
   CI_JSON_A="$1"
   CI_JSON_B="$2"
   export CI_JSON_A CI_JSON_B
-  bun --eval "$CI_JSON_CANONICAL_SCRIPT" 2>/dev/null
+
+  # The exit status is a CONTRACT (0 identical / 1 differs / 2 unreadable),
+  # so it cannot be bun's raw status. The embedded script only ever exits
+  # 0, 1 or 2 — but bun itself exits 127 when it is not on PATH, and can
+  # exit on a signal or fail to start the script at all. Passing that
+  # straight through put 127 into the callers' `else` branch, which reads
+  # "differs from api/openapi.json" — the exact reporting bug the exit-2
+  # split was added to end, reintroduced through a different door.
+  # Anything that is not a clean 0 or 1 is "could not run".
+  # The status MUST be captured in the `else` branch. After a bare
+  # `if cmd; then ...; fi` the `if` itself resets `$?` to 0 when no branch
+  # runs, so reading it on the next line reports success for a command that
+  # just failed — the same trap the call sites in wrapper-ci.yml already
+  # document, arrived at from the other direction.
+  if bun --eval "$CI_JSON_CANONICAL_SCRIPT"; then
+    return 0
+  else
+    CI_JSON_STATUS=$?
+  fi
+  if [ "$CI_JSON_STATUS" -eq 1 ]; then
+    return 1
+  fi
+  if [ "$CI_JSON_STATUS" -ne 2 ]; then
+    printf 'CI_JSON_UNREADABLE: comparison could not run (bun exited %s)\n' \
+      "$CI_JSON_STATUS" >&2
+  fi
+  return 2
 }
 
 # ---------------------------------------------------------------------------
@@ -538,11 +616,13 @@ catalog_missing_bars() {
 # Known gaps — the committed list of roles allowed to ship without BARS.
 #
 # The completeness assertion needs a middle setting, and the two extremes are
-# both wrong. Fail unconditionally and CI is permanently red over SRX.json,
-# which is 54 indicators of expert assessment content nobody can produce on
-# demand; a gate that cannot go green gets deleted within a week and then
-# protects nothing. Warn only, and it is silently green over an incomplete
-# binding catalog, which is how this survived in the first place.
+# both wrong. Fail unconditionally and CI would stay permanently red over
+# content nobody can produce on demand — SRX.json was exactly that, 54
+# indicators of expert assessment content, until bars-catalogue-completion
+# Phase 6 authored it; a gate that cannot go green gets deleted within a week
+# and then protects nothing. Warn only, and it is silently green over an
+# incomplete binding catalog, which is how the SRX gap survived undetected
+# in the first place.
 #
 # So: fail for anything NOT on an explicit, committed list, and — the half that
 # keeps the list honest — fail for anything ON the list that no longer needs to
@@ -605,9 +685,12 @@ catalog_stale_gap_exemptions() {
 #
 # One level finer than everything above. `catalog_missing_bars` and its two
 # callers ask "does bars/<ROLE>.json EXIST" — a question with only two
-# answers, yes or no. A file can exist and still be PARTIAL: FLL, MLL and BUL
-# each anchor 8 of their 18 assigned competencies, and the role-level gate is
-# structurally blind to that — the file is there, so it passes.
+# answers, yes or no. A file can exist and still be PARTIAL, and the
+# role-level gate is structurally blind to that — the file is there, so it
+# passes. Until bars-catalogue-completion this was the live state, not a
+# hypothetical: FLL and MLL anchored 8 of their 18 assigned competencies and
+# BUL 8 of its 14. All 83 pairs are anchored now; this gate is what would
+# catch a regression back.
 #
 # Deliberately asks its question ONLY of roles whose bars file EXISTS. A role
 # with no file at all is the role-level gate's business
@@ -843,23 +926,33 @@ catalog_unexpected_missing_bars_pairs() {
 # A THIRD shape, caught by neither direction until this fix — verified
 # independently and stated precisely so it cannot regress unnoticed: a pair
 # naming a role that IS declared in roles.json but has NO bars/<ROLE>.json
-# file at ALL (SRX's shape, today). `catalog_missing_bars_pairs` skips such a
-# role BY DESIGN (`[ -f ... ] || continue` — the pair-level gate is not this
-# role's business, the role-level gate is); Direction 1 below requires the
-# file to exist and so never runs; Direction 2 finds the pair legitimately
-# declared in roles.json and so never fires either. Net effect before this
-# fix: a line shaped like "SRX:PRS" is accepted onto the per-pair list,
-# produces NO error in either existing direction, and stays mute FOREVER —
-# until the day bars/SRX.json is authored, at which point it fires in a
-# commit that has nothing to do with it. The file's own header already
-# states the POLICY ("SRX's pairs stay under the role-level list, not here");
-# Direction 3 below is what enforces it mechanically instead of by hoping
-# nobody adds one.
+# file at ALL (this was SRX's shape before bars-catalogue-completion Phase 6
+# authored bars/SRX.json — kept as the reference example below, not a claim
+# about SRX today). `catalog_missing_bars_pairs` skips such a role BY DESIGN
+# (`[ -f ... ] || continue` — the pair-level gate is not this role's
+# business, the role-level gate is); Direction 1 below requires the file to
+# exist and so never runs; Direction 2 finds the pair legitimately declared
+# in roles.json and so never fires either. Net effect before this fix: a
+# line shaped like "SRX:PRS" would be accepted onto the per-pair list,
+# produce NO error in either existing direction, and stay mute FOREVER —
+# until the day the role's bars file was authored, at which point it would
+# fire in a commit that has nothing to do with it. The file's own header
+# already states the POLICY ("SRX's pairs stay under the role-level list,
+# not here"); Direction 3 below is what enforces it mechanically instead of
+# by hoping nobody adds one.
 catalog_stale_competency_gap_exemptions() {
   CI_CSCGE_TREE="$1"
   CI_CSCGE_DECLARED=$(mktemp)
-  role_competency_pairs "$CI_CSCGE_TREE" > "$CI_CSCGE_DECLARED" 2>/dev/null
-  CI_CSCGE_STATUS=$?
+  # if/else, not `cmd` then `STATUS=$?` on the next line: under `set -e` the
+  # shell aborts on the failing command and the status is never read, so the
+  # entire could-not-read path becomes dead code. This function is called from
+  # step (f) outside an `if` condition, where that abort is real. Same rule
+  # json_canonical_equal follows and wrapper-ci.yml documents at its call sites.
+  if role_competency_pairs "$CI_CSCGE_TREE" > "$CI_CSCGE_DECLARED" 2>/dev/null; then
+    CI_CSCGE_STATUS=0
+  else
+    CI_CSCGE_STATUS=$?
+  fi
 
   known_gap_pairs | while IFS= read -r CI_CSCGE_PAIR; do
     [ -n "$CI_CSCGE_PAIR" ] || continue
@@ -920,6 +1013,15 @@ stale_competency_gap_exemption_reason() {
       echo "anchored"
       return 0
     fi
+    # The bars file exists and this competency is NOT anchored in it. That is
+    # a LIVE gap, not a stale exemption — unless roles.json no longer declares
+    # the pair at all, which is the orphaned shape. Printing "orphaned"
+    # unconditionally here broke the contract three lines up ("prints nothing
+    # when the pair is not actually stale") and would have told an operator to
+    # delete an exemption that is doing its job.
+    if role_competency_pairs "$CI_SCGER_TREE" 2>/dev/null | grep -qxF "$CI_SCGER_PAIR"; then
+      return 1
+    fi
     echo "orphaned"
     return 0
   fi
@@ -971,4 +1073,434 @@ competency_gaps_role_order_violations() {
   done < "$CI_CGRO_FILE"
 
   rm -f "$CI_CGRO_FILE"
+}
+
+# ---------------------------------------------------------------------------
+# Shape and completeness of an ANCHORED pair (bars-catalogue-completion).
+#
+# `bars_competency_keys` answers "is this competency COVERED at all" with a
+# single test — `length > 0` — which a one-indicator stub with empty anchor
+# text satisfies. It is the right question for the role/pair coverage gates
+# above, and the wrong one for whether what covers a pair is actually a
+# complete, non-degenerate anchor set. This is the question those gates never
+# asked.
+#
+# Prints ROLE:COMP:REASON, one per line, for every competency key in
+# `<tree>/bars/<ROLE>.json` whose entries do not have EXACTLY:
+#   * 3 indicator objects (an EMPTY array is a stub, not malformed — that is
+#     `bars_competency_keys`'s uncovered case, not this guard's business, so
+#     `[]` is skipped rather than flagged)
+#   * each with a non-empty `indicator` string
+#   * a `scale` object with EXACTLY the keys "5", "3", "1" — no more, no
+#     fewer (a missing level, or an extra stray key, both fail)
+#   * every one of those four strings non-empty and with no leading or
+#     trailing whitespace
+#
+# Empty output means the file's anchored competencies are all shape-complete.
+# Fails closed (non-zero, nothing useful on stdout) when the file is missing,
+# unparseable, or not a JSON object — the same rule every other reader in
+# this file obeys.
+# ---------------------------------------------------------------------------
+# shellcheck disable=SC2016
+CI_MALFORMED_BARS_SCRIPT='
+  const path = process.env.CI_BARS_FILE;
+  const role = process.env.CI_MALFORMED_ROLE;
+  let bars;
+  try {
+    bars = JSON.parse(await Bun.file(path).text());
+  } catch (e) {
+    console.error(`ci-guards: cannot read or parse ${path}: ${e.message}`);
+    process.exit(1);
+  }
+  if (bars === null || typeof bars !== "object" || Array.isArray(bars)) {
+    const got = Array.isArray(bars) ? "an array" : bars === null ? "null" : typeof bars;
+    console.error(`ci-guards: ${path} must be a JSON OBJECT keyed by competency code, got ${got}.`);
+    process.exit(1);
+  }
+  const isBlank = (s) => typeof s !== "string" || s.length === 0;
+  const hasEdgeWhitespace = (s) => typeof s === "string" && s !== s.trim();
+  const out = [];
+  for (const comp of Object.keys(bars)) {
+    const entries = bars[comp];
+    if (!Array.isArray(entries)) {
+      out.push(`${role}:${comp}:not-an-array`);
+      continue;
+    }
+    if (entries.length === 0) {
+      continue;
+    }
+    // 3 is RATIFIED, not assumed: openspec/specs/framework-catalog/spec.md
+    // "Every role\u00d7competency pair declared in roles.json MUST have exactly 3
+    // indicators". That is why this guard has no exemption seam while its
+    // siblings do — an exemption seam here would let a pair ship with two
+    // indicators, which the scoring engine has no defined behaviour for.
+    // Changing the count is an SDD question, not a CI-config one.
+    if (entries.length !== 3) {
+      out.push(`${role}:${comp}:count-${entries.length}`);
+      continue;
+    }
+    let ok = true;
+    for (const entry of entries) {
+      if (entry === null || typeof entry !== "object") { ok = false; break; }
+      if (isBlank(entry.indicator) || hasEdgeWhitespace(entry.indicator)) { ok = false; break; }
+      const scale = entry.scale;
+      if (scale === null || typeof scale !== "object" || Array.isArray(scale)) { ok = false; break; }
+      if (Object.keys(scale).sort().join(",") !== "1,3,5") { ok = false; break; }
+      if (isBlank(scale["5"]) || hasEdgeWhitespace(scale["5"])) { ok = false; break; }
+      if (isBlank(scale["3"]) || hasEdgeWhitespace(scale["3"])) { ok = false; break; }
+      if (isBlank(scale["1"]) || hasEdgeWhitespace(scale["1"])) { ok = false; break; }
+    }
+    if (!ok) {
+      out.push(`${role}:${comp}:malformed-entry`);
+    }
+  }
+  console.log(out.join("\n"));
+'
+
+catalog_malformed_bars_entries() {
+  CI_BARS_FILE="$1/bars/$2.json"
+  CI_MALFORMED_ROLE="$2"
+  export CI_BARS_FILE CI_MALFORMED_ROLE
+  if [ ! -f "$CI_BARS_FILE" ]; then
+    echo "ci-guards: $CI_BARS_FILE does not exist." >&2
+    return 1
+  fi
+  bun --eval "$CI_MALFORMED_BARS_SCRIPT"
+}
+
+# ---------------------------------------------------------------------------
+# Cross-role anchor identity (bars-catalogue-completion).
+#
+# "FLL's PRS is MLL's PRS with different words" is a comparison between roles
+# FOR THE SAME COMPETENCY — invisible to every guard above, which each read
+# one role's file in isolation. This one reads every `bars/*.json` file in a
+# tree together and asks, per competency, whether any `indicator` or anchor
+# (`scale.5`/`scale.3`/`scale.1`) STRING is byte-identical across two or more
+# roles.
+#
+# Prints `ROLE_A:ROLE_B:COMP:FIELD`, one per line, for every such duplicate —
+# `ROLE_A`/`ROLE_B` alphabetically ordered so the same real-world duplicate
+# always prints the same line regardless of directory read order, and `FIELD`
+# is one of `indicator`, `anchor_5`, `anchor_3`, `anchor_1`. Deliberately
+# NOT a `<file>:<line>` reference: line numbers shift every time an earlier
+# competency block grows, which every future content PR does, and a baseline
+# keyed on them would drift out from under itself. The role/competency/field
+# tuple is what stays stable while indicators pile up around it.
+#
+# Compared ACROSS roles only — never within one role's own file — matching
+# the spec's own wording ("identical across roles"). A duplicate only within
+# a single role's array is a different defect this guard does not claim.
+#
+# Fails closed (non-zero, nothing useful on stdout) when the bars/ directory
+# cannot be listed, or any file in it is missing, unparseable, or not a JSON
+# object keyed by competency code.
+# ---------------------------------------------------------------------------
+# shellcheck disable=SC2016
+CI_CROSSROLE_SCRIPT='
+  import { readdirSync } from "node:fs";
+
+  const tree = process.env.CI_TREE;
+  const barsDir = `${tree}/bars`;
+
+  let files;
+  try {
+    files = readdirSync(barsDir).filter((f) => f.endsWith(".json")).sort();
+  } catch (e) {
+    console.error(`ci-guards: cannot read ${barsDir}: ${e.message}`);
+    process.exit(1);
+  }
+
+  const roles = files.map((f) => f.replace(/\.json$/, ""));
+  const perRole = {};
+
+  for (const role of roles) {
+    let bars;
+    try {
+      bars = JSON.parse(await Bun.file(`${barsDir}/${role}.json`).text());
+    } catch (e) {
+      console.error(`ci-guards: cannot read or parse ${barsDir}/${role}.json: ${e.message}`);
+      process.exit(1);
+    }
+    if (bars === null || typeof bars !== "object" || Array.isArray(bars)) {
+      const got = Array.isArray(bars) ? "an array" : bars === null ? "null" : typeof bars;
+      console.error(`ci-guards: ${barsDir}/${role}.json must be a JSON OBJECT keyed by competency code, got ${got}.`);
+      process.exit(1);
+    }
+    perRole[role] = bars;
+  }
+
+  const FIELDS = ["indicator", "anchor_5", "anchor_3", "anchor_1"];
+  // competency -> field -> string -> Set(roles that use it)
+  const index = {};
+
+  for (const role of roles) {
+    const bars = perRole[role];
+    for (const comp of Object.keys(bars)) {
+      const entries = bars[comp];
+      if (!Array.isArray(entries)) continue;
+      for (const entry of entries) {
+        if (entry === null || typeof entry !== "object") continue;
+        const values = {
+          indicator: entry.indicator,
+          anchor_5: entry.scale && entry.scale["5"],
+          anchor_3: entry.scale && entry.scale["3"],
+          anchor_1: entry.scale && entry.scale["1"],
+        };
+        for (const field of FIELDS) {
+          const val = values[field];
+          if (typeof val !== "string" || val.length === 0) continue;
+          index[comp] ??= {};
+          index[comp][field] ??= {};
+          index[comp][field][val] ??= new Set();
+          index[comp][field][val].add(role);
+        }
+      }
+    }
+  }
+
+  const dupPairs = new Set();
+  for (const comp of Object.keys(index)) {
+    for (const field of Object.keys(index[comp])) {
+      for (const val of Object.keys(index[comp][field])) {
+        const roleSet = [...index[comp][field][val]].sort();
+        if (roleSet.length < 2) continue;
+        for (let i = 0; i < roleSet.length; i++) {
+          for (let j = i + 1; j < roleSet.length; j++) {
+            dupPairs.add(`${roleSet[i]}:${roleSet[j]}:${comp}:${field}`);
+          }
+        }
+      }
+    }
+  }
+
+  console.log([...dupPairs].sort().join("\n"));
+'
+
+catalog_crossrole_duplicates() {
+  CI_TREE="$1"
+  export CI_TREE
+  if [ ! -d "$CI_TREE/bars" ]; then
+    echo "ci-guards: $CI_TREE/bars does not exist." >&2
+    return 1
+  fi
+  bun --eval "$CI_CROSSROLE_SCRIPT"
+}
+
+# The committed baseline of cross-role duplicates that predate this guard —
+# scripts/framework-crossrole-baseline.txt, generated (never hand-typed) by
+# running catalog_crossrole_duplicates against the catalogue BEFORE any of
+# the 44 new pairs landed. Retro-review of the 39 pre-existing pairs is out
+# of scope for bars-catalogue-completion, so these two are recorded rather
+# than fixed, with the SAME both-direction doctrine as
+# scripts/framework-known-gaps.txt and scripts/framework-competency-gaps.txt:
+# an entry whose duplicate is gone is as much a build failure as a duplicate
+# that is not on the list. New pairs may add ZERO entries to this file.
+#
+# CI_CROSSROLE_BASELINE_FILE mirrors the override seam of
+# CI_KNOWN_GAPS_FILE/CI_COMPETENCY_GAPS_FILE so the self-test can point these
+# functions at a fixture list without touching the committed one.
+CI_CROSSROLE_BASELINE_FILE="${CI_CROSSROLE_BASELINE_FILE:-scripts/framework-crossrole-baseline.txt}"
+
+# The baseline entries, one per line. Same parsing discipline as
+# known_gap_roles/known_gap_pairs: '#' to end of line is a comment, blank
+# lines dropped, only the first whitespace-delimited field is read.
+known_crossrole_baseline_entries() {
+  [ -f "$CI_CROSSROLE_BASELINE_FILE" ] || return 0
+  sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]].*$//' "$CI_CROSSROLE_BASELINE_FILE" \
+    | grep -v '^$' || true
+}
+
+# Cross-role duplicates found in <tree> that are NOT on the committed
+# baseline. Any output is a build failure: a new pair introduced the same
+# reworded-copy defect the scope-shift table and this guard both exist to
+# catch, and the baseline is closed to new entries by design.
+#
+# Propagates catalog_crossrole_duplicates's failure rather than absorbing it
+# — the same "a guard that cannot read its subject must never pass it" rule
+# every other function in this file obeys.
+catalog_unexpected_crossrole_duplicates() {
+  CI_CUCD_KNOWN=$(known_crossrole_baseline_entries)
+  CI_CUCD_FOUND=$(catalog_crossrole_duplicates "$1") || return 1
+  printf '%s\n' "$CI_CUCD_FOUND" | while IFS= read -r CI_CUCD_ENTRY; do
+    [ -n "$CI_CUCD_ENTRY" ] || continue
+    printf '%s\n' "$CI_CUCD_KNOWN" | grep -qxF "$CI_CUCD_ENTRY" && continue
+    printf '%s\n' "$CI_CUCD_ENTRY"
+  done
+}
+
+# Baseline entries that no longer correspond to a real duplicate in <tree> —
+# the half that keeps the baseline honest, the same shape as
+# catalog_stale_gap_exemptions/catalog_stale_competency_gap_exemptions. Any
+# output is a build failure: a baseline entry outliving the duplicate it
+# describes is the identical note-outliving-its-fact defect those two files
+# exist to prevent, applied to this third control file.
+catalog_stale_crossrole_baseline_entries() {
+  CI_SCBE_FOUND=$(catalog_crossrole_duplicates "$1") || return 1
+  known_crossrole_baseline_entries | while IFS= read -r CI_SCBE_ENTRY; do
+    [ -n "$CI_SCBE_ENTRY" ] || continue
+    printf '%s\n' "$CI_SCBE_FOUND" | grep -qxF "$CI_SCBE_ENTRY" && continue
+    printf '%s\n' "$CI_SCBE_ENTRY"
+  done
+}
+
+# ---------------------------------------------------------------------------
+# Anchor word-count drift (bars-catalogue-completion, Phase 5).
+#
+# Phase 4's own apply-progress records the defect this guard exists to close:
+# a first draft where roughly half of ~90 new anchors ran 19-26 words against
+# the house-voice standard's own rule — leader anchors are "one sentence,
+# 10-18 words" (framework-authoring/house-voice-and-anti-hedge-standard.md
+# §1.2) — caught only by a throwaway word-count script run BY HAND against
+# Phase 3's already-measured anchors, because no CI guard checked anchor
+# length at all. That exact regression would have shipped clean through
+# every gate that existed at the time — "a check that cannot fail on the
+# thing it claims to cover", the defect class this file's own header names.
+#
+# Word count, not character count: the standard's own unit is words, and a
+# character-length proxy drifts from it the moment vocabulary shifts (short
+# common words vs. longer domain terms expressing the same idea). Counted the
+# way a human reading the rule would: trim, then split on whitespace,
+# filtering empty tokens so doubled or edge whitespace cannot inflate the
+# count — the SAME whitespace discipline `catalog_malformed_bars_entries`
+# already enforces on these exact strings, so a string that guard accepts is
+# measured here without surprises.
+#
+# Prints ROLE:COMP:LEVEL:WORDCOUNT for every scale anchor (5, 3 and 1 — an
+# INDICATOR's own word count is a different rule, §1.1's 6-16 words, and not
+# this guard's business) in <tree>/bars/<role>.json, regardless of length —
+# the raw fact, the same shape as every other raw-fact reader in this file
+# (`role_competency_pairs`, `bars_competency_keys`). Policy — what counts as
+# too long or too short — is layered on by the two functions below it, not
+# decided here.
+#
+# Fails closed (nothing on stdout, non-zero exit) on a missing, unparseable,
+# or wrongly-shaped bars file — the same rule every reader in this file obeys.
+# ---------------------------------------------------------------------------
+# shellcheck disable=SC2016
+CI_ANCHOR_WORDCOUNT_SCRIPT='
+  const path = process.env.CI_BARS_FILE;
+  const role = process.env.CI_WC_ROLE;
+  let bars;
+  try {
+    bars = JSON.parse(await Bun.file(path).text());
+  } catch (e) {
+    console.error(`ci-guards: cannot read or parse ${path}: ${e.message}`);
+    process.exit(1);
+  }
+  if (bars === null || typeof bars !== "object" || Array.isArray(bars)) {
+    const got = Array.isArray(bars) ? "an array" : bars === null ? "null" : typeof bars;
+    console.error(`ci-guards: ${path} must be a JSON OBJECT keyed by competency code, got ${got}.`);
+    process.exit(1);
+  }
+  const wc = (s) => (typeof s === "string" ? s.trim().split(/\s+/).filter(Boolean).length : 0);
+  const out = [];
+  for (const comp of Object.keys(bars)) {
+    const entries = bars[comp];
+    if (!Array.isArray(entries)) continue;
+    for (const entry of entries) {
+      if (entry === null || typeof entry !== "object") continue;
+      const scale = entry.scale;
+      if (scale === null || typeof scale !== "object") continue;
+      for (const level of ["5", "3", "1"]) {
+        const text = scale[level];
+        if (typeof text !== "string" || text.length === 0) continue;
+        out.push(`${role}:${comp}:${level}:${wc(text)}`);
+      }
+    }
+  }
+  console.log(out.join("\n"));
+'
+
+bars_anchor_word_counts() {
+  CI_BARS_FILE="$1/bars/$2.json"
+  CI_WC_ROLE="$2"
+  export CI_BARS_FILE CI_WC_ROLE
+  if [ ! -f "$CI_BARS_FILE" ]; then
+    echo "ci-guards: $CI_BARS_FILE does not exist." >&2
+    return 1
+  fi
+  bun --eval "$CI_ANCHOR_WORDCOUNT_SCRIPT"
+}
+
+# The role this blocking maximum does NOT apply to — a role name, not a
+# magic number, exactly so this comment can say what it means: ICO's anchors
+# follow a DIFFERENT, documented register — two sentences, 20-30 words
+# (house-voice-and-anti-hedge-standard.md §1.2) — not the leader-file
+# one-sentence, 10-18-word shape this ceiling exists to hold every NEW pair
+# to. ICO's anchors are not new content under this change and are not being
+# retro-reviewed against a rule written for a different role's voice.
+#
+# Lives INSIDE the policy function below, not in the workflow step that calls
+# it, so a self-test can prove the exemption against the SAME function the
+# real gate calls (per this file's own header thesis) instead of trusting a
+# `[ "$ROLE" = "ICO" ] && continue` typed a second time at the call site.
+CI_ANCHOR_WORDCOUNT_EXEMPT_ROLE="ICO"
+
+# The blocking ceiling. Measured, not guessed: at the time this guard was
+# written, FLL, MLL, BUL and the staged SRX content already top out at 18
+# words — see this function's self-test row in wrapper-ci.yml step (f) for
+# the proof against a genuinely-violating fixture. Needs no committed
+# baseline the way the cross-role check above does, because nothing today
+# exceeds it.
+CI_ANCHOR_WORDCOUNT_MAX=18
+
+# The floor is a DIFFERENT question, deliberately not enforced by the
+# function below this one — see catalog_short_bars_anchors's own comment.
+CI_ANCHOR_WORDCOUNT_MIN=10
+
+# BLOCKING: anchors over CI_ANCHOR_WORDCOUNT_MAX words, for one role in one
+# tree. Prints ROLE:COMP:LEVEL:WORDCOUNT for every anchor whose word count
+# exceeds the ceiling. Empty output means every anchor in
+# <tree>/bars/<role>.json is at or under the limit, OR the role is the
+# documented ICO exemption above.
+#
+# Propagates bars_anchor_word_counts's failure rather than absorbing it — the
+# same "a guard that cannot read its subject must never pass it" rule every
+# other function here obeys. The ICO exemption is checked FIRST and returns
+# success without reading the file at all: an exempt role is not examined,
+# not examined-and-found-clean.
+catalog_overlong_bars_anchors() {
+  [ "$2" = "$CI_ANCHOR_WORDCOUNT_EXEMPT_ROLE" ] && return 0
+  CI_COBA_COUNTS=$(bars_anchor_word_counts "$1" "$2") || return 1
+  printf '%s\n' "$CI_COBA_COUNTS" | while IFS= read -r CI_COBA_LINE; do
+    [ -n "$CI_COBA_LINE" ] || continue
+    CI_COBA_WC=${CI_COBA_LINE##*:}
+    # `continue` on the FALSE branch, not a bare `[ ] &&` — a `while` pipeline's
+    # exit status is that of the LAST command run in its body, and a bare
+    # failing `[ ]` test on the final line would leak "false" as the whole
+    # function's exit status even though nothing was actually wrong. Verified:
+    # without this, `catalog_overlong_bars_anchors` returned 1 on a fully
+    # compliant file (BUL, every anchor <=18 words) purely because the LAST
+    # anchor checked happened to be under the ceiling.
+    [ "$CI_COBA_WC" -gt "$CI_ANCHOR_WORDCOUNT_MAX" ] || continue
+    printf '%s\n' "$CI_COBA_LINE"
+  done
+}
+
+# NON-BLOCKING REPORT: anchors under CI_ANCHOR_WORDCOUNT_MIN words, for one
+# role in one tree. Same doctrine as the hedge-marker rate in
+# house-voice-and-anti-hedge-standard.md §2.3: printed for a human to read
+# during review, never a build failure — the caller in wrapper-ci.yml step
+# (d) must NOT set FAIL on this function's output.
+#
+# The floor is not made blocking for the same reason the hedge ceiling is
+# advisory rather than enforced: FLL and MLL each carry legacy anchors as
+# short as 6 and 7 words, authored long before this change and explicitly
+# out of its retro-review scope (house-voice-and-anti-hedge-standard.md
+# §Scope). Blocking a floor of 10 today would fail on content this change is
+# not touching, for the sole reason that a later, unrelated PR happened to
+# read it.
+#
+# No role exemption here, unlike the maximum above — a floor is advisory by
+# construction, so there is nothing for an exemption to protect against.
+catalog_short_bars_anchors() {
+  CI_CSBA_COUNTS=$(bars_anchor_word_counts "$1" "$2") || return 1
+  printf '%s\n' "$CI_CSBA_COUNTS" | while IFS= read -r CI_CSBA_LINE; do
+    [ -n "$CI_CSBA_LINE" ] || continue
+    CI_CSBA_WC=${CI_CSBA_LINE##*:}
+    # Same `continue`-on-false discipline as catalog_overlong_bars_anchors
+    # above, for the same reason — see its comment.
+    [ "$CI_CSBA_WC" -lt "$CI_ANCHOR_WORDCOUNT_MIN" ] || continue
+    printf '%s\n' "$CI_CSBA_LINE"
+  done
 }

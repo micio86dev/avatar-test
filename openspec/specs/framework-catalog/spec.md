@@ -120,6 +120,208 @@ C9 reads anchor text via that FK. These are downstream concerns and are OUT OF S
 
 ---
 
+### Requirement: Complete Role×Competency BARS Coverage
+
+Every role×competency pair declared in `roles.json` MUST have exactly 3
+anchored indicators (levels 5, 3, 1) in its role's `bars/{ROLE}.json` file —
+83 pairs, 249 indicators, 747 anchor texts across ICO/FLL/MLL/BUL/SRX.
+`bars/SRX.json` MUST ship as one complete file (18 competencies, 54
+indicators) in the same commit that removes the `SRX` line from
+`scripts/framework-known-gaps.txt`; a partial SRX file is not a valid
+gap-exempt state. `scripts/framework-known-gaps.txt` and
+`scripts/framework-competency-gaps.txt` MUST contain zero entries once this
+catalogue lands, and the wrapper catalog gate (`wrapper-ci.yml` step d) MUST
+pass in both directions (no undeclared gap, and no stale exemption for a
+now-covered pair).
+
+#### Scenario: All 83 declared pairs seed with complete BARS coverage
+
+- GIVEN roles.json declares 83 role×competency pairs and every role's
+  bars/{ROLE}.json defines all of that role's assigned competencies
+- WHEN FrameworkCatalogSeeder runs
+- THEN framework_bars_indicators contains exactly 3 rows (non-null anchor_5,
+  anchor_3, anchor_1) for each of the 83 pairs
+- AND zero competency_no_bars or role_no_bars gap rows remain pending
+
+#### Scenario: CI gap-control files pass empty in both directions
+
+- GIVEN scripts/framework-known-gaps.txt and
+  scripts/framework-competency-gaps.txt contain zero entries
+- WHEN the wrapper catalog gate runs
+- THEN it passes (no role or pair is undeclared-and-uncovered)
+- AND it would fail if any covered pair were re-listed in either file (the
+  reverse-direction check)
+
+---
+
+### Requirement: Behavioural, Role-Specific Anchor Differentiation
+
+Newly authored anchor texts (levels 5/3/1) for each of the 132 new
+indicators MUST differ across levels by a distinct observable action or
+object, not solely by a degree-of-frequency adverb ("rarely / sometimes /
+consistently" applied to an otherwise identical sentence) — `ICO/PRS`
+indicator 1 (surface symptoms → differentiates problem from symptom → uses
+symptoms as clues to causes) is the binding pattern; `ICO/STG` #1,
+`ICO/INN` #1, and `ICO/ITG` #3 are the counter-example this standard rejects
+for new content. Anchors for the same competency MUST differ across roles by
+the object of the behaviour, its horizon, or its unit of accountability
+drawn from that role's `roles.json` responsibilities — e.g. STG for ICO
+reads "Understand the short- and medium-term consequences of own actions"
+while FLL reads "Have a plan to achieve own team's goals"; new anchors MUST
+NOT be one role's text with the role name swapped. This standard applies to
+the 132 newly authored indicators; the existing 39 pairs are NOT
+retroactively rewritten by this change and remain a recorded, separate
+inconsistency (76% of level-3 anchors carry a hedge marker; ICO alone is
+89%).
+
+#### Scenario: Levels differ by behaviour, not by adverb alone
+
+- GIVEN a newly authored indicator's three anchor texts (levels 5, 3, 1)
+- WHEN each anchor is stripped of degree/frequency adverbs (occasional, may,
+  generally, most, some, rarely, consistently)
+- THEN the three texts still describe three distinguishable actions or
+  objects, not one sentence with the adverb removed three times
+
+#### Scenario: Reworded-copy across roles is a detectable failure
+
+- GIVEN competency STG is anchored for both FLL and MLL
+- WHEN FLL:STG's and MLL:STG's anchor text at the same level is compared
+- THEN the object, horizon, or accountability unit differs (e.g. FLL: own
+  team's goals over weeks/months; MLL: unit plans aligned to strategy over
+  about a year)
+- AND a per-competency scope-shift table row exists per role showing that
+  difference before the anchor prose was written
+
+#### Scenario: Mechanical cross-role check finds no identical strings
+
+- GIVEN all five bars/*.json files (ICO, FLL, MLL, BUL, SRX)
+- WHEN the cross-role duplicate-detection script runs over indicator and
+  anchor strings grouped by competency
+- THEN it reports zero identical strings across roles for the same
+  competency
+- AND any pair above the similarity threshold has a recorded human
+  adjudication
+
+---
+
+### Requirement: SRX Role Responsibilities — Authored Prerequisite
+
+`roles.json`'s SRX role MUST carry a non-empty `responsibilities` value,
+calibrated against the ICO→BUL seniority ladder (ICO: daily-to-weekly, own
+area; FLL: weekly-to-monthly, small department, manages people; MLL: about
+a year, small country, aligns unit plans to strategy; BUL: one-to-two
+years, whole country/region, full P&L), before any SRX BARS indicator is
+authored. No SRX anchor MAY be calibrated against a blank `responsibilities`
+field.
+
+#### Scenario: SRX responsibilities is non-empty and ladder-consistent
+
+- GIVEN roles.json
+- WHEN the SRX role entry is read
+- THEN responsibilities is a non-empty string
+- AND it describes a horizon, scope, and accountability unit one tier beyond
+  BUL's (~1-2 years, country/region or broader, full P&L), consistent with
+  the ICO→BUL progression
+
+#### Scenario: Seeder lands SRX responsibilities on first (unlocked) run
+
+- GIVEN roles.json SRX.responsibilities is now authored (non-empty)
+- AND no FrameworkVersion has is_locked=true
+- WHEN FrameworkCatalogSeeder runs
+- THEN the SRX Role's responsibilities EN translation matches the authored
+  text
+- AND the missing_role_meta gap for SRX no longer appears pending
+
+#### Scenario: Locked FrameworkVersion suppresses the SRX responsibilities update — must be resolved explicitly
+
+- GIVEN a locked FrameworkVersion exists
+- AND the SRX Role row already exists in the DB with responsibilities empty
+  (pre-change production state)
+- WHEN the seeder runs with the newly authored non-empty SRX responsibilities
+  in roles.json
+- THEN the SRX Role's responsibilities translation is NOT updated by the
+  seeder (suppressed by the per-call-site $model->exists gate)
+- AND the deployment MUST NOT be considered complete until a targeted update
+  (seeder-side resolution or a documented one-off fix) sets SRX
+  responsibilities explicitly
+
+---
+
+### Requirement: Gap Row Reconciliation on Seeded Content
+
+When previously-recorded content becomes present in the source JSON (a
+competency gains a BARS entry, a role's BARS file is added, or a role's
+`responsibilities` becomes non-empty), the seeder MUST resolve the matching
+`framework_gaps` row — updating `status` away from `pending_authoring` (e.g.
+to `resolved`) or removing the row — rather than leaving it
+`pending_authoring` indefinitely. Gap resolution MUST proceed even while a
+`FrameworkVersion` is locked (`framework_gaps` writes are exempt from
+lock-guard mutation suppression, consistent with
+`FrameworkGap::updateOrCreate` being exempt for new gaps).
+
+#### Scenario: competency_no_bars gap resolves once the pair is anchored
+
+- GIVEN a framework_gaps row exists with kind=competency_no_bars,
+  role_code=FLL, competency_code=PRS, status=pending_authoring
+- AND bars/FLL.json now defines a PRS entry
+- WHEN the FrameworkCatalogSeeder runs
+- THEN that gap row's status is no longer pending_authoring (resolved or
+  removed)
+- AND no framework_gaps row remains pending for (FLL, PRS)
+
+#### Scenario: role_no_bars and missing_role_meta resolve once SRX is authored
+
+- GIVEN framework_gaps rows exist with kind=role_no_bars (role_code=SRX) and
+  kind=missing_role_meta (role_code=SRX), both status=pending_authoring
+- AND bars/SRX.json now exists and roles.json SRX.responsibilities is
+  non-empty
+- WHEN the seeder runs
+- THEN both gap rows are no longer pending_authoring
+- AND zero framework_gaps rows referencing SRX remain pending
+
+#### Scenario: Gap resolution proceeds even under a locked FrameworkVersion
+
+- GIVEN a locked FrameworkVersion exists
+- AND a pending competency_no_bars gap row exists for a pair that is now
+  anchored in the JSON
+- WHEN the seeder runs in additive-only (lock-guard) mode
+- THEN the gap row is still resolved (framework_gaps writes are exempt from
+  mutation suppression)
+- AND catalog content rows for pre-existing pairs remain byte-for-byte
+  unchanged per the lock-guard
+
+---
+
+### Requirement: Calibrated Draft Pending Specialist Sign-Off
+
+The 132 newly authored indicators (396 anchor texts) and SRX's
+`responsibilities` are a calibrated draft — extrapolated from the complete
+ICO file, the 24 existing leader pairs, `competencies.json` definitions, and
+the `roles.json` seniority ladder. An assessment specialist MUST review and
+sign off this content before it scores a real candidate; sign-off is a
+release gate, not a follow-up. The 8 pairs / 24 indicators with zero
+catalogue precedent ({FLL,MLL,BUL,SRX} × {JDG,TMG}) MUST be flagged for
+priority review.
+
+#### Scenario: Specialist sign-off gates production scoring of new content
+
+- GIVEN the 132 newly authored indicators have been seeded to production
+- WHEN scoring is enabled for real candidates against any newly anchored
+  pair
+- THEN an assessment specialist's recorded sign-off exists for that content
+- AND scoring of real candidates against unsigned-off new pairs does not
+  proceed
+
+#### Scenario: JDG and TMG are flagged for priority review
+
+- GIVEN JDG and TMG have zero worked precedent across all four pre-existing
+  bars files
+- WHEN the {FLL,MLL,BUL,SRX} × {JDG,TMG} content is authored and seeded
+- THEN those 8 pairs / 24 indicators carry an explicit priority-review
+  marker distinct from standard sign-off
+
+---
+
 ### Requirement: Translatable Content Columns
 
 The system MUST store role names, role responsibilities, competency names,
@@ -284,14 +486,14 @@ changes to the split-file path.
 - THEN the row counts for framework_roles, framework_competencies, and framework_bars_indicators are identical
 - AND no duplicate rows exist
 
-#### Scenario: Missing bars/SRX.json is skipped gracefully
+#### Scenario: Missing BARS file for a role is skipped gracefully (fixture)
 
-- GIVEN bars/SRX.json does not exist on disk
+- GIVEN a fixture role has no bars/{ROLE}.json file on disk (post-completion, no real declared role lacks a BARS file — this exercises the defensive path only)
 - WHEN the FrameworkCatalogSeeder runs
 - THEN the seeder does NOT throw an exception
-- AND SRX role metadata (name) is still seeded from roles.json
-- AND a gap entry is recorded flagging "SRX BARS indicators missing"
-- AND framework_bars_indicators contains zero rows for SRX
+- AND the role's metadata (name, responsibilities) is still seeded from roles.json
+- AND a role_no_bars gap entry is recorded
+- AND framework_bars_indicators contains zero rows for that role
 
 #### Scenario: MTG/LAT absent — potential catalog flagged incomplete
 
@@ -324,20 +526,20 @@ changes to the split-file path.
 
 #### Scenario: Seeded-count correctness — per-role BARS coverage
 
-- GIVEN the seeder has run successfully
+- GIVEN the seeder has run successfully against the complete catalogue (all 83 declared pairs anchored)
 - WHEN framework_bars_indicators are counted per role
 - THEN ICO has 45 rows (15 competencies × 3 indicators)
-- AND FLL has 24 rows (8 competencies × 3 indicators)
-- AND MLL has 24 rows (8 competencies × 3 indicators)
-- AND BUL has 24 rows (8 competencies × 3 indicators)
-- AND SRX has 0 rows
+- AND FLL has 54 rows (18 competencies × 3 indicators)
+- AND MLL has 54 rows (18 competencies × 3 indicators)
+- AND BUL has 42 rows (14 competencies × 3 indicators)
+- AND SRX has 54 rows (18 competencies × 3 indicators)
 
-#### Scenario: Re-seeding after correcting a gap adds the missing rows
+#### Scenario: Re-seeding after a previously-missing BARS file is authored adds the missing rows (fixture)
 
-- GIVEN bars/SRX.json was absent on the first seed run
-- AND bars/SRX.json is subsequently authored and placed on disk
+- GIVEN a fixture role's bars/{ROLE}.json was absent on the first seed run
+- AND the file is subsequently authored and placed on disk
 - WHEN the seeder runs again
-- THEN SRX BARS indicators are inserted
+- THEN the role's BARS indicators are inserted
 - AND no existing rows are duplicated
 
 #### Scenario: Delete-stale — removing a competency from a role removes stale pivot and indicator rows (no locked FV)
@@ -467,15 +669,23 @@ not that the current request failed.
 - WHEN GET /api/framework/roles/ICO/competencies/PRS/indicators is called
 - THEN the response contains each indicator's text and anchor text for levels 5, 3, 1
 
-#### Scenario: bars_available flag is true for BARS-covered competencies and false for gap competencies
+#### Scenario: bars_available flag reflects BARS coverage (fixture example for the false case)
 
-- GIVEN the seeder has run and ICO/COM has framework_bars_indicators rows; FLL/PRS has no framework_bars_indicators rows for FLL
+- GIVEN the seeder has run against the complete catalogue and ICO/COM has framework_bars_indicators rows
 - WHEN GET /api/framework/roles/ICO/competencies is called
 - THEN ICO/COM has `bars_available=true`
-- WHEN GET /api/framework/roles/FLL/competencies is called
-- THEN FLL/PRS has `bars_available=false`
+- GIVEN a role×competency pair with zero framework_bars_indicators rows (test fixture — post-completion no real declared pair is in this state)
+- WHEN that role's competencies endpoint is called
+- THEN the fixture pair has `bars_available=false`
 
-**Definition**: `bars_available` is `true` when the competency has ≥1 `framework_bars_indicators` row scoped to the requested role (i.e. it is BARS-covered for that role). It is `false` for gap competencies (those present in `framework_role_competency` but absent from the role's BARS file). All SRX competencies have `bars_available=false` because SRX has no BARS file.
+**Definition**: `bars_available` is `true` when the competency has ≥1 `framework_bars_indicators` row scoped to the requested role (i.e. it is BARS-covered for that role). It is `false` only for a role×competency pair with no indicator rows — a state no real declared pair is in after this change; all 83 declared pairs, including all 18 SRX pairs, have `bars_available=true`.
+
+#### Scenario: All declared pairs report bars_available=true after catalogue completion
+
+- GIVEN the seeder has run against the complete catalogue (83 declared pairs, all anchored)
+- WHEN GET /api/framework/roles/{roleCode}/competencies is called for each of the 5 roles
+- THEN every returned competency has `bars_available=true`
+- AND no role returns `bars_available=false` for any of its declared competencies
 
 #### Scenario: Locale-aware response falls back to EN when IT is absent
 
@@ -526,32 +736,49 @@ gap MUST be recorded as an explicit authoring task in the `framework_gaps` table
 silent. The `framework_gaps` table carries: `kind`, `role_code` (nullable),
 `competency_code` (nullable), `note` (nullable), `status` (default `pending_authoring`).
 
-Known gaps at first seed:
-- `bars/SRX.json` — BARS indicators for Senior Executive role (missing file) → `{kind: role_no_bars, role_code: SRX}`
-- SRX `responsibilities` is empty string in roles.json → `{kind: missing_role_meta, role_code: SRX}` — seeded as-is; client to provide text
-- FLL 10 BARS gaps — competencies assigned but absent from bars/FLL.json (PRS, JDG, DRV, SLF, TMG, COM, COL, NET, ITG, INC) → 10 × `{kind: competency_no_bars, role_code: FLL, competency_code: CODE}`
-- MLL 10 BARS gaps — competencies assigned but absent from bars/MLL.json (same 10 as FLL) → 10 × `{kind: competency_no_bars, role_code: MLL, competency_code: CODE}`
-- BUL 6 BARS gaps — competencies assigned but absent from bars/BUL.json (PRS, JDG, DRV, TMG, COL, NET) → 6 × `{kind: competency_no_bars, role_code: BUL, competency_code: CODE}`
-- MTG and LAT competency definitions and anchors — required for `potential` assessment type → `{kind: missing_potential_competency, competency_code: MTG|LAT}`
-- IT locale translations for all names, definitions, and anchor texts — gates non-EN scoring in C9 → `{kind: missing_translation}`
+SRX BARS indicators and SRX `responsibilities`, once authored as a
+calibrated draft (see Requirement: SRX Role Responsibilities — Authored
+Prerequisite and Requirement: Complete Role×Competency BARS Coverage), are
+catalogue content authored by this change — not domain data C3 defers to
+client/expert authoring. The client/expert-authorship deferral remains only
+for MTG/LAT competency definitions and for IT locale translations of the
+full catalogue (existing and newly authored anchors alike).
 
-The system MUST remain queryable (returning partial data) while gaps persist.
-A partial catalog MUST NOT cause API errors or seeder failures.
+Known gaps at first seed (post-completion):
+- MTG and LAT competency definitions and anchors — required for `potential`
+  assessment type → `{kind: missing_potential_competency, competency_code:
+  MTG|LAT}`
+- IT locale translations for all names, definitions, and anchor texts —
+  gates non-EN scoring in C9 → `{kind: missing_translation}`. Applies to the
+  full 747-anchor catalogue, including the 396 newly authored anchors; an
+  `it`-language project scoring against an untranslated anchor is marked
+  unscorable with `unscorable_reason = 'anchor_translation_missing'`
+  (scoring-engine behavior, unchanged by this change).
 
-#### Scenario: API responds correctly with partial catalog
+The system MUST remain queryable (returning partial data) while gaps
+persist. A partial catalog MUST NOT cause API errors or seeder failures.
+(Previously: also listed `role_no_bars` for SRX, `missing_role_meta` for
+SRX, and 26 `competency_no_bars` entries for FLL/MLL/BUL — all closed by
+this change.)
 
-- GIVEN the catalog is in a partial state (SRX BARS absent, MTG/LAT absent)
+#### Scenario: API responds correctly with a partial catalog (remaining gaps)
+
+- GIVEN the catalog is in a partial state (MTG/LAT absent, some IT
+  translations absent)
 - WHEN GET /api/framework/roles is called
-- THEN the response lists all 5 roles including SRX
-- AND SRX competencies are listed (from roles.json)
+- THEN the response lists all 5 roles including SRX, with populated
+  responsibilities and full BARS coverage
 - AND no 500 error or exception is raised
 
 #### Scenario: Gap log is inspectable after seeder run
 
-- GIVEN the seeder has run with known gaps (SRX.json missing, MTG/LAT absent)
+- GIVEN the seeder has run with the remaining known gaps (MTG/LAT absent,
+  IT locale translations absent)
 - WHEN the seeder gap log or report is inspected
 - THEN it lists each gap with a human-readable description
 - AND each gap has a status of "pending authoring"
+- AND no competency_no_bars, role_no_bars, or SRX missing_role_meta rows
+  appear (all resolved by this change)
 
 ---
 
@@ -563,4 +790,4 @@ The following are OUT OF SCOPE for C3 and MUST NOT be implemented here:
 - **Project → framework_version FK and pin-at-creation** — C4 wires this FK after C3 creates the `framework_versions` table
 - **Per-org BARS overrides or customization** — future additive capability; C3 base is global (working draft); immutability is achieved at C4 pin time via snapshot-at-pin
 - **MTG/LAT scoring flow** — blocked pending authoring; flagged but not implemented
-- **Inventing missing domain data** — SRX BARS, MTG/LAT defs, IT translations are client/expert artifacts; C3 records the gap only
+- **Inventing missing domain data** — MTG/LAT competency definitions and IT locale translations (for the full catalogue, existing and newly authored anchors alike) remain client/expert artifacts; C3 records the gap only. SRX BARS indicators and SRX `responsibilities` are NOT in this list: the `bars-catalogue-completion` change authored them as a calibrated draft — catalogue content, not client-deferred domain data — extrapolated from the complete ICO file, the existing leader-role pairs, `competencies.json`, and the `roles.json` seniority ladder. That draft is pending assessment-specialist sign-off before it scores a real candidate; sign-off is a release gate, not a follow-up
