@@ -12,8 +12,9 @@
 # noticed the openapi gate below had never once run.
 #
 # This workflow validates, in the order the steps run:
-#   (a) docker compose config parses, and every image tag — compose services
-#       and Dockerfile bases alike — is pinned
+#   (a) docker compose config parses, and every image tag — compose services,
+#       Dockerfile FROM bases and Dockerfile COPY --from= images alike — is
+#       pinned; and this workflow's own `uses:` references are SHA-pinned
 #   (b) the committed openapi.json is semantically identical across api/frontend/backoffice
 #   (c) each app's check-client-drift.sh exits 0 (generated TS client matches openapi.json)
 #   (d) the framework catalog matches its authored source, and every declared
@@ -88,7 +89,7 @@ jobs:
 
     steps:
       - name: Checkout wrapper repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # Without this the submodules are empty directories, and every check
           # below that reads a file inside one fails on FileNotFoundError before
@@ -233,10 +234,38 @@ jobs:
             fi
           done
 
-          echo "All image tags are pinned — compose services and Dockerfile bases."
+          # And the SAME rule again, applied to `COPY --from=<image>`. This
+          # construct takes an image reference exactly as FROM does — the
+          # only difference is that df_guard never read it, so a floating tag
+          # here (`COPY --from=composer:2`) was invisible to the guard whose
+          # entire job is catching exactly that. `df_copy_from_guard` reuses
+          # df_guard's own stage-exclusion helpers, so `COPY --from=builder`
+          # (a stage, not an image) is still correctly skipped.
+          for DF in api/Dockerfile frontend/Dockerfile backoffice/Dockerfile; do
+            if ! OFFENDER=$(df_copy_from_guard "$DF"); then
+              echo "ERROR: $DF uses a floating COPY --from= image: $OFFENDER. Pin it per D24/D25."
+              exit 1
+            fi
+          done
+
+          echo "All image tags are pinned — compose services, Dockerfile FROM bases, and Dockerfile COPY --from= images."
+
+          # This workflow's own `uses:` references, held to the same
+          # immutability standard as every image tag above: a GitHub Actions
+          # tag (`@v4`) is exactly as movable as a floating Docker tag, and
+          # this file rejected `redis:8-alpine` for the same reason while
+          # running under `actions/checkout@v4` itself. `workflow_actions_guard`
+          # prints the first offending reference and exits non-zero.
+          if ! OFFENDER=$(workflow_actions_guard .github/workflows/wrapper-ci.yml); then
+            echo "ERROR: .github/workflows/wrapper-ci.yml uses an action not pinned to a commit SHA: $OFFENDER."
+            echo "  Pin to the full 40-character commit SHA, with the human-readable version in a trailing comment."
+            exit 1
+          fi
+
+          echo "This workflow's own 'uses:' references are all SHA-pinned."
 
       - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           # Pinned to the patch, matching what frontend/Dockerfile and
           # backoffice/Dockerfile actually build with (`oven/bun:1.3.14`).
@@ -1210,6 +1239,127 @@ jobs:
             FAILED=1
           else
             echo "  ok — Dockerfile guard: a missing file"
+          fi
+
+          # ------------------------------------------------------------------
+          # COPY --from= pinning — the SAME `df_copy_from_guard` the real
+          # gate in step (a) calls, against fixtures built to trip it. This
+          # is the construct df_guard never read at all: `COPY --from=latest`
+          # and `COPY --from=composer:2` were floating tags hiding in plain
+          # sight in api/Dockerfile while step (a) checked every FROM line
+          # around them. Both directions proven — a floating image rejected,
+          # a pinned image and a declared stage both accepted — the same
+          # discipline df_guard's own rows above already follow.
+          # ------------------------------------------------------------------
+          df_copy_from_case() {
+            printf "$3" > "$FIXTURE/Dockerfile.copyfrom.case"
+            if OFFENDER=$(df_copy_from_guard "$FIXTURE/Dockerfile.copyfrom.case"); then GOT=pass; else GOT=fail; fi
+            if [ "$GOT" = "$2" ]; then
+              echo "  ok — COPY --from= guard: $1"
+            else
+              echo "SELF-TEST FAILED: COPY --from= guard on '$1' expected $2, got $GOT (offender: ${OFFENDER:-none})."
+              FAILED=1
+            fi
+          }
+
+          df_copy_from_case "a pinned image" \
+            pass 'FROM alpine:3.20.3\nCOPY --from=composer:2.10.2 /usr/bin/composer /usr/bin/composer\n'
+          # The exact api/Dockerfile shape before this fix: a bare-major tag,
+          # not caught by anything, because nothing read COPY --from= at all.
+          df_copy_from_case "a floating image (bare major)" \
+            fail 'FROM alpine:3.20.3\nCOPY --from=composer:2 /usr/bin/composer /usr/bin/composer\n'
+          df_copy_from_case "a floating image (latest)" \
+            fail 'FROM alpine:3.20.3\nCOPY --from=mlocati/php-extension-installer:latest /usr/bin/install-php-extensions /usr/local/bin/\n'
+          df_copy_from_case "a stage reference" \
+            pass 'FROM alpine:3.20.3 AS builder\nFROM alpine:3.20.3 AS runtime\nCOPY --from=builder /app /app\n'
+          # --from is not positional like FROM's reference — --chown can sit
+          # on either side of it, and both orders must parse identically.
+          df_copy_from_case "--from before --chown" \
+            pass 'FROM alpine:3.20.3 AS builder\nFROM alpine:3.20.3 AS runtime\nCOPY --from=builder --chown=1000:1000 /app /app\n'
+          df_copy_from_case "--from after --chown" \
+            pass 'FROM alpine:3.20.3 AS builder\nFROM alpine:3.20.3 AS runtime\nCOPY --chown=1000:1000 --from=builder /app /app\n'
+          # A COPY with no --from= at all copies from the build context, not
+          # another stage or image — out of scope for this guard entirely.
+          df_copy_from_case "a plain COPY with no --from=" \
+            pass 'FROM alpine:3.20.3\nCOPY . .\n'
+
+          if df_copy_from_guard "$FIXTURE/Dockerfile.copyfrom.absent" >/dev/null; then
+            echo "SELF-TEST FAILED: the COPY --from= guard passed on a file that does not exist."
+            FAILED=1
+          else
+            echo "  ok — COPY --from= guard: a missing file"
+          fi
+
+          # ...and every real Dockerfile in this repo must be clean, right
+          # now — same discipline as every other control check proved
+          # against the real tree above.
+          for DF in api/Dockerfile frontend/Dockerfile backoffice/Dockerfile; do
+            if ! REAL_OFFENDER=$(df_copy_from_guard "$DF"); then
+              echo "SELF-TEST FAILED: $DF has a floating COPY --from= image: $REAL_OFFENDER."
+              FAILED=1
+            fi
+          done
+          echo "  ok — every committed Dockerfile's COPY --from= images are pinned"
+
+          # ------------------------------------------------------------------
+          # GitHub Actions `uses:` SHA-pinning — the SAME `workflow_action_pinned`
+          # and `workflow_actions_guard` the real gate in step (a) calls. This
+          # workflow ran under `actions/checkout@v4` and `oven-sh/setup-bun@v2`
+          # while rejecting `redis:8-alpine` for the identical reason, one
+          # section above. Both directions proven: a floating tag/branch/short
+          # SHA rejected, a full commit SHA accepted.
+          # ------------------------------------------------------------------
+          for BAD in 'actions/checkout@v4' 'actions/checkout@main' \
+                     'actions/checkout@11d5960' 'actions/checkout'; do
+            if workflow_action_pinned "$BAD"; then
+              echo "SELF-TEST FAILED: the action-pin rule accepted $BAD."
+              FAILED=1
+            fi
+          done
+          for GOOD in 'actions/checkout@11d5960a326750d5838078e36cf38b85af677262' \
+                      'oven-sh/setup-bun@0C5077E51419868618AEAA5FE8019C62421857D6'; do
+            if ! workflow_action_pinned "$GOOD"; then
+              echo "SELF-TEST FAILED: the action-pin rule rejected $GOOD."
+              FAILED=1
+            fi
+          done
+          echo "  ok — action-pin rule: 4 rejected, 2 accepted (case-insensitive hex, full 40 chars only)"
+
+          mkdir -p "$FIXTURE/wf-good" "$FIXTURE/wf-bad"
+          printf 'jobs:\n  x:\n    steps:\n      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0\n      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0\n' \
+            > "$FIXTURE/wf-good/ci.yml"
+          printf 'jobs:\n  x:\n    steps:\n      - uses: actions/checkout@v4\n' \
+            > "$FIXTURE/wf-bad/ci.yml"
+
+          if OFFENDER=$(workflow_actions_guard "$FIXTURE/wf-bad/ci.yml"); then
+            echo "SELF-TEST FAILED: the workflow actions guard accepted a floating tag ref: actions/checkout@v4."
+            FAILED=1
+          else
+            echo "  ok — workflow actions guard rejects a floating tag ref (offender: $OFFENDER)"
+          fi
+
+          if workflow_actions_guard "$FIXTURE/wf-good/ci.yml" >/dev/null; then
+            echo "  ok — workflow actions guard accepts fully SHA-pinned refs"
+          else
+            echo "SELF-TEST FAILED: the workflow actions guard rejected fully SHA-pinned refs."
+            FAILED=1
+          fi
+
+          if workflow_actions_guard "$FIXTURE/wf-absent.yml" >/dev/null 2>&1; then
+            echo "SELF-TEST FAILED: the workflow actions guard passed on a file that does not exist."
+            FAILED=1
+          else
+            echo "  ok — workflow actions guard fails closed on a missing file"
+          fi
+
+          # ...and this workflow file itself must be clean, right now — same
+          # discipline as every other control check proved against the real
+          # tree above.
+          if OFFENDER=$(workflow_actions_guard .github/workflows/wrapper-ci.yml); then
+            echo "  ok — .github/workflows/wrapper-ci.yml has every 'uses:' reference SHA-pinned"
+          else
+            echo "SELF-TEST FAILED: .github/workflows/wrapper-ci.yml has an unpinned 'uses:' reference: $OFFENDER"
+            FAILED=1
           fi
 
           # The catalog gate: it must reject real drift, and must NOT reject two

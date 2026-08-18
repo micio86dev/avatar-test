@@ -65,11 +65,37 @@ a preference — Nuxt SSR and Playwright are officially Node-targeted, and the
 hybrid keeps Bun's install speed without betting production on an unsupported
 runtime.
 
-## Known gap
+## GitHub Actions and build-time `COPY --from=` images
 
-GitHub Actions are referenced by floating major (`actions/checkout@v4`,
-`oven-sh/setup-bun@v2`) while this catalog forbids exactly that for images.
-The inconsistency is real and named here rather than left for a reviewer to
-rediscover. Pinning actions to commit SHAs is tracked as a C1 leftover in
-`openspec/changes/nfr-hardening/tasks.md` under "Documented, Not Scoped"; it
-belongs to that backlog, not to a drive-by edit.
+The gap this section used to document — GitHub Actions referenced by
+floating major (`actions/checkout@v4`, `oven-sh/setup-bun@v2`) while this
+catalog forbade exactly that for images — is closed for
+`.github/workflows/wrapper-ci.yml`: both are now pinned to a full commit SHA,
+with the human-readable version in a trailing comment (a tag can be moved, a
+SHA cannot). Enforced by `workflow_actions_guard` in `scripts/ci-guards.sh`,
+applied to every `uses:` line in that workflow, with the same self-tested
+reject-a-float / accept-a-pin discipline as `tag_pinned`. This is scoped to
+the wrapper's own workflow; `api/`, `frontend/` and `backoffice/` are
+separate repositories with their own CI, outside this gate's reach (see this
+workflow's own header: "Does NOT re-run per-app unit/E2E suites").
+
+Two images were a second instance of the same defect, hiding in a construct
+nobody read: `api/Dockerfile`'s `COPY --from=mlocati/php-extension-installer:latest`
+and `COPY --from=composer:2`. `COPY --from=` takes an image reference exactly
+as `FROM` does, but `df_guard` only ever read `FROM` lines, so both floated
+underneath a gate whose entire job is catching exactly that. Both are now
+pinned to a patch (`mlocati/php-extension-installer:2.11.12`,
+`composer:2.10.2`), enforced by `df_copy_from_guard`, which reuses
+`df_guard`'s own stage-exclusion helpers so a real stage reference
+(`COPY --from=builder`) is still correctly left alone.
+
+These two are build-time tool images — copied into the build stage to
+install a binary, never run themselves — not a base image an app ships in,
+so they are deliberately **not** rows in the "Docker base images" table
+above: that table's reality-check crosswalk (`version_catalog_images`
+against `catalog_dockerfile_images`, guard (h) in
+`.github/workflows/wrapper-ci.yml`) is scoped to `FROM` bases and compose
+`image:` references, and stays that way. Pinning is enforced directly in
+the Dockerfile by `df_copy_from_guard`; this paragraph is where a reader
+finds the fact, not a table row a guard would then have to check twice in
+two vocabularies.

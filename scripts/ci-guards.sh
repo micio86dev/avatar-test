@@ -155,6 +155,119 @@ df_guard() {
 }
 
 # ---------------------------------------------------------------------------
+# `COPY --from=<ref>` pinning — the SAME rule as FROM (D24/D25), for a
+# construct df_guard never read at all. `COPY --from=` takes either a STAGE
+# name (`COPY --from=builder`) or an IMAGE reference (`COPY --from=composer:2`
+# — a floating major, exactly what tag_pinned exists to reject), same
+# ambiguity FROM has. df_guard already solved stage-versus-image
+# (`ci_dockerfile_stage_names`); this reuses that helper rather than
+# re-deriving a second stage-versus-image parser, which is how the FROM
+# parser above ended up broken more than once.
+#
+# The line shape is not FROM's, though. FROM's reference is "the first
+# non-flag token" because FROM has no other flags worth naming. COPY's
+# `--from=` is not positional — `--chown` and `--chmod` can sit on either
+# side of it — so the reference is the VALUE of the `--from=` flag
+# specifically, found by token, not by position.
+# ---------------------------------------------------------------------------
+
+# COPY lines that carry a --from= flag, one per line. A COPY with no
+# --from= copies from the build context, not another stage or image, and is
+# out of scope for this guard entirely — it has nothing to pin.
+ci_dockerfile_copy_from_lines() {
+  grep -iE '^[[:space:]]*copy[[:space:]]' "$1" 2>/dev/null | grep -E -- '--from=' || true
+}
+
+# The --from=<value> token off one COPY line, comment-free by construction
+# (grep -iE above only ever matches instruction lines, not comments). Split
+# the same way ci_dockerfile_ref splits a FROM line (space/tab -> newline,
+# one token per line) so a flag on either side of --from= cannot confuse it.
+ci_dockerfile_copy_from_ref() {
+  # shellcheck disable=SC2020
+  # Same duplicated '\n' as ci_dockerfile_ref above, and the same reason:
+  # BOTH space and tab must become a newline so the line splits into one
+  # token per line, which a single-character replacement set cannot do
+  # portably (tr's padding behaviour is implementation-defined in POSIX).
+  printf '%s' "$1" | tr ' \t' '\n\n' | sed -n 's/^--from=//p' | head -1
+}
+
+# Exit 0 when every COPY --from= reference in $1 is pinned (or is a declared
+# stage). Exit 1 and print the first offending reference otherwise. Exit 1
+# silently on a file that does not exist — same "cannot read its subject"
+# contract df_guard obeys above.
+df_copy_from_guard() {
+  [ -f "$1" ] || return 1
+  CI_DF_STAGES=$(ci_dockerfile_stage_names "$1")
+  ci_dockerfile_copy_from_lines "$1" | while IFS= read -r CI_DF_LINE; do
+    CI_DF_REF=$(ci_dockerfile_copy_from_ref "$CI_DF_LINE")
+    [ -n "$CI_DF_REF" ] || continue
+    CI_DF_LOWER=$(printf '%s' "$CI_DF_REF" | tr '[:upper:]' '[:lower:]')
+    if printf '%s\n' "$CI_DF_STAGES" | grep -qxF "$CI_DF_LOWER"; then
+      continue
+    fi
+    tag_pinned "$CI_DF_REF" || { printf '%s\n' "$CI_DF_REF"; exit 1; }
+  done
+}
+
+# ---------------------------------------------------------------------------
+# GitHub Actions `uses:` SHA-pinning — this workflow's own version of
+# D24/D25, applied to itself. A `uses: owner/repo@v4` tag is exactly as
+# movable as a floating Docker tag: the action's owner can repoint `v4` to a
+# different commit at any time, the same way a registry can repoint a bare
+# major. The only pin that is actually immutable is the commit SHA; the
+# human-readable version belongs in a trailing comment, never in the ref
+# itself, which is why this rejects it there too.
+#
+# Deliberately narrower than tag_pinned: there is no dotted-version or
+# `local` carve-out here, because there is no equivalent of a locally-built,
+# untaggable action. Every `uses:` line names a real, externally-owned
+# action, so every one of them must resolve to a SHA.
+# ---------------------------------------------------------------------------
+
+# `uses:` lines in a workflow file, one per line. `uses:` is a step-level
+# key, which YAML allows written two ways — on its own line as a sibling of
+# `- name:` (every real line in this file), or compressed onto the list
+# item's own dash (`- uses: ...`, valid YAML this guard must still read
+# correctly rather than silently missing). The optional `-` is matched, not
+# assumed absent.
+ci_workflow_uses_lines() {
+  grep -E '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*' "$1" 2>/dev/null || true
+}
+
+# The <owner>/<repo>@<ref> value off one `uses:` line, the same optional
+# leading `-` stripped, trailing comment (the human-readable version,
+# `# v4.4.0`) stripped.
+ci_workflow_uses_ref() {
+  printf '%s' "$1" \
+    | sed -e 's/^[[:space:]]*\(-[[:space:]]\{1,\}\)\{0,1\}uses:[[:space:]]*//' -e 's/[[:space:]]*#.*$//'
+}
+
+# Exit 0 when a `uses:` value is pinned to a full 40-character commit SHA
+# (hex, case-insensitive — Git itself is). A tag (`@v4`), a branch
+# (`@main`), or a short SHA are all rejected: none of them is immutable, and
+# a short SHA is not even guaranteed unambiguous as a repository grows.
+workflow_action_pinned() {
+  case "$1" in
+    *@*) ;;
+    *) return 1 ;;
+  esac
+  printf '%s' "${1##*@}" | grep -qE '^[0-9a-fA-F]{40}$'
+}
+
+# Exit 0 when every `uses:` reference in workflow $1 is SHA-pinned. Exit 1
+# and print the first offending reference otherwise. Exit 1 silently on a
+# file that does not exist — same "cannot read its subject" contract every
+# other guard in this file obeys.
+workflow_actions_guard() {
+  [ -f "$1" ] || return 1
+  ci_workflow_uses_lines "$1" | while IFS= read -r CI_WF_LINE; do
+    CI_WF_REF=$(ci_workflow_uses_ref "$CI_WF_LINE")
+    [ -n "$CI_WF_REF" ] || continue
+    workflow_action_pinned "$CI_WF_REF" || { printf '%s\n' "$CI_WF_REF"; exit 1; }
+  done
+}
+
+# ---------------------------------------------------------------------------
 # docs/version-catalog.md — bidirectional consistency with reality (D25).
 #
 # The catalog exists because the archived design section it replaced
