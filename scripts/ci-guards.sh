@@ -1639,6 +1639,169 @@ catalog_meta_locale_shape() {
 }
 
 # ---------------------------------------------------------------------------
+# roles.json / competencies.json locale COMPLETENESS — the gap the shape
+# guard above deliberately does not close.
+#
+# `catalog_meta_locale_shape` asks "is every locale value THAT IS PRESENT
+# well-formed" — `en` is mandatory there, every OTHER key is optional, so
+# `{"en": "..."}` alone passes it. That is exactly the shape 46 strings (18
+# competencies x {name, definition}, 5 roles x {name, responsibilities})
+# shipped in for an unmeasured period: authored in `en` only, never
+# translated, and invisible to every gate that existed. This function asks
+# the other question — "is every locale the catalogue CLAIMS to support
+# actually here" — which is a different assertion (mandatory-vs-optional
+# key), not a stricter reading of the same one.
+#
+# It closes the gap `scripts/framework-locale-gaps.txt` structurally cannot:
+# that file, and the four guards built on `known_locale_gap_pairs`, track
+# role x competency BARS PAIRS only (`role_competency_pairs`'s own
+# ROLE:COMP vocabulary) and have nothing to say about a `roles.json` or
+# `competencies.json` FIELD. Nor is it the same fact as the runtime's global
+# `missing_translation` FrameworkGap, which is scored over the same BARS
+# pairs and reported "it locale: all 83 of 83 role x competency pairs
+# translated" while these 46 strings sat untranslated in production — true
+# about its own domain, silent about this one.
+#
+# WHICH LOCALES ARE EXPECTED: read from `CI_LOCALES`, the SAME env var step
+# (d) already exports once ("en it") for `catalog_meta_locale_shape` and the
+# cross-locale/partial-coverage guards beside it — not re-derived here.
+# Deriving "expected" from "present" is circular and would have passed
+# exactly the bug this guard exists to catch: every one of the 46 strings
+# HAD an en key, so a completeness check that inferred its locale set from
+# whatever keys happened to exist would infer {"en"} for every one of them
+# and report the catalogue complete. `CI_LOCALES` is a fact asserted by a
+# human once, in one place, ahead of content landing (see that export's own
+# comment in step (d)) precisely so no guard downstream of it can fall into
+# that trap.
+#
+# NO EXEMPTION SEAM, unlike the three sibling control files this guard's own
+# comment block up top cites (framework-known-gaps.txt, framework-
+# competency-gaps.txt, framework-crossrole-baseline.txt) and unlike
+# framework-locale-gaps.txt beside it. Those all exist because their subject
+# is authored INCREMENTALLY across many files and many PRs — 83 role x
+# competency pairs, 996 BARS anchors, cross-role duplicates accumulated over
+# several completion phases — so a legitimate "not there yet, tracked
+# on purpose" state exists and needs a place to live without turning CI
+# permanently red. `competencies.json`/`roles.json` metadata is the opposite
+# shape: 46 leaf strings living in exactly TWO files, added only when a
+# competency or role is added at all (a rare event), and cheap enough for
+# one author to translate in the SAME PR that introduces the English. There
+# is no legitimate half-landed state here to give a name to — either the
+# 46 strings ship translated or the PR that adds them is not done — so an
+# exemption file would not relieve real authoring pressure the way its
+# siblings do; it would just be a second, quieter way to reintroduce this
+# exact incident, opt-in, without even a build failure to notice it by.
+#
+# The ONE recognized incomplete state is `roles.json`'s `responsibilities`
+# with a deliberately blank `en` — and it already has a home. That is the
+# seeder's own `allowBlankEn` sentinel for "this role has not been authored
+# at all yet" (FrameworkGap kind=`n`, `api/database/seeders/
+# FrameworkCatalogSeeder.php`), which `catalog_meta_locale_shape` already
+# encodes and this guard MUST agree with rather than re-litigate: a role
+# with no responsibilities in ANY locale is not a translation gap, it is a
+# role that does not exist yet, and asking "where is its `it`" is the wrong
+# question. Skipped entirely, the same as the shape guard skips it.
+#
+# Prints `COMPETENCIES:<code>:<field>:missing-<locale>` or
+# `ROLES:<code>:<field>:missing-<locale>`, one per line, for every
+# translatable field lacking a non-empty value for a locale `CI_LOCALES`
+# expects. Empty output means the catalogue is fully translated.
+#
+# FAILS CLOSED (nonzero exit, nothing useful on stdout — "the guard failed
+# to run", never "nothing to report", the same contract every reader in
+# this file obeys) on: a missing file, unparseable JSON, either top-level
+# document not a JSON object keyed by code, a translatable field that is
+# present but not itself a locale-map object, or an `en` that is absent (not
+# a string at all) on a field that requires one. This is independent of
+# `catalog_meta_locale_shape` — it is NOT assumed to have already run — so a
+# malformed field is never read as "complete" by a caller that invokes this
+# guard on its own. The one field allowed a blank (not absent) `en` is
+# `responsibilities`, per the sentinel above; every other field requires a
+# non-blank `en` before completeness is even asked.
+# ---------------------------------------------------------------------------
+# shellcheck disable=SC2016
+# Single-quoted for the same reason as CI_META_LOCALE_SHAPE_SCRIPT above:
+# this is a JavaScript template literal that must reach bun untouched.
+CI_META_LOCALE_COMPLETENESS_SCRIPT='
+  const tree = process.env.CI_TREE;
+  const knownLocales = (process.env.CI_LOCALES || "en").split(" ").filter(Boolean);
+  const isBlank = (s) => typeof s !== "string" || s.length === 0;
+
+  // Independent of catalog_meta_locale_shape by design (see the comment
+  // above this script): fails closed on the same two shapes that guard names
+  // ("not-a-locale-map", "missing-en"), so a caller that runs this guard
+  // alone never reads a malformed field as complete.
+  const shapeOk = (value, allowBlankEn) => {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+    if (allowBlankEn) return typeof value.en === "string";
+    return !isBlank(value.en);
+  };
+
+  const out = [];
+
+  const checkField = (entry, code, field, allowBlankEn, prefix) => {
+    const value = entry ? entry[field] : undefined;
+    if (!shapeOk(value, allowBlankEn)) {
+      console.error(`ci-guards: ${tree} ${prefix}:${code}:${field} is not a well-formed locale map (not an object, or its en is absent) -- see catalog_meta_locale_shape.`);
+      process.exit(1);
+    }
+    // The documented sentinel: a role whose responsibilities.en is itself
+    // blank has not been authored at all yet (FrameworkGap kind=n). No
+    // locale is expected for it, it or otherwise, until en exists.
+    if (allowBlankEn && value.en === "") return;
+    for (const locale of knownLocales) {
+      if (isBlank(value[locale])) {
+        out.push(`${prefix}:${code}:${field}:missing-${locale}`);
+      }
+    }
+  };
+
+  let competencies;
+  try {
+    competencies = JSON.parse(await Bun.file(`${tree}/competencies.json`).text());
+  } catch (e) {
+    console.error(`ci-guards: cannot read or parse ${tree}/competencies.json: ${e.message}`);
+    process.exit(1);
+  }
+  if (competencies === null || typeof competencies !== "object" || Array.isArray(competencies)) {
+    console.error(`ci-guards: ${tree}/competencies.json must be a JSON OBJECT keyed by competency code.`);
+    process.exit(1);
+  }
+  for (const code of Object.keys(competencies)) {
+    checkField(competencies[code], code, "name", false, "COMPETENCIES");
+    checkField(competencies[code], code, "definition", false, "COMPETENCIES");
+  }
+
+  let roles;
+  try {
+    roles = JSON.parse(await Bun.file(`${tree}/roles.json`).text());
+  } catch (e) {
+    console.error(`ci-guards: cannot read or parse ${tree}/roles.json: ${e.message}`);
+    process.exit(1);
+  }
+  if (roles === null || typeof roles !== "object" || Array.isArray(roles)) {
+    console.error(`ci-guards: ${tree}/roles.json must be a JSON OBJECT keyed by role code.`);
+    process.exit(1);
+  }
+  for (const code of Object.keys(roles)) {
+    checkField(roles[code], code, "name", false, "ROLES");
+    checkField(roles[code], code, "responsibilities", true, "ROLES");
+  }
+
+  console.log(out.join("\n"));
+'
+
+catalog_meta_locale_completeness() {
+  CI_TREE="$1"
+  export CI_TREE
+  if [ ! -f "$CI_TREE/competencies.json" ] || [ ! -f "$CI_TREE/roles.json" ]; then
+    echo "ci-guards: $CI_TREE/competencies.json or roles.json does not exist." >&2
+    return 1
+  fi
+  bun --eval "$CI_META_LOCALE_COMPLETENESS_SCRIPT"
+}
+
+# ---------------------------------------------------------------------------
 # Shape and completeness of an ANCHORED pair (bars-catalogue-completion).
 #
 # `bars_competency_keys` answers "is this competency COVERED at all" with a

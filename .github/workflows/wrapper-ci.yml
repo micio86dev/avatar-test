@@ -824,6 +824,49 @@ jobs:
           done
 
           # ------------------------------------------------------------------
+          # roles.json / competencies.json locale COMPLETENESS — the gap the
+          # shape check above deliberately leaves open. `catalog_meta_locale_
+          # shape` only requires `en`; every other locale key is optional, so
+          # a field authored `{"en": "..."}` alone passes it. That is exactly
+          # how 46 strings (18 competencies x {name, definition}, 5 roles x
+          # {name, responsibilities}) shipped to production with no `it`
+          # value at all: `scripts/framework-locale-gaps.txt` and its four
+          # guards track role x competency BARS PAIRS only and had nothing to
+          # say about a roles.json/competencies.json FIELD, and the global
+          # missing_translation FrameworkGap — scored over that same BARS
+          # pair set — reported "it locale: all 83 of 83 role x competency
+          # pairs translated" throughout, true about its own domain and
+          # silent about this one. This is the guard that closes it.
+          #
+          # See catalog_meta_locale_completeness's own comment in
+          # scripts/ci-guards.sh for how it decides which locales are
+          # expected (CI_LOCALES, set once above — never derived from what
+          # happens to be present, which would have passed the exact bug
+          # this guard exists to catch) and the argument against giving this
+          # a fourth control file the way scripts/framework-locale-gaps.txt
+          # has one: 46 strings in two files, authored atomically whenever a
+          # competency or role is added at all, have no legitimate half-
+          # landed state to name — unlike the incrementally-authored BARS
+          # catalog its siblings track. Blocking, unconditionally.
+          # ------------------------------------------------------------------
+          for TREE in "$SRC" "$VENDORED"; do
+            if catalog_meta_locale_completeness "$TREE" > "$LIST"; then
+              while IFS= read -r ENTRY; do
+                [ -n "$ENTRY" ] || continue
+                echo "ERROR: $TREE has an incomplete roles.json/competencies.json translation: '$ENTRY'."
+                echo "  Every name/definition value must carry a non-empty value for every locale in CI_LOCALES ($CI_LOCALES)."
+                echo "  roles.json responsibilities is exempt ONLY while its own 'en' value is blank (role not yet authored, FrameworkGap kind=n)."
+                FAIL=1
+              done < "$LIST"
+            else
+              echo "ERROR: the roles.json/competencies.json locale-completeness check could not read $TREE."
+              echo "  This is a guard that FAILED TO RUN, not a catalog that passed. See the"
+              echo "  ci-guards message above for the cause (malformed JSON, a field that is not a locale map, or an absent en)."
+              FAIL=1
+            fi
+          done
+
+          # ------------------------------------------------------------------
           # CROSS-LOCALE duplicate divergence (framework-catalog-it-translations
           # design D2a) — the one mechanical fidelity check that exists: an
           # Italian pair diverging where the English is byte-identical (or
@@ -2320,6 +2363,74 @@ jobs:
             fi
           done
           echo "  ok — the committed roles.json/competencies.json are locale-shape-clean in both trees"
+
+          # ------------------------------------------------------------------
+          # roles.json / competencies.json locale COMPLETENESS — the 46-
+          # string gap. Two directions: the guard must CATCH a field missing
+          # a locale CI_LOCALES expects (while still honoring the
+          # responsibilities blank-en sentinel, not contradicting it), and
+          # it must FAIL CLOSED — nonzero exit, not a clean report — on input
+          # too malformed to even ask the question of.
+          #
+          # Calls catalog_meta_locale_completeness directly — the SAME
+          # function the real gate in step (d) calls — against fixtures
+          # built to trip it, not a re-typed narrower copy of its logic.
+          # ------------------------------------------------------------------
+          mkdir -p "$FIXTURE/meta-completeness-bad"
+          printf '{"PRS": {"name": {"en":"Problem Solving"}, "definition": {"en":"d","it":"d"}}, "STG": {"name": {"en":"Strategy","it":"Strategia"}, "definition": {"en":"d"}}}' \
+            > "$FIXTURE/meta-completeness-bad/competencies.json"
+          printf '{"ICO": {"name": {"en":"Individual Contributor","it":"Collaboratore individuale"}, "responsibilities": {"en":""}, "competencies": ["PRS"]}, "FLL": {"name": {"en":"Front Line Leader"}, "responsibilities": {"en":"x","it":"x"}, "competencies": ["PRS"]}, "MLL": {"name": {"en":"x","it":"x"}, "responsibilities": {"en":"authored, no it yet"}, "competencies": ["PRS"]}}' \
+            > "$FIXTURE/meta-completeness-bad/roles.json"
+          COMPLETE_BAD=$(catalog_meta_locale_completeness "$FIXTURE/meta-completeness-bad")
+          COMPLETE_OK=1
+          for REASON in "COMPETENCIES:PRS:name:missing-it" "COMPETENCIES:STG:definition:missing-it" "ROLES:FLL:name:missing-it" "ROLES:MLL:responsibilities:missing-it"; do
+            if ! printf '%s\n' "$COMPLETE_BAD" | grep -qxF "$REASON"; then
+              echo "SELF-TEST FAILED: the meta-locale-completeness guard did not report '$REASON' for its known-bad fixture. Got:"
+              printf '%s\n' "$COMPLETE_BAD"
+              FAILED=1
+              COMPLETE_OK=0
+            fi
+          done
+          if printf '%s\n' "$COMPLETE_BAD" | grep -q '^ROLES:ICO:responsibilities:'; then
+            echo "SELF-TEST FAILED: the meta-locale-completeness guard flagged ICO's blank-EN responsibilities as an incomplete translation — a blank 'en' is the documented 'role not yet authored' sentinel (FrameworkGap kind=n), and this guard must agree with catalog_meta_locale_shape's own decision to skip it, not contradict it."
+            FAILED=1
+            COMPLETE_OK=0
+          fi
+          [ "$COMPLETE_OK" -eq 1 ] && echo "  ok — meta-locale-completeness guard catches a competency name and definition each missing 'it', a role name missing 'it', and an AUTHORED responsibilities field missing 'it' — and still leaves the blank-EN 'not yet authored' sentinel alone"
+
+          mkdir -p "$FIXTURE/meta-completeness-notobject" "$FIXTURE/meta-completeness-noen"
+          printf '{"PRS": {"name": "bare string, pre-migration shape", "definition": {"en":"d","it":"d"}}}' \
+            > "$FIXTURE/meta-completeness-notobject/competencies.json"
+          printf '{"ICO": {"name": {"en":"x","it":"x"}, "responsibilities": {"en":"x","it":"x"}, "competencies": []}}' \
+            > "$FIXTURE/meta-completeness-notobject/roles.json"
+          if catalog_meta_locale_completeness "$FIXTURE/meta-completeness-notobject" >/tmp/meta-completeness-notobject.out 2>/tmp/meta-completeness-notobject.err; then
+            echo "SELF-TEST FAILED: the meta-locale-completeness guard returned SUCCESS on a translatable field that is a bare string, not a locale-map object. It must fail closed instead of reading malformed input as complete. stdout was:"
+            cat /tmp/meta-completeness-notobject.out
+          else
+            echo "  ok — meta-locale-completeness guard fails closed (nonzero exit) on a translatable field that is not an object:"
+            sed 's/^/    /' /tmp/meta-completeness-notobject.err
+          fi
+
+          printf '{"PRS": {"name": {"en":"Problem Solving","it":"x"}, "definition": {"en":"d","it":"d"}}}' \
+            > "$FIXTURE/meta-completeness-noen/competencies.json"
+          printf '{"ICO": {"name": {"en":"x","it":"x"}, "responsibilities": {"it":"present but en is entirely absent"}, "competencies": []}}' \
+            > "$FIXTURE/meta-completeness-noen/roles.json"
+          if catalog_meta_locale_completeness "$FIXTURE/meta-completeness-noen" >/tmp/meta-completeness-noen.out 2>/tmp/meta-completeness-noen.err; then
+            echo "SELF-TEST FAILED: the meta-locale-completeness guard returned SUCCESS on a responsibilities field with no 'en' key at all (not even a blank one — the sentinel requires en to be PRESENT and empty, not absent). It must fail closed. stdout was:"
+            cat /tmp/meta-completeness-noen.out
+          else
+            echo "  ok — meta-locale-completeness guard fails closed (nonzero exit) on a field whose 'en' is absent rather than blank:"
+            sed 's/^/    /' /tmp/meta-completeness-noen.err
+          fi
+
+          for TREE in docs/app_description/02-domain/framework api/database/framework; do
+            COMPLETE=$(catalog_meta_locale_completeness "$TREE") || { echo "SELF-TEST FAILED: could not read $TREE for locale-map completeness."; FAILED=1; }
+            if [ -n "$COMPLETE" ]; then
+              echo "SELF-TEST FAILED: $TREE has an incomplete roles.json/competencies.json translation: $COMPLETE"
+              FAILED=1
+            fi
+          done
+          echo "  ok — the committed roles.json/competencies.json are fully translated (en+it) in both trees"
 
           # ------------------------------------------------------------------
           # Partial IT-coverage control file (framework-catalog-it-translations
