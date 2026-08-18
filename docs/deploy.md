@@ -46,3 +46,28 @@ variables. Key differences from local docker-compose values:
 | `REDIS_HOST` | `redis` (compose service name) | Railway Redis private host |
 | `NUXT_PUBLIC_API_BASE` | `http://api:9000/api` | HTTPS API service URL |
 | `NUXT_PUBLIC_APP_ENV` | `local` | `staging` or `production` |
+
+## Recovering a Locked-Out User
+
+When an existing user has forgotten their password and no in-app recovery
+path applies (self-service email reset is not yet shipped), an operator with
+shell access to the `api` service can reset it directly:
+
+```
+railway ssh --service api -- php artisan beai:reset-user-password user@example.com --no-interaction
+```
+
+- The password is always **generated**, never supplied — there is no
+  `--password=` option, so a credential is never typed into shell history.
+- The generated password is **printed exactly once**, in the command's own
+  output. It is not stored anywhere else and cannot be recovered afterward —
+  copy it immediately.
+- The reset **revokes every existing session** for that user: any token
+  issued before the reset is rejected on its next use, regardless of
+  remaining TTL, so every device the user was logged into must sign in again.
+- A **deactivated** user is refused, not reactivated — reactivate them first
+  (via the backoffice or `POST /api/users/{id}/reactivate`), then re-run the
+  command.
+- This command only resets an **existing** user. For a deployment with no
+  organization and therefore no admin at all, use
+  `beai:provision-organization` instead.
