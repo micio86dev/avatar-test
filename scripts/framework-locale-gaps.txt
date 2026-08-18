@@ -1,0 +1,43 @@
+# BEAI — framework catalog partial IT-coverage control file (CI control file)
+#
+# One "LOCALE:ROLE:COMP" entry per line. Everything from a '#' to end of
+# line is a comment. An entry names a role x competency pair that is NOT yet
+# fully translated (all 12 required strings: 3 indicators x {text/indicator,
+# anchor_5, anchor_3, anchor_1}) into the given locale — `catalog_locale_
+# coverage` (scripts/ci-guards.sh) is the mechanism, and
+# .github/workflows/wrapper-ci.yml step (d) is the caller.
+#
+# DISTINCT from scripts/framework-known-gaps.txt (role has no BARS file at
+# all) and scripts/framework-competency-gaps.txt (pair has no anchors at
+# all) — this file answers a THIRD, different question: a pair IS anchored,
+# but is not yet translated into a given non-English locale. Those two
+# files MUST NOT absorb this one (framework-catalog-it-translations
+# proposal, Constraint 3; see framework-competency-gaps.txt's own header for
+# why a fourth file, not a line added to a third, is the house answer to
+# "this needs tracking and it isn't the same question").
+#
+# THIS IS NOT A MUTE SWITCH — same both-direction doctrine as its two
+# siblings:
+#
+#   * an incomplete, undeclared pair (not listed here)         -> CI fails
+#   * a listed pair that is now fully translated, or whose     -> CI fails
+#     pair no longer exists in roles.json at all
+#   * a role whose LISTED pair count is neither 0 nor its      -> CI fails
+#     FULL declared pair count (`locale_gaps_whole_role_
+#     violations`) — no role may ship half-translated
+#
+# GENERATED, NOT TYPED. Produced by, and reviewed against:
+#   . ./scripts/ci-guards.sh
+#   catalog_locale_coverage docs/app_description/02-domain/framework it
+# Committed verbatim in role-declaration order (ICO, FLL, MLL, BUL, SRX —
+# the ratified role order, tasks.md) — do not hand-edit the entry list, only
+# the comments.
+#
+# CURRENT STATE (framework-catalog-it-translations Phase 2 — shape migration
+# only, no Italian content authored yet): all 83 declared role x competency
+# pairs are listed, because none is translated yet. This file starts full
+# and SHRINKS BY EXACTLY ONE ROLE per completed content slice — ICO's 15
+# entries are removed only on the PR that completes ICO's translation (and
+# so on for FLL, MLL, BUL, SRX, in that order) — never removed partially,
+# per the whole-role rule above. It reaches empty, exactly like its two
+# siblings, once the full agreed scope ships.

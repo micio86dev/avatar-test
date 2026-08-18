@@ -418,6 +418,16 @@ jobs:
         run: |
           . ./scripts/ci-guards.sh
 
+          # Locale dimension (framework-catalog-it-translations, design D1).
+          # Every locale-aware guard below reads this — set here, once, so a
+          # future locale (Italian first) is examined by every content guard
+          # from the moment its first string lands, not from whenever someone
+          # remembers to widen this line. "en" alone would make an "it" key
+          # in the catalogue an "unknown-locale-it" CI failure the day content
+          # PRs start landing — the ceiling is raised NOW, ahead of content,
+          # on purpose.
+          export CI_LOCALES="en it"
+
           SRC=docs/app_description/02-domain/framework
           VENDORED=api/database/framework
           FAIL=0
@@ -790,6 +800,110 @@ jobs:
             fi
           done
 
+          # ------------------------------------------------------------------
+          # roles.json / competencies.json locale-map SHAPE
+          # (framework-catalog-it-translations design D2 row 8) — 46 strings
+          # nothing else reads (role_keys/role_competency_pairs read only
+          # `code`/`competencies`; catalog_malformed_bars_entries reads bars
+          # files only). Without this check they carry the locale dimension
+          # under zero content guards.
+          # ------------------------------------------------------------------
+          for TREE in "$SRC" "$VENDORED"; do
+            if catalog_meta_locale_shape "$TREE" > "$LIST"; then
+              while IFS= read -r ENTRY; do
+                [ -n "$ENTRY" ] || continue
+                echo "ERROR: $TREE has a malformed roles.json/competencies.json locale field: '$ENTRY'."
+                echo "  Every name/definition/responsibilities value must be a locale-map object {\"en\":...,\"it\":...}, 'en' mandatory."
+                FAIL=1
+              done < "$LIST"
+            else
+              echo "ERROR: the roles.json/competencies.json locale-shape check could not read $TREE."
+              echo "  This is a guard that FAILED TO RUN, not a catalog that passed."
+              FAIL=1
+            fi
+          done
+
+          # ------------------------------------------------------------------
+          # CROSS-LOCALE duplicate divergence (framework-catalog-it-translations
+          # design D2a) — the one mechanical fidelity check that exists: an
+          # Italian pair diverging where the English is byte-identical (or
+          # converging where English differs) means the "translation" changed
+          # the source. Blocking. Empty today (no `it` content lands until a
+          # later, content-only PR) — this check is wired NOW so the first
+          # content PR is covered from its first commit, not from whenever
+          # someone remembers to add the gate.
+          # ------------------------------------------------------------------
+          for TREE in "$SRC" "$VENDORED"; do
+            if [ ! -d "$TREE/bars" ]; then
+              continue
+            fi
+            if catalog_crosslocale_duplicate_divergence "$TREE" > "$LIST"; then
+              while IFS= read -r ENTRY; do
+                [ -n "$ENTRY" ] || continue
+                echo "ERROR: $TREE has a cross-locale duplicate divergence: '$ENTRY'."
+                echo "  Either the Italian pair diverges where the English is identical (an improved/altered translation),"
+                echo "  or it converges where the English differs (a flattened translation). Translate faithfully instead."
+                FAIL=1
+              done < "$LIST"
+            else
+              echo "ERROR: the cross-locale divergence check could not read $TREE/bars/*.json."
+              echo "  This is a guard that FAILED TO RUN, not a catalog that passed."
+              FAIL=1
+            fi
+          done
+
+          # ------------------------------------------------------------------
+          # PARTIAL IT-COVERAGE control file (framework-catalog-it-translations
+          # design D6) — scripts/framework-locale-gaps.txt, same both-direction
+          # doctrine as the two siblings above, PLUS the whole-role rule: no
+          # role may ship half-translated. Checked for `it` only today (the
+          # one locale this change adds); a future locale adds its own loop
+          # iteration, not a rewrite of this one.
+          # ------------------------------------------------------------------
+          for TREE in "$SRC" "$VENDORED"; do
+            for LOCALE in it; do
+              if catalog_unexpected_locale_gaps "$TREE" "$LOCALE" > "$LIST"; then
+                while IFS= read -r PAIR; do
+                  [ -n "$PAIR" ] || continue
+                  echo "ERROR: '$PAIR' is an incomplete $LOCALE translation in $TREE, but is NOT listed in scripts/framework-locale-gaps.txt."
+                  echo "  Either finish translating it, or add it to the control file."
+                  FAIL=1
+                done < "$LIST"
+              else
+                echo "ERROR: the locale-coverage check could not read $TREE."
+                FAIL=1
+              fi
+
+              if catalog_stale_locale_gap_exemptions "$TREE" "$LOCALE" > "$LIST"; then
+                while IFS= read -r PAIR; do
+                  [ -n "$PAIR" ] || continue
+                  echo "ERROR: '$PAIR' is listed in scripts/framework-locale-gaps.txt, but is now fully translated (or no longer declared) in $TREE."
+                  echo "  Delete the '$PAIR' entry from scripts/framework-locale-gaps.txt."
+                  FAIL=1
+                done < "$LIST"
+              else
+                echo "ERROR: the stale locale-gap-exemption check could not read $TREE."
+                FAIL=1
+              fi
+            done
+          done
+
+          if VIOLATIONS=$(locale_gaps_whole_role_violations "$SRC"); then
+            if [ -n "$VIOLATIONS" ]; then
+              echo "$VIOLATIONS" | while IFS= read -r V; do
+                [ -n "$V" ] || continue
+                echo "ERROR: scripts/framework-locale-gaps.txt lists a PARTIAL role: '$V' (LOCALE:ROLE:LISTED/FULL) — no role may ship half-translated."
+              done
+              FAIL=1
+            fi
+          fi
+
+          INTERLEAVED=$(locale_gaps_role_order_violations)
+          if [ -n "$INTERLEAVED" ]; then
+            echo "ERROR: scripts/framework-locale-gaps.txt interleaves role '$INTERLEAVED' with another role's entries."
+            FAIL=1
+          fi
+
           rm -f "$LIST"
           [ "$FAIL" -eq 0 ] || {
             echo "To fix drift: cp -R docs/app_description/02-domain/framework/* api/database/framework/"
@@ -947,6 +1061,12 @@ jobs:
           # checked rather than asserted.
           set -e
           . ./scripts/ci-guards.sh
+
+          # Same locale ceiling as step (d) — a SEPARATE shell process, so it
+          # is not inherited; every locale-aware self-test row below needs it
+          # set explicitly, the same "'en' alone would make an 'it' key an
+          # unknown-locale failure" reasoning as step (d)'s own comment.
+          export CI_LOCALES="en it"
 
           FIXTURE=$(mktemp -d)
           FAILED=0
@@ -1752,24 +1872,33 @@ jobs:
           # OWN named line rather than being masked by the others).
           # ------------------------------------------------------------------
           mkdir -p "$FIXTURE/shape-bad/bars" "$FIXTURE/shape-good/bars"
-          GOOD_ENTRY='{"indicator":"Do the thing","scale":{"5":"Great","3":"Ok","1":"Bad"}}'
+          # Locale-map shape (framework-catalog-it-translations design D1):
+          # every leaf is now {"en": "..."}, not a bare string. GOOD_ENTRY
+          # below is the well-formed baseline every OTHER entry in this
+          # fixture is a deliberate one-field mutation of.
+          GOOD_ENTRY='{"indicator":{"en":"Do the thing"},"scale":{"5":{"en":"Great"},"3":{"en":"Ok"},"1":{"en":"Bad"}}}'
           printf '{
             "WRONGCOUNT": [%s, %s],
-            "EMPTYIND": [{"indicator":"","scale":{"5":"a","3":"b","1":"c"}}, %s, %s],
-            "WHITESPACE": [{"indicator":" leading space","scale":{"5":"a","3":"b","1":"c"}}, %s, %s],
-            "MISSINGLEVEL": [{"indicator":"x","scale":{"5":"a","3":"b"}}, %s, %s],
-            "EXTRALEVEL": [{"indicator":"x","scale":{"5":"a","3":"b","1":"c","2":"d"}}, %s, %s],
+            "EMPTYIND": [{"indicator":{"en":""},"scale":{"5":{"en":"a"},"3":{"en":"b"},"1":{"en":"c"}}}, %s, %s],
+            "WHITESPACE": [{"indicator":{"en":" leading space"},"scale":{"5":{"en":"a"},"3":{"en":"b"},"1":{"en":"c"}}}, %s, %s],
+            "MISSINGLEVEL": [{"indicator":{"en":"x"},"scale":{"5":{"en":"a"},"3":{"en":"b"}}}, %s, %s],
+            "EXTRALEVEL": [{"indicator":{"en":"x"},"scale":{"5":{"en":"a"},"3":{"en":"b"},"1":{"en":"c"},"2":{"en":"d"}}}, %s, %s],
+            "OLDSHAPE": [{"indicator":"bare string, pre-migration shape","scale":{"5":{"en":"a"},"3":{"en":"b"},"1":{"en":"c"}}}, %s, %s],
+            "NOEN": [{"indicator":{"it":"solo italiano"},"scale":{"5":{"en":"a"},"3":{"en":"b"},"1":{"en":"c"}}}, %s, %s],
+            "UNKNOWNLOCALE": [{"indicator":{"en":"x","fr":"y"},"scale":{"5":{"en":"a"},"3":{"en":"b"},"1":{"en":"c"}}}, %s, %s],
             "EMPTYARRAY": [],
             "OK": [%s, %s, %s]
           }' "$GOOD_ENTRY" "$GOOD_ENTRY" "$GOOD_ENTRY" "$GOOD_ENTRY" "$GOOD_ENTRY" "$GOOD_ENTRY" \
+             "$GOOD_ENTRY" "$GOOD_ENTRY" "$GOOD_ENTRY" "$GOOD_ENTRY" "$GOOD_ENTRY" "$GOOD_ENTRY" \
              "$GOOD_ENTRY" "$GOOD_ENTRY" "$GOOD_ENTRY" "$GOOD_ENTRY" "$GOOD_ENTRY" "$GOOD_ENTRY" "$GOOD_ENTRY" \
              > "$FIXTURE/shape-bad/bars/TST.json"
 
           SHAPE_BAD=$(catalog_malformed_bars_entries "$FIXTURE/shape-bad" TST)
           SHAPE_OK=1
-          for REASON in "TST:WRONGCOUNT:count-2" "TST:EMPTYIND:malformed-entry" \
-                        "TST:WHITESPACE:malformed-entry" "TST:MISSINGLEVEL:malformed-entry" \
-                        "TST:EXTRALEVEL:malformed-entry"; do
+          for REASON in "TST:WRONGCOUNT:count-2" "TST:EMPTYIND:missing-en" \
+                        "TST:WHITESPACE:missing-en" "TST:MISSINGLEVEL:malformed-entry" \
+                        "TST:EXTRALEVEL:malformed-entry" "TST:OLDSHAPE:not-a-locale-map" \
+                        "TST:NOEN:missing-en" "TST:UNKNOWNLOCALE:unknown-locale-fr"; do
             if ! printf '%s\n' "$SHAPE_BAD" | grep -qxF "$REASON"; then
               echo "SELF-TEST FAILED: the shape guard did not report '$REASON' for its known-bad fixture."
               FAILED=1
@@ -1787,7 +1916,7 @@ jobs:
             FAILED=1
             SHAPE_OK=0
           fi
-          [ "$SHAPE_OK" -eq 1 ] && echo "  ok — shape guard catches wrong-count, empty-indicator, leading-whitespace, missing-level and extra-level, and leaves well-formed entries and coverage stubs alone"
+          [ "$SHAPE_OK" -eq 1 ] && echo "  ok — shape guard catches wrong-count, empty-indicator, leading-whitespace, missing-level, extra-level, the pre-migration bare-string shape, a missing 'en' key and an unknown locale key — and leaves well-formed entries and coverage stubs alone"
 
           printf '{"OK": [%s, %s, %s]}' "$GOOD_ENTRY" "$GOOD_ENTRY" "$GOOD_ENTRY" > "$FIXTURE/shape-good/bars/TST.json"
           FALSE=$(catalog_malformed_bars_entries "$FIXTURE/shape-good" TST)
@@ -1836,59 +1965,112 @@ jobs:
 
           WC_LONG_ANCHOR="Consistently drives results across every business unit in the organization even when individual markets face sudden and prolonged disruption"
           WC_OK_ANCHOR="Consistently drives results across every business unit in the organization even when individual markets face sudden prolonged disruption"
-          printf '{"PRS": [{"indicator":"Do the thing","scale":{"5":"%s","3":"%s","1":"%s"}}]}' \
+          printf '{"PRS": [{"indicator":{"en":"Do the thing"},"scale":{"5":{"en":"%s"},"3":{"en":"%s"},"1":{"en":"%s"}}}]}' \
             "$WC_LONG_ANCHOR" "$WC_OK_ANCHOR" "$WC_OK_ANCHOR" > "$FIXTURE/wc-long/bars/TST.json"
 
           expect_caught "anchor word-count ceiling (19-word fixture)" \
-            "$(catalog_overlong_bars_anchors "$FIXTURE/wc-long" TST)"
-          WC_LONG_LINE=$(catalog_overlong_bars_anchors "$FIXTURE/wc-long" TST)
-          if [ "$WC_LONG_LINE" != "TST:PRS:5:19" ]; then
-            echo "SELF-TEST FAILED: expected 'TST:PRS:5:19' from the 19-word fixture, got: $WC_LONG_LINE"
+            "$(catalog_overlong_bars_anchors "$FIXTURE/wc-long" TST en)"
+          WC_LONG_LINE=$(catalog_overlong_bars_anchors "$FIXTURE/wc-long" TST en)
+          if [ "$WC_LONG_LINE" != "TST:PRS:5:en:19" ]; then
+            echo "SELF-TEST FAILED: expected 'TST:PRS:5:en:19' from the 19-word fixture, got: $WC_LONG_LINE"
             FAILED=1
           else
-            echo "  ok — the max-18 anchor guard reports the exact ROLE:COMP:LEVEL:WORDCOUNT for a 19-word anchor, and leaves its compliant 18-word siblings alone"
+            echo "  ok — the max-18 anchor guard reports the exact ROLE:COMP:LEVEL:LOCALE:WORDCOUNT for a 19-word anchor, and leaves its compliant 18-word siblings alone"
           fi
 
           # ICO exemption — the SAME fixture shape, deliberately over the
           # ceiling (22 words, ICO's own two-sentence register), called with
           # role ICO through the SAME function. Empty output proves the
           # exemption is a real skip INSIDE the function the real gate
-          # calls, not a coincidence of a clean fixture.
+          # calls, not a coincidence of a clean fixture. Also proven
+          # LOCALE-BLIND (design D2 row 5): the same fixture, examined as
+          # `it` with a deliberately LOW override ceiling that would
+          # otherwise trip immediately, must still be empty.
           WC_ICO_ANCHOR="Recognizes symptoms that indicate underlying problems across multiple areas and consistently investigates root causes before proposing any corrective action for the team"
-          printf '{"PRS": [{"indicator":"Do the thing","scale":{"5":"%s","3":"%s","1":"%s"}}]}' \
-            "$WC_ICO_ANCHOR" "$WC_ICO_ANCHOR" "$WC_ICO_ANCHOR" > "$FIXTURE/wc-ico/bars/ICO.json"
-          FALSE=$(catalog_overlong_bars_anchors "$FIXTURE/wc-ico" ICO)
+          printf '{"PRS": [{"indicator":{"en":"Do the thing"},"scale":{"5":{"en":"%s","it":"%s"},"3":{"en":"%s"},"1":{"en":"%s"}}}]}' \
+            "$WC_ICO_ANCHOR" "$WC_ICO_ANCHOR" "$WC_ICO_ANCHOR" "$WC_ICO_ANCHOR" > "$FIXTURE/wc-ico/bars/ICO.json"
+          FALSE=$(catalog_overlong_bars_anchors "$FIXTURE/wc-ico" ICO en)
           if [ -n "$FALSE" ]; then
             echo "SELF-TEST FAILED: the max-18 guard fired on ICO, which is exempt (documented, different two-sentence register): $FALSE"
             FAILED=1
           else
             echo "  ok — the max-18 anchor guard exempts ICO explicitly, even against a fixture that would otherwise trip it"
           fi
+          FALSE_IT=$(CI_ANCHOR_WORDCOUNT_MAX_IT=1 catalog_overlong_bars_anchors "$FIXTURE/wc-ico" ICO it)
+          if [ -n "$FALSE_IT" ]; then
+            echo "SELF-TEST FAILED: the max-18 guard's ICO exemption is not locale-blind — it examined an ICO 'it' anchor: $FALSE_IT"
+            FAILED=1
+          else
+            echo "  ok — the max-18 anchor guard's ICO exemption is locale-blind: an ICO 'it' anchor is not examined even with a ceiling of 1"
+          fi
 
-          if catalog_overlong_bars_anchors "$FIXTURE/wc-long" NOFILE >/dev/null 2>&1; then
+          if catalog_overlong_bars_anchors "$FIXTURE/wc-long" NOFILE en >/dev/null 2>&1; then
             echo "SELF-TEST FAILED: the max-18 guard reported SUCCESS on a bars file that does not exist."
             FAILED=1
           else
             echo "  ok — max-18 guard fails closed on a missing bars file for a non-exempt role"
           fi
 
+          # Per-locale ceiling, and fail-closed when unconfigured (design D3).
+          #
+          # The fail-closed half is exercised against locale 'fr', NOT 'it'.
+          # It used to use 'it', which worked only while the Italian ceiling
+          # was unmeasured; the Phase 4 pilot measured it (26 words) and gave
+          # CI_ANCHOR_WORDCOUNT_MAX_IT a default, so 'it' can no longer reach
+          # that branch and the row started asserting the opposite of what it
+          # claimed. 'fr' has no constant at all, which is the real condition
+          # under test — and pointing at a locale nobody has measured also
+          # proves the mechanism generalises past the one locale it was
+          # written for, rather than being an it-shaped special case.
+          #
+          # With a self-test override ceiling of 15, the same 22-word IT
+          # anchor must be CAUGHT.
+          printf '{"PRS": [{"indicator":{"en":"Do the thing"},"scale":{"5":{"en":"%s","it":"%s"},"3":{"en":"%s"},"1":{"en":"%s"}}}]}' \
+            "$WC_LONG_ANCHOR" "uno due tre quattro cinque sei sette otto nove dieci undici dodici tredici quattordici quindici sedici diciassette diciotto diciannove venti ventuno ventidue" \
+            "$WC_OK_ANCHOR" "$WC_OK_ANCHOR" > "$FIXTURE/wc-long/bars/TST.json"
+          if catalog_overlong_bars_anchors "$FIXTURE/wc-long" TST fr >/dev/null 2>&1; then
+            echo "SELF-TEST FAILED: catalog_overlong_bars_anchors returned SUCCESS for locale 'fr' with NO measured ceiling configured — it must fail closed (design D3)."
+            FAILED=1
+          else
+            echo "  ok — catalog_overlong_bars_anchors fails closed on an unconfigured locale ceiling, rather than silently passing or reusing the EN number"
+          fi
+          WC_LONG_IT_LINE=$(CI_ANCHOR_WORDCOUNT_MAX_IT=15 catalog_overlong_bars_anchors "$FIXTURE/wc-long" TST it)
+          if [ "$WC_LONG_IT_LINE" != "TST:PRS:5:it:22" ]; then
+            echo "SELF-TEST FAILED: expected 'TST:PRS:5:it:22' from the 22-word IT fixture with an overridden ceiling of 15, got: $WC_LONG_IT_LINE"
+            FAILED=1
+          else
+            echo "  ok — with a measured IT ceiling configured, an over-ceiling IT anchor is caught by the SAME function the real gate calls"
+          fi
+
+          # The line design D1 names ("the guard that would go silently
+          # blind"): a non-string 'it' value under the new shape must HARD
+          # FAIL, never silently continue past it.
+          printf '{"PRS": [{"indicator":{"en":"Do the thing"},"scale":{"5":{"en":"ok text here"},"3":{"en":"ok"},"1":{"en":"ok","it":12345}}}]}' \
+            > "$FIXTURE/wc-long/bars/BADTYPE.json"
+          if bars_anchor_word_counts "$FIXTURE/wc-long" BADTYPE >/dev/null 2>&1; then
+            echo "SELF-TEST FAILED: bars_anchor_word_counts returned SUCCESS on a non-string 'it' anchor value — it must hard-fail (design D1), not silently skip it."
+            FAILED=1
+          else
+            echo "  ok — bars_anchor_word_counts hard-fails on a non-string locale value instead of silently skipping it (the exact 'silently blind' defect design D1 names)"
+          fi
+
           # The floor: NON-BLOCKING report in step (d), same doctrine as the
           # hedge-rate line — but the FUNCTION still has to actually detect a
           # short anchor when fed one.
           WC_SHORT_ANCHOR="Fails to plan ahead"
-          printf '{"PRS": [{"indicator":"Do the thing","scale":{"5":"%s","3":"%s","1":"%s"}}]}' \
+          printf '{"PRS": [{"indicator":{"en":"Do the thing"},"scale":{"5":{"en":"%s"},"3":{"en":"%s"},"1":{"en":"%s"}}}]}' \
             "$WC_OK_ANCHOR" "$WC_OK_ANCHOR" "$WC_SHORT_ANCHOR" > "$FIXTURE/wc-short/bars/TST.json"
           expect_caught "anchor word-count floor (non-blocking report)" \
-            "$(catalog_short_bars_anchors "$FIXTURE/wc-short" TST)"
-          WC_SHORT_LINE=$(catalog_short_bars_anchors "$FIXTURE/wc-short" TST)
-          if [ "$WC_SHORT_LINE" != "TST:PRS:1:4" ]; then
-            echo "SELF-TEST FAILED: expected 'TST:PRS:1:4' from the 4-word fixture, got: $WC_SHORT_LINE"
+            "$(catalog_short_bars_anchors "$FIXTURE/wc-short" TST en)"
+          WC_SHORT_LINE=$(catalog_short_bars_anchors "$FIXTURE/wc-short" TST en)
+          if [ "$WC_SHORT_LINE" != "TST:PRS:1:en:4" ]; then
+            echo "SELF-TEST FAILED: expected 'TST:PRS:1:en:4' from the 4-word fixture, got: $WC_SHORT_LINE"
             FAILED=1
           else
-            echo "  ok — the floor report names the exact ROLE:COMP:LEVEL:WORDCOUNT for a short anchor"
+            echo "  ok — the floor report names the exact ROLE:COMP:LEVEL:LOCALE:WORDCOUNT for a short anchor"
           fi
 
-          if catalog_short_bars_anchors "$FIXTURE/wc-long" NOFILE >/dev/null 2>&1; then
+          if catalog_short_bars_anchors "$FIXTURE/wc-long" NOFILE en >/dev/null 2>&1; then
             echo "SELF-TEST FAILED: the floor report reported SUCCESS on a bars file that does not exist."
             FAILED=1
           else
@@ -1922,24 +2104,24 @@ jobs:
           # only WITHIN one role's own file.
           # ------------------------------------------------------------------
           mkdir -p "$FIXTURE/xrole-dup/bars" "$FIXTURE/xrole-clean/bars"
-          printf '{"PRS": [{"indicator":"Shared sentence","scale":{"5":"a","3":"b","1":"c"}}]}' \
+          printf '{"PRS": [{"indicator":{"en":"Shared sentence"},"scale":{"5":{"en":"a"},"3":{"en":"b"},"1":{"en":"c"}}}]}' \
             > "$FIXTURE/xrole-dup/bars/AAA.json"
-          printf '{"PRS": [{"indicator":"Shared sentence","scale":{"5":"d","3":"e","1":"f"}}]}' \
+          printf '{"PRS": [{"indicator":{"en":"Shared sentence"},"scale":{"5":{"en":"d"},"3":{"en":"e"},"1":{"en":"f"}}}]}' \
             > "$FIXTURE/xrole-dup/bars/BBB.json"
           expect_caught "cross-role anchor identity" "$(catalog_crossrole_duplicates "$FIXTURE/xrole-dup")"
           DUP_LINE=$(catalog_crossrole_duplicates "$FIXTURE/xrole-dup")
-          if [ "$DUP_LINE" != "AAA:BBB:PRS:indicator" ]; then
-            echo "SELF-TEST FAILED: expected 'AAA:BBB:PRS:indicator', got: $DUP_LINE"
+          if [ "$DUP_LINE" != "AAA:BBB:PRS:en:indicator" ]; then
+            echo "SELF-TEST FAILED: expected 'AAA:BBB:PRS:en:indicator', got: $DUP_LINE"
             FAILED=1
           else
-            echo "  ok — cross-role guard names the exact ROLE_A:ROLE_B:COMP:FIELD tuple, roles alphabetised"
+            echo "  ok — cross-role guard names the exact ROLE_A:ROLE_B:COMP:LOCALE:FIELD tuple, roles alphabetised"
           fi
 
           # Same string, DIFFERENT competency in each role — must NOT fire:
           # the guard's unit is per-competency, not a whole-catalogue string pool.
-          printf '{"PRS": [{"indicator":"Shared sentence","scale":{"5":"a","3":"b","1":"c"}}]}' \
+          printf '{"PRS": [{"indicator":{"en":"Shared sentence"},"scale":{"5":{"en":"a"},"3":{"en":"b"},"1":{"en":"c"}}}]}' \
             > "$FIXTURE/xrole-clean/bars/AAA.json"
-          printf '{"STG": [{"indicator":"Shared sentence","scale":{"5":"d","3":"e","1":"f"}}]}' \
+          printf '{"STG": [{"indicator":{"en":"Shared sentence"},"scale":{"5":{"en":"d"},"3":{"en":"e"},"1":{"en":"f"}}}]}' \
             > "$FIXTURE/xrole-clean/bars/BBB.json"
           FALSE=$(catalog_crossrole_duplicates "$FIXTURE/xrole-clean")
           if [ -n "$FALSE" ]; then
@@ -1949,6 +2131,21 @@ jobs:
             echo "  ok — cross-role guard does not fire on the same string under different competencies"
           fi
 
+          # THE line design D1 names for this guard too: a non-locale-map
+          # value used to be silently `continue`d past
+          # (`typeof val !== "string" ... continue`), which under the new
+          # shape would let the whole tree pass vacuously. It is now a hard
+          # failure.
+          mkdir -p "$FIXTURE/xrole-oldshape/bars"
+          printf '{"PRS": [{"indicator":"bare string, pre-migration shape","scale":{"5":{"en":"a"},"3":{"en":"b"},"1":{"en":"c"}}}]}' \
+            > "$FIXTURE/xrole-oldshape/bars/AAA.json"
+          if catalog_crossrole_duplicates "$FIXTURE/xrole-oldshape" >/dev/null 2>&1; then
+            echo "SELF-TEST FAILED: catalog_crossrole_duplicates returned SUCCESS on a pre-migration bare-string indicator — it must hard-fail (design D1), not silently skip it."
+            FAILED=1
+          else
+            echo "  ok — cross-role guard hard-fails on a non-locale-map value instead of silently skipping it (the exact 'silently blind' defect design D1 names)"
+          fi
+
           # A string repeated twice WITHIN one role's own file must not fire —
           # "identical across roles" (the spec's own wording), not within one.
           # A DEDICATED, single-role fixture directory — reusing xrole-clean
@@ -1956,7 +2153,7 @@ jobs:
           # cross-role duplicate the moment a third file lands beside them,
           # testing nothing about the within-one-role case specifically.
           mkdir -p "$FIXTURE/xrole-within/bars"
-          printf '{"PRS": [{"indicator":"Same sentence twice","scale":{"5":"a","3":"b","1":"c"}},{"indicator":"Same sentence twice","scale":{"5":"d","3":"e","1":"f"}}]}' \
+          printf '{"PRS": [{"indicator":{"en":"Same sentence twice"},"scale":{"5":{"en":"a"},"3":{"en":"b"},"1":{"en":"c"}}},{"indicator":{"en":"Same sentence twice"},"scale":{"5":{"en":"d"},"3":{"en":"e"},"1":{"en":"f"}}}]}' \
             > "$FIXTURE/xrole-within/bars/AAA.json"
           FALSE=$(catalog_crossrole_duplicates "$FIXTURE/xrole-within")
           if [ -n "$FALSE" ]; then
@@ -1977,7 +2174,7 @@ jobs:
           # the known-gaps and competency-gaps fixtures above, against
           # CI_CROSSROLE_BASELINE_FILE's own override seam.
           REAL_CROSSROLE_BASELINE_FILE="$CI_CROSSROLE_BASELINE_FILE"
-          printf 'AAA:BBB:PRS:indicator\n' > "$FIXTURE/xrole-baseline.txt"
+          printf 'AAA:BBB:PRS:en:indicator\n' > "$FIXTURE/xrole-baseline.txt"
           CI_CROSSROLE_BASELINE_FILE="$FIXTURE/xrole-baseline.txt"
           export CI_CROSSROLE_BASELINE_FILE
 
@@ -1993,7 +2190,7 @@ jobs:
           expect_caught "cross-role duplicate not on the baseline" \
             "$(catalog_unexpected_crossrole_duplicates "$FIXTURE/xrole-dup")"
 
-          printf 'AAA:BBB:PRS:indicator\n' > "$FIXTURE/xrole-baseline.txt"
+          printf 'AAA:BBB:PRS:en:indicator\n' > "$FIXTURE/xrole-baseline.txt"
           expect_caught "stale cross-role baseline entry" \
             "$(catalog_stale_crossrole_baseline_entries "$FIXTURE/xrole-clean")"
 
@@ -2031,6 +2228,200 @@ jobs:
             fi
           done
           echo "  ok — the committed cross-role baseline matches the real tree in both directions, on both trees"
+
+          # ------------------------------------------------------------------
+          # Cross-locale duplicate divergence (framework-catalog-it-translations
+          # design D2a) — the SAME function catalog_crosslocale_duplicate_
+          # divergence step (d) calls, fed fixtures built to trip BOTH
+          # directions, plus a clean faithful-translation fixture that must
+          # NOT fire.
+          # ------------------------------------------------------------------
+          mkdir -p "$FIXTURE/xlocale-diverge/bars" "$FIXTURE/xlocale-converge/bars" "$FIXTURE/xlocale-clean/bars"
+
+          printf '{"INF": [{"indicator":{"en":"Identify the motives and objectives","it":"Individuare i motivi e gli obiettivi"},"scale":{"5":{"en":"a5"},"3":{"en":"a3"},"1":{"en":"a1"}}}]}' \
+            > "$FIXTURE/xlocale-diverge/bars/AAA.json"
+          printf '{"INF": [{"indicator":{"en":"Identify the motives and objectives","it":"COMPLETAMENTE DIVERSO"},"scale":{"5":{"en":"a5b"},"3":{"en":"a3b"},"1":{"en":"a1b"}}}]}' \
+            > "$FIXTURE/xlocale-diverge/bars/BBB.json"
+          expect_caught "cross-locale divergence (EN identical, IT diverges)" \
+            "$(catalog_crosslocale_duplicate_divergence "$FIXTURE/xlocale-diverge")"
+          DIVERGE_LINE=$(catalog_crosslocale_duplicate_divergence "$FIXTURE/xlocale-diverge")
+          if [ "$DIVERGE_LINE" != "AAA:BBB:INF:indicator:diverges-though-en-identical" ]; then
+            echo "SELF-TEST FAILED: expected 'AAA:BBB:INF:indicator:diverges-though-en-identical', got: $DIVERGE_LINE"
+            FAILED=1
+          else
+            echo "  ok — cross-locale guard catches Italian diverging where English is byte-identical (an improved/altered translation)"
+          fi
+
+          printf '{"RES": [{"indicator":{"en":"Handle mistakes constructively","it":"Gestire gli errori in modo costruttivo"},"scale":{"5":{"en":"a5"},"3":{"en":"a3"},"1":{"en":"a1"}}}]}' \
+            > "$FIXTURE/xlocale-converge/bars/AAA.json"
+          printf '{"RES": [{"indicator":{"en":"A completely different English sentence","it":"Gestire gli errori in modo costruttivo"},"scale":{"5":{"en":"a5b"},"3":{"en":"a3b"},"1":{"en":"a1b"}}}]}' \
+            > "$FIXTURE/xlocale-converge/bars/BBB.json"
+          CONVERGE_LINE=$(catalog_crosslocale_duplicate_divergence "$FIXTURE/xlocale-converge")
+          if [ "$CONVERGE_LINE" != "AAA:BBB:RES:indicator:converges-though-en-differs" ]; then
+            echo "SELF-TEST FAILED: expected 'AAA:BBB:RES:indicator:converges-though-en-differs', got: $CONVERGE_LINE"
+            FAILED=1
+          else
+            echo "  ok — cross-locale guard catches Italian converging where English differs (a flattened translation) — the mirror direction"
+          fi
+
+          printf '{"INF": [{"indicator":{"en":"Identify the motives and objectives","it":"Individuare i motivi e gli obiettivi"},"scale":{"5":{"en":"a5"},"3":{"en":"a3"},"1":{"en":"a1"}}}]}' \
+            > "$FIXTURE/xlocale-clean/bars/AAA.json"
+          printf '{"INF": [{"indicator":{"en":"Identify the motives and objectives","it":"Individuare i motivi e gli obiettivi"},"scale":{"5":{"en":"a5b"},"3":{"en":"a3b"},"1":{"en":"a1b"}}}]}' \
+            > "$FIXTURE/xlocale-clean/bars/BBB.json"
+          FALSE=$(catalog_crosslocale_duplicate_divergence "$FIXTURE/xlocale-clean")
+          if [ -n "$FALSE" ]; then
+            echo "SELF-TEST FAILED: the cross-locale guard fired on a faithful translation of an identical EN pair: $FALSE"
+            FAILED=1
+          else
+            echo "  ok — cross-locale guard does not fire on a faithful translation (IT identical where EN is identical)"
+          fi
+
+          # ...and the committed catalogue (no IT content authored yet in this
+          # change) must be clean — empty output is the correct, current state.
+          for TREE in docs/app_description/02-domain/framework api/database/framework; do
+            DIVERGENCE=$(catalog_crosslocale_duplicate_divergence "$TREE")
+            if [ -n "$DIVERGENCE" ]; then
+              echo "SELF-TEST FAILED: $TREE has a cross-locale divergence: $DIVERGENCE"
+              FAILED=1
+            fi
+          done
+          echo "  ok — the committed catalogue has no cross-locale divergence (no IT content authored yet)"
+
+          # ------------------------------------------------------------------
+          # roles.json / competencies.json locale-map shape
+          # (framework-catalog-it-translations design D2 row 8).
+          # ------------------------------------------------------------------
+          mkdir -p "$FIXTURE/meta-shape-bad"
+          printf '{"PRS": {"name": "bare string, pre-migration shape", "definition": {"en":"ok"}}, "STG": {"name": {"en":"ok"}, "definition": {"en":"ok","es":"unknown locale"}}}' \
+            > "$FIXTURE/meta-shape-bad/competencies.json"
+          printf '{"ICO": {"name": {"en":"Individual Contributor"}, "responsibilities": {"en":""}, "competencies": ["PRS","STG"]}, "FLL": {"name": {"en":"  "}, "responsibilities": {"en":"ok"}, "competencies": ["PRS"]}}' \
+            > "$FIXTURE/meta-shape-bad/roles.json"
+          META_BAD=$(catalog_meta_locale_shape "$FIXTURE/meta-shape-bad")
+          META_OK=1
+          for REASON in "COMPETENCIES:PRS:name:not-a-locale-map" "COMPETENCIES:STG:definition:unknown-locale-es" "ROLES:FLL:name:missing-en"; do
+            if ! printf '%s\n' "$META_BAD" | grep -qxF "$REASON"; then
+              echo "SELF-TEST FAILED: the meta-locale-shape guard did not report '$REASON' for its known-bad fixture."
+              FAILED=1
+              META_OK=0
+            fi
+          done
+          if printf '%s\n' "$META_BAD" | grep -q '^ROLES:ICO:responsibilities:'; then
+            echo "SELF-TEST FAILED: the meta-locale-shape guard flagged ICO's empty EN responsibilities — a blank 'en' is the documented, legitimate 'not yet authored' sentinel for this ONE field."
+            FAILED=1
+            META_OK=0
+          fi
+          [ "$META_OK" -eq 1 ] && echo "  ok — meta-locale-shape guard catches a bare-string field, an unknown locale key and a whitespace-only name — and allows a blank EN responsibilities (the documented fill-empty sentinel) alone"
+
+          for TREE in docs/app_description/02-domain/framework api/database/framework; do
+            SHAPE=$(catalog_meta_locale_shape "$TREE")
+            if [ -n "$SHAPE" ]; then
+              echo "SELF-TEST FAILED: $TREE has a malformed roles.json/competencies.json locale field: $SHAPE"
+              FAILED=1
+            fi
+          done
+          echo "  ok — the committed roles.json/competencies.json are locale-shape-clean in both trees"
+
+          # ------------------------------------------------------------------
+          # Partial IT-coverage control file (framework-catalog-it-translations
+          # design D6) — scripts/framework-locale-gaps.txt's own both-direction
+          # doctrine, plus the whole-role rule, against CI_LOCALE_GAPS_FILE's
+          # override seam (same pattern as CI_KNOWN_GAPS_FILE/CI_COMPETENCY_
+          # GAPS_FILE above).
+          # ------------------------------------------------------------------
+          REAL_LOCALE_GAPS_FILE="$CI_LOCALE_GAPS_FILE"
+
+          # Built against a FIXTURE tree with a deliberately un-translated pair,
+          # NOT against the real catalogue.
+          #
+          # This row used to point at docs/app_description/02-domain/framework
+          # with a near-empty gaps list, which worked only while the real
+          # catalogue had untranslated pairs to find. The moment Italian
+          # coverage reached 83/83 the row could not catch anything and started
+          # asserting nothing at all — the same defect this repo has now hit
+          # five separate times: a check that depends on the data being
+          # incomplete stops verifying the instant you complete it. Manufacture
+          # the precondition; never borrow it from the tree under test.
+          mkdir -p "$FIXTURE/locale-undeclared/bars"
+          printf '{"ICO":{"name":{"en":"Individual Contributor","it":"Collaboratore individuale"},"responsibilities":{"en":"x","it":"x"},"competencies":["PRS","STG"]}}' \
+            > "$FIXTURE/locale-undeclared/roles.json"
+          printf '{"PRS":{"name":{"en":"Problem Solving","it":"Problem solving"},"definition":{"en":"d","it":"d"}},"STG":{"name":{"en":"Strategy","it":"Strategia"},"definition":{"en":"d","it":"d"}}}' \
+            > "$FIXTURE/locale-undeclared/competencies.json"
+          # PRS fully translated; STG has EN only — an incomplete pair.
+          printf '{"PRS":[{"indicator":{"en":"a","it":"a"},"scale":{"5":{"en":"a","it":"a"},"3":{"en":"a","it":"a"},"1":{"en":"a","it":"a"}}},{"indicator":{"en":"b","it":"b"},"scale":{"5":{"en":"b","it":"b"},"3":{"en":"b","it":"b"},"1":{"en":"b","it":"b"}}},{"indicator":{"en":"c","it":"c"},"scale":{"5":{"en":"c","it":"c"},"3":{"en":"c","it":"c"},"1":{"en":"c","it":"c"}}}],"STG":[{"indicator":{"en":"d"},"scale":{"5":{"en":"d"},"3":{"en":"d"},"1":{"en":"d"}}},{"indicator":{"en":"e"},"scale":{"5":{"en":"e"},"3":{"en":"e"},"1":{"en":"e"}}},{"indicator":{"en":"f"},"scale":{"5":{"en":"f"},"3":{"en":"f"},"1":{"en":"f"}}}]}' \
+            > "$FIXTURE/locale-undeclared/bars/ICO.json"
+          printf 'it:ICO:PRS\n' > "$FIXTURE/locale-gaps-partial.txt"
+          CI_LOCALE_GAPS_FILE="$FIXTURE/locale-gaps-partial.txt"
+          export CI_LOCALE_GAPS_FILE
+          UNDECLARED=$(catalog_unexpected_locale_gaps "$FIXTURE/locale-undeclared" it)
+          if ! printf '%s\n' "$UNDECLARED" | grep -qxF 'it:ICO:STG'; then
+            echo "SELF-TEST FAILED: catalog_unexpected_locale_gaps did not catch the fixture's incomplete, undeclared pair it:ICO:STG. Got: $UNDECLARED"
+            FAILED=1
+          else
+            echo "  ok — catalog_unexpected_locale_gaps catches an incomplete pair not listed in the control file"
+          fi
+
+          printf 'it:ICO:PRS\nit:ZZZ:NOPE\n' > "$FIXTURE/locale-gaps-stale.txt"
+          CI_LOCALE_GAPS_FILE="$FIXTURE/locale-gaps-stale.txt"
+          export CI_LOCALE_GAPS_FILE
+          STALE=$(catalog_stale_locale_gap_exemptions docs/app_description/02-domain/framework it)
+          if ! printf '%s\n' "$STALE" | grep -qxF 'it:ZZZ:NOPE'; then
+            echo "SELF-TEST FAILED: catalog_stale_locale_gap_exemptions did not catch an exemption for a pair that no longer exists: $STALE"
+            FAILED=1
+          else
+            echo "  ok — catalog_stale_locale_gap_exemptions catches an exemption for a nonexistent/now-complete pair"
+          fi
+
+          printf 'it:ICO:PRS\nit:ICO:STG\n' > "$FIXTURE/locale-gaps-partial-role.txt"
+          CI_LOCALE_GAPS_FILE="$FIXTURE/locale-gaps-partial-role.txt"
+          export CI_LOCALE_GAPS_FILE
+          WHOLE_ROLE=$(locale_gaps_whole_role_violations docs/app_description/02-domain/framework)
+          if [ "$WHOLE_ROLE" != "it:ICO:2/15" ]; then
+            echo "SELF-TEST FAILED: expected 'it:ICO:2/15' from a role listed with 2 of its 15 pairs, got: $WHOLE_ROLE"
+            FAILED=1
+          else
+            echo "  ok — locale_gaps_whole_role_violations catches a role listed with neither 0 nor its full pair count (no role may ship half-translated)"
+          fi
+
+          printf 'it:ICO:PRS\nit:FLL:PRS\nit:ICO:STG\n' > "$FIXTURE/locale-gaps-interleaved.txt"
+          CI_LOCALE_GAPS_FILE="$FIXTURE/locale-gaps-interleaved.txt"
+          export CI_LOCALE_GAPS_FILE
+          INTERLEAVED=$(locale_gaps_role_order_violations)
+          if [ "$INTERLEAVED" != "ICO" ]; then
+            echo "SELF-TEST FAILED: expected 'ICO' from an interleaved fixture, got: $INTERLEAVED"
+            FAILED=1
+          else
+            echo "  ok — locale_gaps_role_order_violations catches roles whose entries are not grouped contiguously"
+          fi
+
+          CI_LOCALE_GAPS_FILE="$REAL_LOCALE_GAPS_FILE"
+          export CI_LOCALE_GAPS_FILE
+
+          # ...and the COMMITTED control file must round-trip cleanly against
+          # the real tree, in both directions, on both trees — all 83 pairs
+          # listed, none stale, no role partially listed, no interleaving.
+          for TREE in docs/app_description/02-domain/framework api/database/framework; do
+            UNDECLARED=$(catalog_unexpected_locale_gaps "$TREE" it) || { echo "SELF-TEST FAILED: could not read $TREE for locale coverage."; FAILED=1; }
+            if [ -n "$UNDECLARED" ]; then
+              echo "SELF-TEST FAILED: $TREE has an incomplete IT pair not listed in scripts/framework-locale-gaps.txt: $UNDECLARED"
+              FAILED=1
+            fi
+            STALE=$(catalog_stale_locale_gap_exemptions "$TREE" it) || { echo "SELF-TEST FAILED: could not read $TREE for stale locale-gap exemptions."; FAILED=1; }
+            if [ -n "$STALE" ]; then
+              echo "SELF-TEST FAILED: scripts/framework-locale-gaps.txt has a stale entry against $TREE: $STALE"
+              FAILED=1
+            fi
+          done
+          WHOLE_ROLE=$(locale_gaps_whole_role_violations docs/app_description/02-domain/framework)
+          if [ -n "$WHOLE_ROLE" ]; then
+            echo "SELF-TEST FAILED: scripts/framework-locale-gaps.txt lists a partial role: $WHOLE_ROLE"
+            FAILED=1
+          fi
+          INTERLEAVED=$(locale_gaps_role_order_violations)
+          if [ -n "$INTERLEAVED" ]; then
+            echo "SELF-TEST FAILED: scripts/framework-locale-gaps.txt interleaves role '$INTERLEAVED' with another role's entries."
+            FAILED=1
+          fi
+          echo "  ok — the committed scripts/framework-locale-gaps.txt round-trips cleanly: all 83 pairs listed (none translated yet), none stale, no role partially listed, no interleaving"
 
           # ------------------------------------------------------------------
           # Guard (e): submodule pointer reachability.

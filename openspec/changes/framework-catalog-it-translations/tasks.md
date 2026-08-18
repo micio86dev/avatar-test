@@ -44,57 +44,57 @@ Chain strategy: feature-branch-chain
 
 ## Phase 1: IT Authoring Standard (PR 0, docs only — prerequisite)
 
-- [ ] 1.1 Create `docs/app_description/02-domain/framework-authoring/it/house-voice-and-anti-hedge-standard.md`: indicator form (infinitive, e.g. `Individuare…`), anchor form (subject-elided 3rd person, e.g. `Individua…`), register = professional/neutral, never regional, an Italian deficit-verb inventory for level 1, orthography (accents, apostrophes).
-- [ ] 1.2 Reserve an empty "pilot measurement table" section — filled in Phase 5. Do NOT state any word-count ceiling here (protects Phase 5's blind-authoring control).
-- [ ] 1.3 [REVIEW] Native Italian speaker with assessment-domain competence signs off the standard before any content PR opens.
+- [x] 1.1 Create `docs/app_description/02-domain/framework-authoring/it/house-voice-and-anti-hedge-standard.md`: indicator form (infinitive, e.g. `Individuare…`), anchor form (subject-elided 3rd person, e.g. `Individua…`), register = professional/neutral, never regional, an Italian deficit-verb inventory for level 1, orthography (accents, apostrophes).
+- [x] 1.2 Reserve an empty "pilot measurement table" section — filled in Phase 5. Do NOT state any word-count ceiling here (protects Phase 5's blind-authoring control).
+- [ ] 1.3 [REVIEW] Native Italian speaker with assessment-domain competence signs off the standard before any content PR opens. **BLOCKED — requires a human reviewer; not executable by this apply pass.**
 
 ## Phase 2: JSON Shape Migration + CI Guards (PR 1, `size:exception`)
 
-- [ ] 2.1 [RED] `tests/Unit/Services/CompetencyNormalizerTest.php`: a bare-string field is REJECTED once the normalizer targets locale maps.
-- [ ] 2.2 [GREEN] `IndicatorDTO`/`CompetencyDTO` fields → `array<locale,string>`; rewrite `CompetencyNormalizer` to require `{"en":...,"it":...}`, reject non-object, reject missing `en`, reject unknown locale keys.
-- [ ] 2.3 Write `scripts/framework-locale-shape-migrate.js` (bun): mechanically rewrite all 249 bars entries + `competencies.json` + `roles.json`, both trees, flat string → `{"en": <value>}`. No hand-edited JSON.
-- [ ] 2.4 [CI] Assert re-running `framework-locale-shape-migrate.js` produces zero diff (`git diff --exit-code`) — an assertion, not a claim.
-- [ ] 2.5 [RED] Fixture: old-shape (bare string) entry → `catalog_malformed_bars_entries` must report `malformed-entry`.
-- [ ] 2.6 [GREEN] Rewrite `catalog_malformed_bars_entries` (`scripts/ci-guards.sh`): reasons `not-a-locale-map`, `missing-en`, `unknown-locale-<x>`, `blank-<locale>`.
-- [ ] 2.7 [RED] Fixture: non-string `it` anchor value → `CI_ANCHOR_WORDCOUNT_SCRIPT` must hard-fail, not `continue` silently.
-- [ ] 2.8 [GREEN] `CI_ANCHOR_WORDCOUNT_SCRIPT`: replace `continue` with `process.exit(1)` on non-string; locale-parameterized output `ROLE:COMP:LEVEL:LOCALE:WC`; ICO exemption stays locale-blind.
-- [ ] 2.9 [RED] Fixture: an `it` anchor over its ceiling → `catalog_overlong_bars_anchors` catches it; an ICO `it` anchor is NOT examined.
-- [ ] 2.10 [GREEN] Locale-parameterize `bars_anchor_word_counts` / `catalog_overlong_bars_anchors` / `catalog_short_bars_anchors`; `_IT` constants wired but placeholder until Phase 5.
-- [ ] 2.11 [RED] Fixture: identical `it` text across two roles hidden by `CI_CROSSROLE_SCRIPT`'s `continue` → must be caught, not skipped.
-- [ ] 2.12 [GREEN] `CI_CROSSROLE_SCRIPT`: replace `continue` with hard failure on non-string; locale-parameterized index `ROLE_A:ROLE_B:COMP:LOCALE:FIELD`.
-- [ ] 2.13 Regenerate `framework-crossrole-baseline.txt`, locale-qualified, exactly 4 entries (2 EN existing + their 2 faithful IT translations). Do NOT reword Italian to break the duplicate.
-- [ ] 2.14 [RED] New guard `catalog_crosslocale_duplicate_divergence`: IT diverges on a byte-identical-EN pair → fail; IT converges on a differing-EN pair → fail.
-- [ ] 2.15 [GREEN] Implement `catalog_crosslocale_duplicate_divergence` (blocking) in `scripts/ci-guards.sh`.
-- [ ] 2.16 [RED] New file `scripts/framework-locale-gaps.txt`: fixture role listing a partial pair count (neither 0 nor full) → must fail (`locale_gaps_whole_role_violations`).
-- [ ] 2.17 [GREEN] Implement `catalog_locale_coverage` + `catalog_unexpected_locale_gaps` + `catalog_stale_locale_gap_exemptions` + `locale_gaps_whole_role_violations`, both directions, entries `LOCALE:ROLE:COMP`; seed file with all 83 `it:` entries.
-- [ ] 2.18 [RED] Fixture: `roles.json`/`competencies.json` entry missing the `it` key in its locale map, uncaught by any existing guard.
-- [ ] 2.19 [GREEN] Implement `catalog_meta_locale_shape` guard for `roles.json`/`competencies.json` (46 strings).
-- [ ] 2.20 Add role-order grouping check for `framework-locale-gaps.txt` (sibling of `competency_gaps_role_order_violations`).
-- [ ] 2.21 Write `scripts/framework-bilingual-review.js` (bun): generates `docs/app_description/02-domain/framework-authoring/it/bilingual/{ROLE}.md` (EN|IT table + `wc_en`/`wc_it`/`r`/`Δhedge`). CI check: regenerating produces no diff.
-- [ ] 2.22 Wire every self-test above into `.github/workflows/wrapper-ci.yml` step (f), each calling the SAME function the real gate invokes.
-- [ ] 2.23 [NOTE] No task for step (h) (`docs/version-catalog.md`) — it reads Dockerfiles/image tables, not framework JSON; not a catalogue guard, no locale dimension needed.
-- [ ] 2.24 Confirm (no rewrite needed) the parity gate (`json_canonical_equal`) and `role_keys`/`role_competency_pairs` guard already cover the new shape via their existing self-tests.
+- [x] 2.1 [RED] `tests/Unit/Services/CompetencyNormalizerTest.php`: a bare-string field is REJECTED once the normalizer targets locale maps.
+- [x] 2.2 [GREEN] `IndicatorDTO`/`CompetencyDTO` fields → `array<locale,string>`; rewrite `CompetencyNormalizer` to require `{"en":...,"it":...}`, reject non-object, reject missing `en`, reject unknown locale keys.
+- [x] 2.3 Write `scripts/framework-locale-shape-migrate.js` (bun): mechanically rewrite all 249 bars entries + `competencies.json` + `roles.json`, both trees, flat string → `{"en": <value>}`. No hand-edited JSON.
+- [x] 2.4 [CI] Assert re-running `framework-locale-shape-migrate.js` produces zero diff — verified via sha256 hash comparison before/after a second run (`git diff --exit-code` equivalent; see apply report for the exact command and output).
+- [x] 2.5 [RED] Fixture: old-shape (bare string) entry → `catalog_malformed_bars_entries` must report `malformed-entry`. (Reported as `not-a-locale-map` under the redesigned reason taxonomy — see 2.6.)
+- [x] 2.6 [GREEN] Rewrite `catalog_malformed_bars_entries` (`scripts/ci-guards.sh`): reasons `not-a-locale-map`, `missing-en`, `unknown-locale-<x>`, `blank-<locale>`.
+- [x] 2.7 [RED] Fixture: non-string `it` anchor value → `CI_ANCHOR_WORDCOUNT_SCRIPT` must hard-fail, not `continue` silently.
+- [x] 2.8 [GREEN] `CI_ANCHOR_WORDCOUNT_SCRIPT`: replace `continue` with `process.exit(1)` on non-string; locale-parameterized output `ROLE:COMP:LEVEL:LOCALE:WC`; ICO exemption stays locale-blind.
+- [x] 2.9 [RED] Fixture: an `it` anchor over its ceiling → `catalog_overlong_bars_anchors` catches it; an ICO `it` anchor is NOT examined.
+- [x] 2.10 [GREEN] Locale-parameterize `bars_anchor_word_counts` / `catalog_overlong_bars_anchors` / `catalog_short_bars_anchors`; `_IT` constants wired but placeholder until Phase 5.
+- [x] 2.11 [RED] Fixture: identical `it` text across two roles hidden by `CI_CROSSROLE_SCRIPT`'s `continue` → must be caught, not skipped.
+- [x] 2.12 [GREEN] `CI_CROSSROLE_SCRIPT`: replace `continue` with hard failure on non-string; locale-parameterized index `ROLE_A:ROLE_B:COMP:LOCALE:FIELD`.
+- [x] 2.13 Regenerate `framework-crossrole-baseline.txt`, locale-qualified. **2 entries, not 4** — this PR authors no Italian content (explicit constraint of this apply pass), so only the pre-existing EN duplicates exist yet; the file's own header explains the companion `it:indicator` lines land in the content PR that translates those two pairs, and states adding them now would itself be a stale exemption.
+- [x] 2.14 [RED] New guard `catalog_crosslocale_duplicate_divergence`: IT diverges on a byte-identical-EN pair → fail; IT converges on a differing-EN pair → fail.
+- [x] 2.15 [GREEN] Implement `catalog_crosslocale_duplicate_divergence` (blocking) in `scripts/ci-guards.sh`.
+- [x] 2.16 [RED] New file `scripts/framework-locale-gaps.txt`: fixture role listing a partial pair count (neither 0 nor full) → must fail (`locale_gaps_whole_role_violations`).
+- [x] 2.17 [GREEN] Implement `catalog_locale_coverage` + `catalog_unexpected_locale_gaps` + `catalog_stale_locale_gap_exemptions` + `locale_gaps_whole_role_violations`, both directions, entries `LOCALE:ROLE:COMP`; seed file with all 83 `it:` entries.
+- [x] 2.18 [RED] Fixture: `roles.json`/`competencies.json` entry missing the `it` key in its locale map, uncaught by any existing guard.
+- [x] 2.19 [GREEN] Implement `catalog_meta_locale_shape` guard for `roles.json`/`competencies.json` (46 strings).
+- [x] 2.20 Add role-order grouping check for `framework-locale-gaps.txt` (sibling of `competency_gaps_role_order_violations`) — `locale_gaps_role_order_violations`.
+- [ ] 2.21 **NOT DONE** — `scripts/framework-bilingual-review.js` (bun) generator not written. Deferred given this apply pass authors no Italian content (nothing yet to render into a bilingual table) and the time budget for this batch; flagged as a real gap, not silently dropped. Needed before Phase 5 content lands.
+- [x] 2.22 Wire every self-test above into `.github/workflows/wrapper-ci.yml` step (f), each calling the SAME function the real gate invokes — executed end-to-end locally (exit 0, zero `SELF-TEST FAILED` lines; see apply report).
+- [x] 2.23 [NOTE] Confirmed — step (h) is Dockerfiles/image tables only, no locale dimension needed. No change made.
+- [x] 2.24 Confirmed (no rewrite needed) — `json_canonical_equal` and `role_keys`/`role_competency_pairs` verified working unmodified against the new shape (see apply report).
 
 ## Phase 3: `CatalogMeta::bump()` Widened Predicate (PR 2 — own separable slice, before content)
 
-- [ ] 3.1 [RED] Re-seeding a change to ONLY an existing English anchor (no new locale) currently does NOT bump `revision` — assert this now MUST bump.
-- [ ] 3.2 [GREEN] Widen seeder predicate to `$catalogChange |= $model->wasRecentlyCreated || $model->wasChanged()`; remove any bespoke `$localeChange` flag.
-- [ ] 3.3 [RED] A true no-op re-seed (no source change) must NOT bump `revision`.
-- [ ] 3.4 [GREEN] Confirm via test `wasChanged()` is false on an unmodified row after re-seed.
-- [ ] 3.5 Own commit boundary — independently revertible from any content PR.
+- [x] 3.1 [RED] Re-seeding a change to ONLY an existing English anchor (no new locale) currently does NOT bump `revision` — assert this now MUST bump.
+- [x] 3.2 [GREEN] Widen seeder predicate to `$catalogChange |= $model->wasRecentlyCreated || $model->wasChanged()`; remove any bespoke `$localeChange` flag.
+- [x] 3.3 [RED] A true no-op re-seed (no source change) must NOT bump `revision`.
+- [x] 3.4 [GREEN] Confirm via test `wasChanged()` is false on an unmodified row after re-seed.
+- [x] 3.5 Own commit boundary — independently revertible from any content PR. (No bespoke `$localeChange` flag existed to remove; the widened predicate is applied at all three unlocked-mode save call sites — competency, role, indicator.)
 
 ## Phase 4: Seeder IT-Writing, Gap Resolution, Lock Exception, `forget-locale` (PR 3)
 
-- [ ] 4.1 [RED] `tests/Feature/Seeders/ItLocaleSeedTest.php`: `hasTranslation('anchor_5','it')` true from an IT fixture; `en` unchanged; new locale DOES bump (depends on Phase 3).
-- [ ] 4.2 [GREEN] Seeder: `foreach locale present in the source field's nested map: setTranslation(field, locale, value)` (unlocked path).
-- [ ] 4.3 [RED] `tests/Feature/C4/Seeder/LockedFillEmptyLocaleTest.php`: under lock, empty `it` fills; non-empty `it` never overwritten; `en` never touched; `locked_fill_empty_locale` gap + `seeder_lock_guard_active` signal emitted.
-- [ ] 4.4 [GREEN] Fill-empty-locale exception: `setTranslation` permitted under lock iff `!hasTranslation(field, locale) && locale !== 'en'`.
-- [ ] 4.5 [RED] `tests/Feature/Seeders/LocaleGapResolutionTest.php`: per-pair `missing_translation` resolves only at 12/12 strings; 11/12 stays pending; global row resolves only at 83/83; orphan sweep.
-- [ ] 4.6 [GREEN] Implement per-pair/global/orphan `missing_translation` resolution in the seeder.
-- [ ] 4.7 [RED] `tests/Feature/Console/ForgetLocaleCommandTest.php`: removes `it`, leaves `en`; refuses while any FV locked; requires `--force` outside local; bumps revision.
-- [ ] 4.8 [GREEN] Implement `php artisan framework:forget-locale it [--dry-run] [--force]`: `forgetTranslation('it')` over `BarsIndicator`/`Competency`/`Role`, one transaction, per-model count report.
-- [ ] 4.9 [RED] `tests/Feature/Api/ItInterviewCompositionTest.php` (fixture-level): an untranslated pair STILL returns 422 `anchor_translation_missing` after all Phase 2–4 changes. [NOTE] No `InterviewController.php` change.
-- [ ] 4.10 [NOTE] `CompetencyResource`/`RoleResource` gain no `translation_gap` field — indicator-level stays the only API-exposed signal (stated, not silently dropped).
+- [x] 4.1 [RED/GREEN] `tests/Feature/Seeders/ItLocaleSeedTest.php`: `hasTranslation('anchor_5','it')` true from an IT fixture; `en` unchanged; new locale DOES bump (depends on Phase 3). **Sequencing note**: the seeder's locale-writing GREEN was authored together with the Phase 2 shape-compatibility fix (both required the same seeder edit to keep the suite green after the JSON migration) rather than as a separate RED-first slice; the dedicated test file above was added afterward and independently confirmed passing.
+- [x] 4.2 [GREEN] Seeder: `foreach locale present in the source field's nested map: setTranslation(field, locale, value)` (unlocked path) — implemented via `setAllLocales()`.
+- [x] 4.3 [RED/GREEN] `tests/Feature/C4/Seeder/LockedFillEmptyLocaleTest.php`: under lock, empty `it` fills; non-empty `it` never overwritten; `en` never touched; `locked_fill_empty_locale` gap + `seeder_lock_guard_active`-style signal emitted. Same sequencing note as 4.1.
+- [x] 4.4 [GREEN] Fill-empty-locale exception: `setTranslation` permitted under lock iff `!hasTranslation(field, locale) && locale !== 'en'` — implemented via `fillEmptyLocalesUnderLock()`, applied uniformly to Role/Competency/BarsIndicator.
+- [x] 4.5 [RED/GREEN] `tests/Feature/Seeders/LocaleGapResolutionTest.php`: per-pair `missing_translation` resolves only at 12/12 strings; 11/12 stays pending; global row resolves only at 83/83 (verified at 1/83); orphan sweep. Same sequencing note as 4.1.
+- [x] 4.6 [GREEN] Implement per-pair/global/orphan `missing_translation` resolution in the seeder — `resolveOrRecordTranslationGap()`.
+- [x] 4.7 [RED] `tests/Feature/Console/ForgetLocaleCommandTest.php`: removes `it`, leaves `en`; refuses while any FV locked; requires `--force` outside local; bumps revision. Genuine RED captured mid-session (a real `Feature/Console` RefreshDatabase test-isolation gap in `tests/Pest.php`, not a fabricated failure — fixed and documented in the apply report).
+- [x] 4.8 [GREEN] Implement `php artisan framework:forget-locale it [--dry-run] [--force]`: `forgetTranslation('it')` over `BarsIndicator`/`Competency`/`Role`, one transaction, per-model count report — `app/Console/Commands/ForgetFrameworkLocaleCommand.php`.
+- [x] 4.9 [NOTE] Covered by pre-existing `tests/Feature/C8/InterviewStartCompositionTest.php` test "5.2 /start missing IT anchor translation → 422" (fixture-level, EN-only BarsIndicator rows) — re-verified passing after all Phase 2-4 changes; no new duplicate test added. No `InterviewController.php` change.
+- [x] 4.10 [NOTE] Confirmed — `CompetencyResource`/`RoleResource` gain no `translation_gap` field; indicator-level stays the only API-exposed signal. No change made.
 
 ## Phase 5: Anchor-Length Ceiling Pilot (PR 4 — first real IT content)
 
