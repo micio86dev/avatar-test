@@ -27,12 +27,25 @@
 # not have, which is the exact note-outliving-its-fact defect these guards
 # exist to catch, in the guards' own documentation.
 #
-# What is true now: `shellcheck -s sh` and `dash -n` pass on this file AND on
-# every `run:` block that sources it. The steps still EXECUTE under bash,
-# because that is the Actions default and nothing here needs changing that.
-# What POSIX compatibility buys is that `shell: sh` on a step would not
-# silently break a guard, and that `shellcheck -s sh` stays able to check them.
-# Verify both before changing this paragraph.
+# What is true now, and CHECKED BY A REAL GATE ("Lint scripts/ci-guards.sh"
+# in .github/workflows/wrapper-ci.yml, run before anything sources this
+# file): `shellcheck -s sh` and `dash -n` both pass on THIS FILE. What POSIX
+# compatibility buys is that `shell: sh` on a step would not silently break a
+# guard, and that `shellcheck -s sh` stays able to check the functions
+# themselves.
+#
+# The claim stops at this file on purpose, and used to overreach: an earlier
+# draft said it also covered "every `run:` block that sources it", which
+# nothing checked either — a second instance of the same note-outliving-its-
+# fact defect, inside the paragraph about that defect. The steps that source
+# this file EXECUTE under bash (Actions' default, unchanged), not sh, so
+# checking them under `-s sh` would be the wrong dialect even if something
+# ran it. Making that half true would mean parsing this workflow's YAML,
+# extracting every `run:` block, and shellchecking each under `-s bash` —
+# real, separate machinery this file does not build. They are held to the
+# no-`local`/no-arrays/no-`[[` discipline stated above by review, not by a
+# gate. Do not restore the wider claim unless that machinery exists and a CI
+# step runs it.
 #
 # Usage:  . scripts/ci-guards.sh          (from the repository root)
 
@@ -138,6 +151,145 @@ df_guard() {
       continue
     fi
     tag_pinned "$CI_DF_REF" || { printf '%s\n' "$CI_DF_REF"; exit 1; }
+  done
+}
+
+# ---------------------------------------------------------------------------
+# docs/version-catalog.md — bidirectional consistency with reality (D25).
+#
+# The catalog exists because the archived design section it replaced
+# drifted: `openspec/changes/archive/2026-07-16-project-skeleton-ci/design.md`
+# D25 listed `oven/bun:1.3`, `node:24-slim` and `nginx:1.27-alpine` — three
+# bare-major tags `tag_pinned` above would reject — while every Dockerfile
+# had already moved on to a patch pin. docs/version-catalog.md's own rules
+# section says the table and reality "are checked against each other" —
+# this is that check, in BOTH directions:
+#
+#   * every image tag reality actually uses (Dockerfile FROM bases, compose
+#     image: references) must be a row in the catalog — a tag bumped
+#     without updating the row FAILS.
+#   * every row the catalog declares must still be used somewhere — a row
+#     left behind after an image is dropped or renamed FAILS too. This is
+#     the same note-outliving-its-fact defect scripts/framework-known-gaps.txt,
+#     scripts/framework-competency-gaps.txt and
+#     scripts/framework-crossrole-baseline.txt already guard against,
+#     applied to a fourth control file.
+#
+# Wired into .github/workflows/wrapper-ci.yml as step (h), and proved
+# against a genuinely broken fixture — both directions — in step (f)'s
+# self-test.
+#
+# Reality is the source of truth for what is USED; the catalog is the
+# source of truth for what is ALLOWED. The three locally-built tags
+# (beai-api:local, beai-frontend:local, beai-backoffice:local) are excluded
+# by the SAME "the literal `local`" convention `tag_pinned` above already
+# documents: they are built FROM the Dockerfiles this guard reads, and a
+# row pinning "whatever was just built" would assert nothing.
+#
+# Multi-stage `FROM builder AS runtime` references an earlier STAGE, not an
+# image — `catalog_dockerfile_images` below reuses `df_guard`'s own
+# stage-exclusion helpers (`ci_dockerfile_from_lines`,
+# `ci_dockerfile_stage_names`, `ci_dockerfile_ref`, all defined above)
+# rather than re-deriving the same parsing this file already got wrong once.
+# ---------------------------------------------------------------------------
+
+# Non-stage FROM image references in a Dockerfile, one per line. Fails
+# closed (return 1, nothing printed) on a file that does not exist — the
+# same contract df_guard obeys, using the exact same stage-collection and
+# per-line parsing it does.
+catalog_dockerfile_images() {
+  [ -f "$1" ] || return 1
+  CI_CDI_STAGES=$(ci_dockerfile_stage_names "$1")
+  ci_dockerfile_from_lines "$1" | while IFS= read -r CI_CDI_LINE; do
+    CI_CDI_REF=$(ci_dockerfile_ref "$CI_CDI_LINE")
+    [ -n "$CI_CDI_REF" ] || continue
+    CI_CDI_LOWER=$(printf '%s' "$CI_CDI_REF" | tr '[:upper:]' '[:lower:]')
+    [ "$CI_CDI_LOWER" = "scratch" ] && continue
+    printf '%s\n' "$CI_CDI_STAGES" | grep -qxF "$CI_CDI_LOWER" && continue
+    printf '%s\n' "$CI_CDI_REF"
+  done
+}
+
+# The image: values in a `docker compose config` OUTPUT (a multi-line
+# string passed as $1, not a path — the caller already has it and should
+# not have to invoke docker compose a second time to get it), one per
+# line, excluding the `:local` build-only convention `tag_pinned` above
+# already documents. Always exits 0: this is a pure filter over text the
+# caller already obtained, with nothing of its own left to fail on.
+compose_declared_images() {
+  printf '%s\n' "$1" \
+    | grep -E '^[[:space:]]*image:' \
+    | sed 's/^[[:space:]]*image:[[:space:]]*//' \
+    | while IFS= read -r CI_CDI_IMG; do
+        [ -n "$CI_CDI_IMG" ] || continue
+        case "$CI_CDI_IMG" in
+          *:local) continue ;;
+        esac
+        printf '%s\n' "$CI_CDI_IMG"
+      done
+}
+
+# Every image tag docs/version-catalog.md declares in its "Docker base
+# images" table, one per line — read from the Tag column's backtick span
+# directly, rather than a second hand-maintained list somewhere else.
+#
+# The table lives between "## Docker base images" and the NEXT "## "
+# heading. A sed range `/^## Docker base images/,/^## /p` gets this
+# wrong: that heading line itself starts with "## ", matching BOTH
+# boundaries of its own range on the same line, so the range opens and
+# closes on the heading and prints nothing after it. Tracked as an
+# explicit `insection` flag in awk instead, which is not fooled by one
+# line satisfying both patterns: the heading sets the flag and moves on
+# (`next`, so it is never itself scanned for a table row); a LATER
+# "## " heading clears the flag and exits before that line is scanned
+# either.
+#
+# Matches the FIRST backtick span on each row, always the Tag column —
+# the Image column carries no backticks, so nothing upstream of it can be
+# mistaken for one.
+# shellcheck disable=SC2016
+# Single-quoted on purpose: `$0`, `insection` and the awk regexes below
+# are AWK's own syntax and must reach it untouched, not shell variables.
+CI_VERSION_CATALOG_AWK_SCRIPT='
+  /^## Docker base images/ { insection = 1; next }
+  insection && /^## / { exit }
+  insection {
+    if (match($0, /`[^`]+`/)) {
+      print substr($0, RSTART + 1, RLENGTH - 2)
+    }
+  }
+'
+
+# Fails closed: a missing file returns 1 with nothing printed. A file that
+# exists but no longer has a "Docker base images" table returns 0 with
+# EMPTY output — the caller in step (h) treats a zero-row result as a
+# guard that FAILED TO RUN, the same "empty list read as nothing missing"
+# doctrine guard (a)'s `compose_image_refs_present` and guard (e)'s
+# submodule-status check already apply to their own evidence.
+version_catalog_images() {
+  if [ ! -f "$1" ]; then
+    echo "ci-guards: $1 does not exist." >&2
+    return 1
+  fi
+  awk "$CI_VERSION_CATALOG_AWK_SCRIPT" "$1"
+}
+
+# Lines in set $1 (newline-separated) absent, byte-for-byte, from set $2.
+# Shared by BOTH directions of the catalog check: "used but not cataloged"
+# is this called as (used, catalog); "cataloged but no longer used" is the
+# SAME function with the two arguments swapped. A symmetric failure mode
+# gets one implementation, not two copies that could drift from each
+# other — the exact defect shape this whole file exists to rule out,
+# applied to itself.
+#
+# Blank lines in $1 are skipped rather than reported. Always exits 0 — a
+# pure set operation over text the caller already validated non-empty
+# (see the min-evidence checks in step (h) for both operands).
+image_set_difference() {
+  printf '%s\n' "$1" | while IFS= read -r CI_ISD_ITEM; do
+    [ -n "$CI_ISD_ITEM" ] || continue
+    printf '%s\n' "$2" | grep -qxF "$CI_ISD_ITEM" && continue
+    printf '%s\n' "$CI_ISD_ITEM"
   done
 }
 
