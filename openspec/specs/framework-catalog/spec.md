@@ -250,14 +250,27 @@ field.
 ### Requirement: Gap Row Reconciliation on Seeded Content
 
 When previously-recorded content becomes present in the source JSON (a
-competency gains a BARS entry, a role's BARS file is added, or a role's
-`responsibilities` becomes non-empty), the seeder MUST resolve the matching
-`framework_gaps` row — updating `status` away from `pending_authoring` (e.g.
-to `resolved`) or removing the row — rather than leaving it
-`pending_authoring` indefinitely. Gap resolution MUST proceed even while a
-`FrameworkVersion` is locked (`framework_gaps` writes are exempt from
+competency gains a BARS entry, a role's BARS file is added, a role's
+`responsibilities` becomes non-empty, or a translatable field gains an `it`
+value for a locale it previously lacked), the seeder MUST resolve the
+matching `framework_gaps` row — updating `status` away from
+`pending_authoring` (e.g. to `resolved`) or removing the row — rather than
+leaving it `pending_authoring` indefinitely. Gap resolution MUST proceed even
+while a `FrameworkVersion` is locked (`framework_gaps` writes are exempt from
 lock-guard mutation suppression, consistent with
 `FrameworkGap::updateOrCreate` being exempt for new gaps).
+
+For the `missing_translation` gap specifically, resolution MUST be evaluated
+at role×competency PAIR granularity, not per string: a pair's 12 strings
+(3 indicators × {text, anchor_5, anchor_3, anchor_1}) must ALL carry an `it`
+translation before that pair counts as translated (mirrors the scoring-engine
+per-competency hard-fail unit — 11 of 12 is worth the same as 0). The seeder
+MUST NOT mark `missing_translation` resolved for scope that is only
+partially translated, and MUST resolve (in full, or by narrowing to the
+still-untranslated remainder) as each pair's 12 strings become complete.
+(Previously: this requirement's trigger list did not include translation
+completion, so `missing_translation` had no resolution path and would stay
+`pending_authoring` forever even once fully translated.)
 
 #### Scenario: competency_no_bars gap resolves once the pair is anchored
 
@@ -289,6 +302,25 @@ lock-guard mutation suppression, consistent with
   mutation suppression)
 - AND catalog content rows for pre-existing pairs remain byte-for-byte
   unchanged per the lock-guard
+
+#### Scenario: missing_translation resolves once a full role×competency pair's 12 strings are translated
+
+- GIVEN ICO×PRS has all 3 indicators' text and all 3 anchors' texts (12
+  strings) present in `it` in the source JSON
+- WHEN the seeder runs
+- THEN the missing_translation gap coverage for (ICO, PRS) is no longer
+  pending_authoring
+- AND a sibling pair (e.g. ICO×COL) still missing even one of its 12 strings
+  remains pending_authoring
+
+#### Scenario: missing_translation stays pending when 11 of 12 strings are translated
+
+- GIVEN ICO×STG has 11 of its 12 required IT strings present and one
+  anchor_1 text still missing IT
+- WHEN the seeder runs
+- THEN the missing_translation gap coverage for (ICO, STG) remains
+  pending_authoring (11 of 12 is treated as zero, consistent with the
+  scoring-engine per-competency hard-fail)
 
 ---
 
@@ -350,9 +382,18 @@ content team) — NOT a failure for the current request locale. An `?locale=en`
 consumer that receives `translation_gap=true` should understand that IT content
 has not yet been authored, not that its own request failed.
 
-The seeder MUST use `setTranslation('field', 'en', $value)` per field (NOT
-bulk `updateOrCreate` on the raw JSON column), so that a manually-added IT
-translation persists across a re-seed.
+The seeder MUST call `setTranslation('field', $locale, $value)` per field, per
+locale present in the source JSON's nested locale key for that field (see
+Requirement: Locale Dimension Uses Nested Keys) — NOT bulk `updateOrCreate` on
+the raw JSON column — so that a manually-added translation in any locale
+persists across a re-seed. The seeder MUST continue to call
+`setTranslation('field', 'en', $value)` at every existing call site, and MUST
+additionally call `setTranslation('field', 'it', $value)` wherever that
+field's nested source value carries an `it` key. A field with no `it` key in
+the source MUST be left untouched — the seeder MUST NOT write an empty-string
+or null `it` translation to manufacture the appearance of coverage.
+(Previously: the seeder called `setTranslation('field','en',$value)` only;
+no source field carried an `it` value.)
 
 #### Scenario: Requesting EN locale returns EN content
 
@@ -380,6 +421,23 @@ translation persists across a re-seed.
 - WHEN the seeder runs again
 - THEN the IT translation is still present on that Competency
 - AND the EN translation reflects the current JSON value
+
+#### Scenario: Seeder writes an IT translation from a nested-locale source field
+
+- GIVEN a BarsIndicator's `anchor_5` source value carries a nested
+  `{"en": "...", "it": "..."}` object
+- WHEN FrameworkCatalogSeeder runs (no locked FrameworkVersion)
+- THEN `setTranslation('anchor_5', 'it', ...)` is called with the source's
+  `it` value
+- AND `$model->hasTranslation('anchor_5', 'it')` is true after the run
+
+#### Scenario: Seeder leaves IT untouched when the source has no IT value
+
+- GIVEN a field's source value carries only an `en` key, no `it` key
+- WHEN FrameworkCatalogSeeder runs
+- THEN no `it` translation is written for that field
+- AND `$model->hasTranslation('field', 'it')` remains false (a real,
+  un-manufactured gap)
 
 ---
 
@@ -437,7 +495,12 @@ suppressed by the guard it is reporting.
 **New-locale suppression (explicit):** While ANY FV is locked, adding a new locale translation to
 an EXISTING catalog row IS a mutation of that row. It is SUPPRESSED (the per-call-site `$model->exists`
 gate skips the `setTranslation` call for pre-existing rows). New-translation authoring for existing
-catalog rows waits until no FV is locked. Byte-for-byte preservation of existing rows wins.
+catalog rows waits until no FV is locked. Byte-for-byte preservation of existing rows wins. This
+suppression MUST NOT be silent: the same `seeder_lock_guard_active` signal (log entry and/or
+`framework_gaps` record) required above MUST fire, and it MUST be inspectable that IT strings
+present in the source JSON were NOT written because of an active lock — an operator re-running the
+seeder against a locked FV MUST be able to tell, without reading source code, that translation
+authoring did not take effect.
 
 **`CatalogMeta::bump()` in additive mode:** `bump()` MUST be called only when at least one genuinely
 new row was inserted during this seeder run. If the seeder ran in additive mode but inserted no new
@@ -615,6 +678,20 @@ stale-unassigned branch (not in `$currentAssignedIds`) even though their DB pivo
 - THEN the stale framework_role_competency pivot for (FLL, Y) is DELETED (guard inactive)
 - AND the anchor row is updated to "New anchor" (mutation proceeds normally when no FV is locked)
 
+#### Scenario: Locked FV suppresses new IT translation — explicit signal, not a silent no-op
+
+- GIVEN FrameworkVersion FV1 has is_locked=true
+- AND ICO×PRS indicator rows already exist in the DB with only EN translations
+- AND the source JSON now carries `it` values for all 12 of ICO×PRS's strings
+- WHEN the seeder runs
+- THEN none of ICO×PRS's existing rows gain an `it` translation
+  (`$model->hasTranslation('field', 'it')` remains false for all 12 strings)
+- AND the `seeder_lock_guard_active` signal (log entry and/or `framework_gaps`
+  record) is emitted
+- AND an operator inspecting the seeder's output can determine, without
+  reading source, that IT authoring for ICO×PRS exists in the source JSON but
+  was NOT applied because a FrameworkVersion is locked
+
 ---
 
 ### Requirement: Read-Only Org-Scoped Framework API
@@ -740,31 +817,36 @@ SRX BARS indicators and SRX `responsibilities`, once authored as a
 calibrated draft (see Requirement: SRX Role Responsibilities — Authored
 Prerequisite and Requirement: Complete Role×Competency BARS Coverage), are
 catalogue content authored by this change — not domain data C3 defers to
-client/expert authoring. The client/expert-authorship deferral remains only
-for MTG/LAT competency definitions and for IT locale translations of the
-full catalogue (existing and newly authored anchors alike).
+client/expert authoring. The same is now true of `it` translations for any
+role×competency pair within an agreed, shipped scope (see
+`framework-catalog-it-translations`): once a pair's 12 strings are translated
+and seeded, that pair is catalogue content, not a client-deferred gap. The
+client/expert-authorship deferral remains for MTG/LAT competency definitions,
+and for `it` translations of pairs that fall OUTSIDE the agreed scope of any
+landed translation change.
 
 Known gaps at first seed (post-completion):
 - MTG and LAT competency definitions and anchors — required for `potential`
   assessment type → `{kind: missing_potential_competency, competency_code:
   MTG|LAT}`
-- IT locale translations for all names, definitions, and anchor texts —
-  gates non-EN scoring in C9 → `{kind: missing_translation}`. Applies to the
-  full 747-anchor catalogue, including the 396 newly authored anchors; an
-  `it`-language project scoring against an untranslated anchor is marked
-  unscorable with `unscorable_reason = 'anchor_translation_missing'`
-  (scoring-engine behavior, unchanged by this change).
+- IT locale translations for role×competency pairs outside the agreed,
+  shipped translation scope — gates non-EN scoring in C9 for those pairs only
+  → `{kind: missing_translation}`. An `it`-language project scoring against
+  an untranslated pair is marked unscorable with `unscorable_reason =
+  'anchor_translation_missing'` (scoring-engine behavior, unchanged by this
+  change). Pairs within the shipped scope are NOT in this gap list once
+  translated (see Requirement: Gap Row Reconciliation on Seeded Content).
 
 The system MUST remain queryable (returning partial data) while gaps
 persist. A partial catalog MUST NOT cause API errors or seeder failures.
-(Previously: also listed `role_no_bars` for SRX, `missing_role_meta` for
-SRX, and 26 `competency_no_bars` entries for FLL/MLL/BUL — all closed by
-this change.)
+(Previously: the client/expert-authorship deferral for IT translations
+covered the entire catalogue unconditionally, with no notion of a shipped
+translation scope; this reverses that deferral for translated pairs.)
 
 #### Scenario: API responds correctly with a partial catalog (remaining gaps)
 
 - GIVEN the catalog is in a partial state (MTG/LAT absent, some IT
-  translations absent)
+  translations absent outside the shipped scope)
 - WHEN GET /api/framework/roles is called
 - THEN the response lists all 5 roles including SRX, with populated
   responsibilities and full BARS coverage
@@ -773,12 +855,179 @@ this change.)
 #### Scenario: Gap log is inspectable after seeder run
 
 - GIVEN the seeder has run with the remaining known gaps (MTG/LAT absent,
-  IT locale translations absent)
+  out-of-scope IT locale translations absent)
 - WHEN the seeder gap log or report is inspected
 - THEN it lists each gap with a human-readable description
 - AND each gap has a status of "pending authoring"
 - AND no competency_no_bars, role_no_bars, or SRX missing_role_meta rows
-  appear (all resolved by this change)
+  appear (all resolved by earlier catalogue completion)
+- AND no missing_translation entry appears for a pair that has all 12 of its
+  strings translated in `it`
+
+---
+
+### Requirement: Locale Dimension Uses Nested Keys, Visible to Every Content Guard
+
+The catalogue JSON's locale dimension MUST be represented as a nested key
+inside each existing translatable field's value (e.g.
+`{"en": "...", "it": "..."}`), inside the existing per-role and per-domain
+files. Sibling per-locale files or directories (e.g. `bars/it/{ROLE}.json`)
+and filename-suffixed locale variants (e.g. `bars/{ROLE}.it.json`) MUST NOT
+be used, because every non-parity CI content guard enumerates catalogue files
+non-recursively and derives the role from the filename — either scheme makes
+IT content invisible to, or misidentified by, those guards. No locale MAY be
+invisible to any content guard by virtue of file layout or naming.
+
+Every existing CI content guard (malformed-entry, overlong-anchor,
+cross-role-duplicate, and both completeness gates) MUST be updated to read
+the nested-locale shape and MUST be proven to run its checks against
+non-`en` locale content via a self-test in the wrapper CI step (f) — the
+guard function under test MUST be the SAME function the real gate invokes,
+and the self-test fixture MUST include a deliberately broken `it` value that
+the guard is asserted to catch.
+
+#### Scenario: A content guard demonstrably fails on broken Italian content
+
+- GIVEN a step (f) self-test fixture where an `it` anchor value exceeds the
+  configured word-count ceiling
+- WHEN `catalog_overlong_bars_anchors` (the same function the real gate
+  calls) runs against the fixture
+- THEN the guard reports a failure
+- AND the failure is attributed to the `it` value, not silently skipped
+
+#### Scenario: Cross-role duplicate detection reads Italian strings, not phantom roles
+
+- GIVEN two roles share identical `it` anchor text for the same competency
+  in the nested-locale shape
+- WHEN the cross-role duplicate-detection script runs
+- THEN it reports the Italian duplicate under the two real role codes
+- AND no phantom role (e.g. `ICO.it`) appears in its output
+
+---
+
+### Requirement: Per-Locale Anchor Length Ceiling, Measured Not Inherited
+
+Each supported locale MUST have its own blocking word-count ceiling and
+advisory word-count floor for BARS anchor text, calibrated by measuring a
+representative sample of that locale's OWN authored content. A locale's
+ceiling and floor MUST NOT default to another locale's numeric threshold and
+MUST NOT be invented without a recorded measurement. The measurement basis
+(what was measured, how many samples, and the resulting distribution) MUST
+be recorded alongside the configured value, mirroring the existing English
+ceiling's own recorded basis.
+
+#### Scenario: Italian anchors are checked against a calibrated Italian ceiling
+
+- GIVEN the Italian anchor-length ceiling has been calibrated from a
+  measured pilot competency and recorded
+- WHEN a CI content guard checks Italian anchor word counts
+- THEN it compares against the Italian-specific ceiling, not the English
+  ceiling value
+
+#### Scenario: An un-measured locale ceiling is rejected at config time
+
+- GIVEN a locale's ceiling configuration has no recorded measurement basis
+- WHEN the CI guard configuration is validated
+- THEN the missing basis is flagged rather than silently defaulting to
+  another locale's number
+
+---
+
+### Requirement: Italian Authoring Standard Precedes Content
+
+A sibling Italian-language authoring standard document MUST exist and be
+committed before any Italian BARS, competency, or role content is merged. It
+MUST specify, at minimum: the Italian indicator form, the Italian anchor
+form, register (professional/neutral business Italian — never regional), an
+Italian deficit-verb inventory for level 1 that carries equivalent force to
+the English inventory without inventing severity the English does not
+express, and orthography conventions (accents, apostrophes). The standard
+MUST be reviewed by a native Italian speaker with assessment-domain
+competence.
+
+#### Scenario: A content PR without a preceding authoring standard is blocked
+
+- GIVEN no Italian authoring standard document exists in the repository
+- WHEN an Italian content PR is opened
+- THEN the PR cannot be merged under the documented process (the standard is
+  a stated prerequisite, checked at review)
+
+#### Scenario: The standard specifies non-regional professional register
+
+- GIVEN the Italian authoring standard document
+- WHEN its register section is read
+- THEN it states professional/neutral business Italian and explicitly
+  excludes regional or colloquial variants
+
+---
+
+### Requirement: Partial IT-Coverage Control File (Both-Direction Doctrine)
+
+When Italian content ships in slices (e.g. role by role) rather than as one
+complete landing, a NEW control file — distinct from
+`scripts/framework-known-gaps.txt` and
+`scripts/framework-competency-gaps.txt`, which answer different questions and
+MUST NOT absorb this one — MUST track role×competency pairs still pending
+`it` translation. It MUST be enforced in both directions, matching the
+doctrine of the two existing control files: a role×competency pair that is
+NOT fully translated (all 12 strings) AND is NOT listed in this control file
+MUST fail CI; a pair LISTED in this control file that IS now fully
+translated MUST also fail CI (stale exemption). If and when the entire
+agreed scope ships as one landing with no partial state, this file MUST be
+empty, exactly like the other two control files.
+
+#### Scenario: An untranslated, unlisted pair fails CI
+
+- GIVEN role×competency pair BUL×STG is not fully translated to `it`
+- AND BUL×STG is NOT listed in the IT-coverage control file
+- WHEN the wrapper catalog gate runs
+- THEN it fails, naming BUL×STG as an undeclared translation gap
+
+#### Scenario: A stale exemption for a now-translated pair fails CI
+
+- GIVEN ICO×PRS is listed in the IT-coverage control file as a pending
+  exemption
+- AND ICO×PRS now has all 12 strings translated to `it`
+- WHEN the wrapper catalog gate runs
+- THEN it fails, naming ICO×PRS as a stale exemption that must be removed
+  from the control file
+
+#### Scenario: The control file is empty once the full agreed scope ships
+
+- GIVEN every role×competency pair in the agreed scope is fully translated
+- WHEN the wrapper catalog gate runs
+- THEN the IT-coverage control file contains zero entries and the gate
+  passes
+
+---
+
+### Requirement: Locale Merge Semantics — Adding Is Idempotent-Safe, Removing Is Not
+
+`setTranslation('field', $locale, $value)` MERGES into the existing JSON
+translation column; it MUST NOT be relied upon to remove a locale. Removing
+an `it` value from the source JSON and re-seeding MUST NOT be expected to
+remove the corresponding `it` translation from the database — the seeder
+provides no delete-locale path via normal seeding. Removing a locale from
+the database, when required, MUST be performed by a targeted, explicit
+operation (e.g. a `forgetTranslation('it')` pass over the affected rows) —
+NOT by editing the source JSON and re-running the seeder.
+
+#### Scenario: Re-seeding after removing IT from the source does not remove it from the DB
+
+- GIVEN a BarsIndicator has both `en` and `it` translations persisted
+- AND the `it` value is removed from the field's source JSON
+- WHEN the seeder runs again (no locked FrameworkVersion)
+- THEN the `it` translation is still present on the model
+  (`hasTranslation('field', 'it')` remains true)
+- AND the `en` translation is updated to reflect the current source value
+
+#### Scenario: Locale removal requires an explicit targeted operation
+
+- GIVEN an operator needs to remove a mistakenly-seeded `it` translation
+- WHEN the removal is performed
+- THEN it is performed via a dedicated `forgetTranslation('it')`-style
+  operation targeting the specific rows, documented as distinct from a
+  normal seeder re-run
 
 ---
 
@@ -790,4 +1039,4 @@ The following are OUT OF SCOPE for C3 and MUST NOT be implemented here:
 - **Project → framework_version FK and pin-at-creation** — C4 wires this FK after C3 creates the `framework_versions` table
 - **Per-org BARS overrides or customization** — future additive capability; C3 base is global (working draft); immutability is achieved at C4 pin time via snapshot-at-pin
 - **MTG/LAT scoring flow** — blocked pending authoring; flagged but not implemented
-- **Inventing missing domain data** — MTG/LAT competency definitions and IT locale translations (for the full catalogue, existing and newly authored anchors alike) remain client/expert artifacts; C3 records the gap only. SRX BARS indicators and SRX `responsibilities` are NOT in this list: the `bars-catalogue-completion` change authored them as a calibrated draft — catalogue content, not client-deferred domain data — extrapolated from the complete ICO file, the existing leader-role pairs, `competencies.json`, and the `roles.json` seniority ladder. That draft is pending assessment-specialist sign-off before it scores a real candidate; sign-off is a release gate, not a follow-up
+- **Inventing missing domain data** — MTG/LAT competency definitions remain client/expert artifacts; C3 records the gap only. IT locale translations for translated role×competency pairs are catalogue content (handled by `framework-catalog-it-translations`), not client-deferred domain data. SRX BARS indicators and SRX `responsibilities` are NOT in this list: the `bars-catalogue-completion` change authored them as a calibrated draft — catalogue content, not client-deferred domain data — extrapolated from the complete ICO file, the existing leader-role pairs, `competencies.json`, and the `roles.json` seniority ladder. That draft is pending assessment-specialist sign-off before it scores a real candidate; sign-off is a release gate, not a follow-up
