@@ -382,60 +382,86 @@ does deliver from what a future billing slice must deliver.)
 
 ### Requirement: AI Request Logging
 
-Every AI provider request issued by the BEAI backend MUST be persisted as a
-log record in the database. This log is the sole authoritative source for cost
-analysis, performance benchmarking, provider comparison, and prompt optimization.
+Every call to an LLM provider MUST produce exactly one `ai_requests` row,
+**whether or not the call's result is usable**, and that row MUST survive a
+rollback of the work the call was made for.
 
-Each `ai_requests` record MUST capture:
+Two properties, and they are separate. The current implementation satisfies
+neither, and each failure loses money silently.
 
-| Field | Type | Description |
-|---|---|---|
-| `provider` | string | AI provider name (e.g. `anthropic`, `openai`) |
-| `model` | string | Model identifier (e.g. `claude-haiku-4-5-20251001`) |
-| `prompt_version` | string | Versioned prompt identifier |
-| `prompt_tokens` | integer | Prompt tokens consumed |
-| `completion_tokens` | integer | Completion tokens returned |
-| `total_tokens` | integer | Sum of prompt and completion tokens |
-| `latency_ms` | integer | Round-trip latency in milliseconds |
-| `estimated_cost_usd` | decimal | Estimated cost at published pricing as of log time |
-| `success` | boolean | `true` if the provider returned a valid response |
-| `failure_reason` | string\|null | Error code or message when `success` is `false` |
-| `organization_id` | uuid | Tenant scoping — MUST always be set |
-| `created_at` | timestamp | ISO 8601 timestamp of the request |
+**1. Logging is failure-path inclusive.**
 
-AI request log records are **append-only**. Application code MUST NOT issue
-UPDATE or DELETE statements against existing `ai_requests` rows. Deletion is
-subject to the GDPR retention policy (open product decision 2, ROADMAP.md).
+A provider call that returns unparseable JSON, violates the indicator contract,
+or produces a non-verbatim excerpt has still been **made and billed**. The
+scoring job today returns early on those paths, before any row is written, so
+the spend leaves no trace. A row MUST be written for them, carrying
+`success = false` and a `failure_reason`.
 
-Logging MUST be synchronous with the AI call: a failed or timed-out request
-MUST still produce a log record with `success = false` and a populated
-`failure_reason`.
+`failure_reason` records why the RESULT was unusable, never the raw provider
+payload — an error string can echo prompt content, and this table is read by an
+org-scoped cost dashboard.
 
-#### Scenario: A successful scoring AI call produces a complete log record
+**2. Logging is transaction-independent.**
 
-- GIVEN a `ScoreEvaluationJob` that calls the LLM provider and receives a valid response
-- WHEN the response is processed
-- THEN an `ai_requests` record is persisted with `success = true`, accurate token counts, latency, and `organization_id`
+The row MUST NOT be written inside the transaction that persists the scoring
+results. A provider call is an external, irreversible, billed event; the results
+are local and revocable. Wrapping the first in the second means any later
+failure in that transaction rolls back the record of money already spent — the
+database ends up disagreeing with the invoice, and it disagrees in the direction
+that hides cost.
 
-#### Scenario: A failed AI call still produces a log record
+Write the row in its own committed statement, before or after the results
+transaction, never within it.
 
-- GIVEN a `ScoreEvaluationJob` whose LLM provider call times out or returns an API error
-- WHEN the failure is handled
-- THEN an `ai_requests` record is persisted with `success = false` and `failure_reason` populated
-- AND the record includes `provider`, `model`, and `prompt_version` for traceability
+**Field set.** In addition to the shipped columns, the table MUST carry:
 
-#### Scenario: AI log records are scoped to the requesting organization
+| Column | Purpose |
+|---|---|
+| `provider` | Which vendor was billed. Nullable-free: unattributable spend is not a cost record. |
+| `estimated_cost_usd` | Derived at write time from the model's rate. Stored, not computed on read, so a later rate change cannot silently rewrite history. |
+| `success` | Whether the result was usable. Distinct from "the HTTP call returned 200". |
+| `failure_reason` | Machine key, null when `success` is true. Never a raw payload. |
 
-- GIVEN AI request log records in a multi-tenant environment
-- WHEN organization A queries its AI usage metrics
-- THEN only records with `organization_id = A` are returned
-- AND no record belonging to another organization is included
+`estimated_cost_usd` is an ESTIMATE and is named so. It is not an invoice, it is
+not authoritative for billing, and the dashboard reading it MUST present it as
+an estimate.
 
-#### Scenario: AI log records are append-only
+**Append-only.** `ai_requests` has no `updated_at` and MUST NOT be updated by
+business logic. A cost record that can be edited is not a cost record.
 
-- GIVEN the `ai_requests` table at runtime
-- WHEN all SQL statements issued by application code are reviewed
-- THEN no UPDATE or DELETE is issued against `ai_requests` rows
+#### Scenario: A billed call whose result cannot be parsed is still recorded
+
+- GIVEN a provider call that returns 200 with a body that fails JSON parsing
+- WHEN the scoring job handles the failure
+- THEN one `ai_requests` row exists for that competency
+- AND `success` is false
+- AND `failure_reason` identifies the failure class
+- AND the row contains no fragment of the provider payload
+
+#### Scenario: A rolled-back scoring transaction does not erase the spend
+
+- GIVEN a provider call that succeeded and was billed
+- AND the transaction persisting the competency results subsequently fails
+- WHEN the transaction rolls back
+- THEN the `ai_requests` row is still present
+
+This is the property the current code most clearly violates, and the one with
+the largest blast radius: it under-reports cost precisely when something else
+went wrong, which is exactly when spend tends to spike.
+
+#### Scenario: Every recorded call is attributable
+
+- WHEN an `ai_requests` row is written
+- THEN `provider`, `model`, `organization_id` and `estimated_cost_usd` are all
+  populated
+
+#### Scenario: The table rejects mutation
+
+- WHEN business logic attempts to update an existing `ai_requests` row
+- THEN an architecture test fails the build
+
+Enforced the same way the append-only discipline is enforced elsewhere: by a
+guard, not by a convention.
 
 ---
 
