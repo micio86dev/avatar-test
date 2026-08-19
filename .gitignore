@@ -39,3 +39,9 @@ data/
 
 # Wrangler (Cloudflare CLI) local state
 .wrangler/
+
+# Engram memory export — NEVER commit.
+# `engram sync` writes verbatim session history here: user prompts, internal
+# decisions, infrastructure identifiers and local filesystem paths. This repo
+# is PUBLIC, so committing it publishes all of that irreversibly.
+.engram/
