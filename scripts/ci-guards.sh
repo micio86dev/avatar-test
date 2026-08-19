@@ -27,12 +27,25 @@
 # not have, which is the exact note-outliving-its-fact defect these guards
 # exist to catch, in the guards' own documentation.
 #
-# What is true now: `shellcheck -s sh` and `dash -n` pass on this file AND on
-# every `run:` block that sources it. The steps still EXECUTE under bash,
-# because that is the Actions default and nothing here needs changing that.
-# What POSIX compatibility buys is that `shell: sh` on a step would not
-# silently break a guard, and that `shellcheck -s sh` stays able to check them.
-# Verify both before changing this paragraph.
+# What is true now, and CHECKED BY A REAL GATE ("Lint scripts/ci-guards.sh"
+# in .github/workflows/wrapper-ci.yml, run before anything sources this
+# file): `shellcheck -s sh` and `dash -n` both pass on THIS FILE. What POSIX
+# compatibility buys is that `shell: sh` on a step would not silently break a
+# guard, and that `shellcheck -s sh` stays able to check the functions
+# themselves.
+#
+# The claim stops at this file on purpose, and used to overreach: an earlier
+# draft said it also covered "every `run:` block that sources it", which
+# nothing checked either — a second instance of the same note-outliving-its-
+# fact defect, inside the paragraph about that defect. The steps that source
+# this file EXECUTE under bash (Actions' default, unchanged), not sh, so
+# checking them under `-s sh` would be the wrong dialect even if something
+# ran it. Making that half true would mean parsing this workflow's YAML,
+# extracting every `run:` block, and shellchecking each under `-s bash` —
+# real, separate machinery this file does not build. They are held to the
+# no-`local`/no-arrays/no-`[[` discipline stated above by review, not by a
+# gate. Do not restore the wider claim unless that machinery exists and a CI
+# step runs it.
 #
 # Usage:  . scripts/ci-guards.sh          (from the repository root)
 
@@ -138,6 +151,258 @@ df_guard() {
       continue
     fi
     tag_pinned "$CI_DF_REF" || { printf '%s\n' "$CI_DF_REF"; exit 1; }
+  done
+}
+
+# ---------------------------------------------------------------------------
+# `COPY --from=<ref>` pinning — the SAME rule as FROM (D24/D25), for a
+# construct df_guard never read at all. `COPY --from=` takes either a STAGE
+# name (`COPY --from=builder`) or an IMAGE reference (`COPY --from=composer:2`
+# — a floating major, exactly what tag_pinned exists to reject), same
+# ambiguity FROM has. df_guard already solved stage-versus-image
+# (`ci_dockerfile_stage_names`); this reuses that helper rather than
+# re-deriving a second stage-versus-image parser, which is how the FROM
+# parser above ended up broken more than once.
+#
+# The line shape is not FROM's, though. FROM's reference is "the first
+# non-flag token" because FROM has no other flags worth naming. COPY's
+# `--from=` is not positional — `--chown` and `--chmod` can sit on either
+# side of it — so the reference is the VALUE of the `--from=` flag
+# specifically, found by token, not by position.
+# ---------------------------------------------------------------------------
+
+# COPY lines that carry a --from= flag, one per line. A COPY with no
+# --from= copies from the build context, not another stage or image, and is
+# out of scope for this guard entirely — it has nothing to pin.
+ci_dockerfile_copy_from_lines() {
+  grep -iE '^[[:space:]]*copy[[:space:]]' "$1" 2>/dev/null | grep -E -- '--from=' || true
+}
+
+# The --from=<value> token off one COPY line, comment-free by construction
+# (grep -iE above only ever matches instruction lines, not comments). Split
+# the same way ci_dockerfile_ref splits a FROM line (space/tab -> newline,
+# one token per line) so a flag on either side of --from= cannot confuse it.
+ci_dockerfile_copy_from_ref() {
+  # shellcheck disable=SC2020
+  # Same duplicated '\n' as ci_dockerfile_ref above, and the same reason:
+  # BOTH space and tab must become a newline so the line splits into one
+  # token per line, which a single-character replacement set cannot do
+  # portably (tr's padding behaviour is implementation-defined in POSIX).
+  printf '%s' "$1" | tr ' \t' '\n\n' | sed -n 's/^--from=//p' | head -1
+}
+
+# Exit 0 when every COPY --from= reference in $1 is pinned (or is a declared
+# stage). Exit 1 and print the first offending reference otherwise. Exit 1
+# silently on a file that does not exist — same "cannot read its subject"
+# contract df_guard obeys above.
+df_copy_from_guard() {
+  [ -f "$1" ] || return 1
+  CI_DF_STAGES=$(ci_dockerfile_stage_names "$1")
+  ci_dockerfile_copy_from_lines "$1" | while IFS= read -r CI_DF_LINE; do
+    CI_DF_REF=$(ci_dockerfile_copy_from_ref "$CI_DF_LINE")
+    [ -n "$CI_DF_REF" ] || continue
+    CI_DF_LOWER=$(printf '%s' "$CI_DF_REF" | tr '[:upper:]' '[:lower:]')
+    if printf '%s\n' "$CI_DF_STAGES" | grep -qxF "$CI_DF_LOWER"; then
+      continue
+    fi
+    tag_pinned "$CI_DF_REF" || { printf '%s\n' "$CI_DF_REF"; exit 1; }
+  done
+}
+
+# ---------------------------------------------------------------------------
+# GitHub Actions `uses:` SHA-pinning — this workflow's own version of
+# D24/D25, applied to itself. A `uses: owner/repo@v4` tag is exactly as
+# movable as a floating Docker tag: the action's owner can repoint `v4` to a
+# different commit at any time, the same way a registry can repoint a bare
+# major. The only pin that is actually immutable is the commit SHA; the
+# human-readable version belongs in a trailing comment, never in the ref
+# itself, which is why this rejects it there too.
+#
+# Deliberately narrower than tag_pinned: there is no dotted-version or
+# `local` carve-out here, because there is no equivalent of a locally-built,
+# untaggable action. Every `uses:` line names a real, externally-owned
+# action, so every one of them must resolve to a SHA.
+# ---------------------------------------------------------------------------
+
+# `uses:` lines in a workflow file, one per line. `uses:` is a step-level
+# key, which YAML allows written two ways — on its own line as a sibling of
+# `- name:` (every real line in this file), or compressed onto the list
+# item's own dash (`- uses: ...`, valid YAML this guard must still read
+# correctly rather than silently missing). The optional `-` is matched, not
+# assumed absent.
+ci_workflow_uses_lines() {
+  grep -E '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]*' "$1" 2>/dev/null || true
+}
+
+# The <owner>/<repo>@<ref> value off one `uses:` line, the same optional
+# leading `-` stripped, trailing comment (the human-readable version,
+# `# v4.4.0`) stripped.
+ci_workflow_uses_ref() {
+  printf '%s' "$1" \
+    | sed -e 's/^[[:space:]]*\(-[[:space:]]\{1,\}\)\{0,1\}uses:[[:space:]]*//' -e 's/[[:space:]]*#.*$//'
+}
+
+# Exit 0 when a `uses:` value is pinned to a full 40-character commit SHA
+# (hex, case-insensitive — Git itself is). A tag (`@v4`), a branch
+# (`@main`), or a short SHA are all rejected: none of them is immutable, and
+# a short SHA is not even guaranteed unambiguous as a repository grows.
+workflow_action_pinned() {
+  case "$1" in
+    *@*) ;;
+    *) return 1 ;;
+  esac
+  printf '%s' "${1##*@}" | grep -qE '^[0-9a-fA-F]{40}$'
+}
+
+# Exit 0 when every `uses:` reference in workflow $1 is SHA-pinned. Exit 1
+# and print the first offending reference otherwise. Exit 1 silently on a
+# file that does not exist — same "cannot read its subject" contract every
+# other guard in this file obeys.
+workflow_actions_guard() {
+  [ -f "$1" ] || return 1
+  ci_workflow_uses_lines "$1" | while IFS= read -r CI_WF_LINE; do
+    CI_WF_REF=$(ci_workflow_uses_ref "$CI_WF_LINE")
+    [ -n "$CI_WF_REF" ] || continue
+    workflow_action_pinned "$CI_WF_REF" || { printf '%s\n' "$CI_WF_REF"; exit 1; }
+  done
+}
+
+# ---------------------------------------------------------------------------
+# docs/version-catalog.md — bidirectional consistency with reality (D25).
+#
+# The catalog exists because the archived design section it replaced
+# drifted: `openspec/changes/archive/2026-07-16-project-skeleton-ci/design.md`
+# D25 listed `oven/bun:1.3`, `node:24-slim` and `nginx:1.27-alpine` — three
+# bare-major tags `tag_pinned` above would reject — while every Dockerfile
+# had already moved on to a patch pin. docs/version-catalog.md's own rules
+# section says the table and reality "are checked against each other" —
+# this is that check, in BOTH directions:
+#
+#   * every image tag reality actually uses (Dockerfile FROM bases, compose
+#     image: references) must be a row in the catalog — a tag bumped
+#     without updating the row FAILS.
+#   * every row the catalog declares must still be used somewhere — a row
+#     left behind after an image is dropped or renamed FAILS too. This is
+#     the same note-outliving-its-fact defect scripts/framework-known-gaps.txt,
+#     scripts/framework-competency-gaps.txt and
+#     scripts/framework-crossrole-baseline.txt already guard against,
+#     applied to a fourth control file.
+#
+# Wired into .github/workflows/wrapper-ci.yml as step (h), and proved
+# against a genuinely broken fixture — both directions — in step (f)'s
+# self-test.
+#
+# Reality is the source of truth for what is USED; the catalog is the
+# source of truth for what is ALLOWED. The three locally-built tags
+# (beai-api:local, beai-frontend:local, beai-backoffice:local) are excluded
+# by the SAME "the literal `local`" convention `tag_pinned` above already
+# documents: they are built FROM the Dockerfiles this guard reads, and a
+# row pinning "whatever was just built" would assert nothing.
+#
+# Multi-stage `FROM builder AS runtime` references an earlier STAGE, not an
+# image — `catalog_dockerfile_images` below reuses `df_guard`'s own
+# stage-exclusion helpers (`ci_dockerfile_from_lines`,
+# `ci_dockerfile_stage_names`, `ci_dockerfile_ref`, all defined above)
+# rather than re-deriving the same parsing this file already got wrong once.
+# ---------------------------------------------------------------------------
+
+# Non-stage FROM image references in a Dockerfile, one per line. Fails
+# closed (return 1, nothing printed) on a file that does not exist — the
+# same contract df_guard obeys, using the exact same stage-collection and
+# per-line parsing it does.
+catalog_dockerfile_images() {
+  [ -f "$1" ] || return 1
+  CI_CDI_STAGES=$(ci_dockerfile_stage_names "$1")
+  ci_dockerfile_from_lines "$1" | while IFS= read -r CI_CDI_LINE; do
+    CI_CDI_REF=$(ci_dockerfile_ref "$CI_CDI_LINE")
+    [ -n "$CI_CDI_REF" ] || continue
+    CI_CDI_LOWER=$(printf '%s' "$CI_CDI_REF" | tr '[:upper:]' '[:lower:]')
+    [ "$CI_CDI_LOWER" = "scratch" ] && continue
+    printf '%s\n' "$CI_CDI_STAGES" | grep -qxF "$CI_CDI_LOWER" && continue
+    printf '%s\n' "$CI_CDI_REF"
+  done
+}
+
+# The image: values in a `docker compose config` OUTPUT (a multi-line
+# string passed as $1, not a path — the caller already has it and should
+# not have to invoke docker compose a second time to get it), one per
+# line, excluding the `:local` build-only convention `tag_pinned` above
+# already documents. Always exits 0: this is a pure filter over text the
+# caller already obtained, with nothing of its own left to fail on.
+compose_declared_images() {
+  printf '%s\n' "$1" \
+    | grep -E '^[[:space:]]*image:' \
+    | sed 's/^[[:space:]]*image:[[:space:]]*//' \
+    | while IFS= read -r CI_CDI_IMG; do
+        [ -n "$CI_CDI_IMG" ] || continue
+        case "$CI_CDI_IMG" in
+          *:local) continue ;;
+        esac
+        printf '%s\n' "$CI_CDI_IMG"
+      done
+}
+
+# Every image tag docs/version-catalog.md declares in its "Docker base
+# images" table, one per line — read from the Tag column's backtick span
+# directly, rather than a second hand-maintained list somewhere else.
+#
+# The table lives between "## Docker base images" and the NEXT "## "
+# heading. A sed range `/^## Docker base images/,/^## /p` gets this
+# wrong: that heading line itself starts with "## ", matching BOTH
+# boundaries of its own range on the same line, so the range opens and
+# closes on the heading and prints nothing after it. Tracked as an
+# explicit `insection` flag in awk instead, which is not fooled by one
+# line satisfying both patterns: the heading sets the flag and moves on
+# (`next`, so it is never itself scanned for a table row); a LATER
+# "## " heading clears the flag and exits before that line is scanned
+# either.
+#
+# Matches the FIRST backtick span on each row, always the Tag column —
+# the Image column carries no backticks, so nothing upstream of it can be
+# mistaken for one.
+# shellcheck disable=SC2016
+# Single-quoted on purpose: `$0`, `insection` and the awk regexes below
+# are AWK's own syntax and must reach it untouched, not shell variables.
+CI_VERSION_CATALOG_AWK_SCRIPT='
+  /^## Docker base images/ { insection = 1; next }
+  insection && /^## / { exit }
+  insection {
+    if (match($0, /`[^`]+`/)) {
+      print substr($0, RSTART + 1, RLENGTH - 2)
+    }
+  }
+'
+
+# Fails closed: a missing file returns 1 with nothing printed. A file that
+# exists but no longer has a "Docker base images" table returns 0 with
+# EMPTY output — the caller in step (h) treats a zero-row result as a
+# guard that FAILED TO RUN, the same "empty list read as nothing missing"
+# doctrine guard (a)'s `compose_image_refs_present` and guard (e)'s
+# submodule-status check already apply to their own evidence.
+version_catalog_images() {
+  if [ ! -f "$1" ]; then
+    echo "ci-guards: $1 does not exist." >&2
+    return 1
+  fi
+  awk "$CI_VERSION_CATALOG_AWK_SCRIPT" "$1"
+}
+
+# Lines in set $1 (newline-separated) absent, byte-for-byte, from set $2.
+# Shared by BOTH directions of the catalog check: "used but not cataloged"
+# is this called as (used, catalog); "cataloged but no longer used" is the
+# SAME function with the two arguments swapped. A symmetric failure mode
+# gets one implementation, not two copies that could drift from each
+# other — the exact defect shape this whole file exists to rule out,
+# applied to itself.
+#
+# Blank lines in $1 are skipped rather than reported. Always exits 0 — a
+# pure set operation over text the caller already validated non-empty
+# (see the min-evidence checks in step (h) for both operands).
+image_set_difference() {
+  printf '%s\n' "$1" | while IFS= read -r CI_ISD_ITEM; do
+    [ -n "$CI_ISD_ITEM" ] || continue
+    printf '%s\n' "$2" | grep -qxF "$CI_ISD_ITEM" && continue
+    printf '%s\n' "$CI_ISD_ITEM"
   done
 }
 
@@ -339,6 +604,30 @@ compose_service_diff() {
 }
 
 # ---------------------------------------------------------------------------
+# Minimum-evidence guard for the compose image-pin check.
+#
+# `docker compose config | grep -E '^\s*image:' | while read -r _ REF; do ...`
+# matching ZERO lines walks that loop zero times, prints nothing to
+# /tmp/unpinned.txt, and the step announced "All compose image tags are
+# pinned" having examined NOTHING. Same shape guard (e) already refuses for
+# submodule pointers ("An empty list would walk the loop zero times ... a
+# green gate over no evidence") — a rule that binds one gate and not the next
+# is a preference, not a rule. Triggers: a compose format change, a service
+# becoming build-only, or the `image:` key moving.
+#
+# Extracted (rather than left inline in the workflow step) for the same
+# reason `tag_pinned` and `compose_service_diff` are: so the self-test in (f)
+# exercises the SAME predicate the real gate calls, not a private copy of it.
+#
+# $1 is the count of `image:` lines matched (an integer, e.g. from
+# `grep -cE '^\s*image:'`). Exit 0 when at least one was found — there is
+# evidence to check — 1 otherwise.
+# ---------------------------------------------------------------------------
+compose_image_refs_present() {
+  [ "$1" -ge 1 ] 2>/dev/null
+}
+
+# ---------------------------------------------------------------------------
 # Submodule pointer reachability — can everybody else FETCH this commit?
 #
 # Lives here rather than inline in step (e) because it was inline in step (e),
@@ -419,8 +708,27 @@ submodule_clear_verify_refs() {
 # installing a whole language runtime to do a JSON.parse and an equality check
 # is a D37 dependency question rather than a style preference.
 #
-# Exit 0 when both files parse to the same document, 1 otherwise — including
-# when either file is missing or is not valid JSON.
+# Exit 0 when both files parse to the same document, 1 when both parse but
+# differ, 2 when either file is missing, unreadable, or is not valid JSON.
+#
+# 1 and 2 are DELIBERATELY different exit codes, not the same "nonzero" —
+# this file's own doctrine, applied to itself. "Could not be read" and
+# "differs" are separated everywhere else a guard in this repo touches a file
+# it did not author (step (a)'s missing-Dockerfile check, step (e)'s
+# fetch-failure-versus-unreachable-pointer split, and the comment above step
+# (b)'s call site here) — before this fix `json_canonical_equal` did the
+# separation in every OTHER caller's intent but not in its own mechanism: an
+# uncaught JSON.parse throw and a real content mismatch both exited 1, so a
+# genuinely malformed file was reported with the exact same wording as real
+# drift ("differs from api/openapi.json"), sending the next operator hunting
+# for a content change in a file that was never parseable to begin with.
+#
+# The stderr write on the exit-2 path is INTENTIONAL and NOT discarded —
+# `2>/dev/null` used to swallow bun's own parse-error trace here, which is
+# exactly what buried this distinction. Callers that want the reason
+# (both real gates below do) capture stderr themselves; callers that only
+# care about the boolean (the self-test's "identical"/"differs" rows) are
+# unaffected, because this path only ever writes when it is about to exit 2.
 # ---------------------------------------------------------------------------
 CI_JSON_CANONICAL_SCRIPT='
   const canonical = (v) => {
@@ -428,15 +736,50 @@ CI_JSON_CANONICAL_SCRIPT='
     if (v === null || typeof v !== "object") return v;
     return Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonical(v[k])]));
   };
-  const s = async (p) => JSON.stringify(canonical(JSON.parse(await Bun.file(p).text())));
-  process.exit((await s(process.env.CI_JSON_A)) === (await s(process.env.CI_JSON_B)) ? 0 : 1);
+  const load = async (p) => {
+    try {
+      return JSON.stringify(canonical(JSON.parse(await Bun.file(p).text())));
+    } catch (e) {
+      process.stderr.write("CI_JSON_UNREADABLE: " + p + " is missing or is not valid JSON (" + e.message + ")\n");
+      process.exit(2);
+    }
+  };
+  const a = await load(process.env.CI_JSON_A);
+  const b = await load(process.env.CI_JSON_B);
+  process.exit(a === b ? 0 : 1);
 '
 
 json_canonical_equal() {
   CI_JSON_A="$1"
   CI_JSON_B="$2"
   export CI_JSON_A CI_JSON_B
-  bun --eval "$CI_JSON_CANONICAL_SCRIPT" 2>/dev/null
+
+  # The exit status is a CONTRACT (0 identical / 1 differs / 2 unreadable),
+  # so it cannot be bun's raw status. The embedded script only ever exits
+  # 0, 1 or 2 — but bun itself exits 127 when it is not on PATH, and can
+  # exit on a signal or fail to start the script at all. Passing that
+  # straight through put 127 into the callers' `else` branch, which reads
+  # "differs from api/openapi.json" — the exact reporting bug the exit-2
+  # split was added to end, reintroduced through a different door.
+  # Anything that is not a clean 0 or 1 is "could not run".
+  # The status MUST be captured in the `else` branch. After a bare
+  # `if cmd; then ...; fi` the `if` itself resets `$?` to 0 when no branch
+  # runs, so reading it on the next line reports success for a command that
+  # just failed — the same trap the call sites in wrapper-ci.yml already
+  # document, arrived at from the other direction.
+  if bun --eval "$CI_JSON_CANONICAL_SCRIPT"; then
+    return 0
+  else
+    CI_JSON_STATUS=$?
+  fi
+  if [ "$CI_JSON_STATUS" -eq 1 ]; then
+    return 1
+  fi
+  if [ "$CI_JSON_STATUS" -ne 2 ]; then
+    printf 'CI_JSON_UNREADABLE: comparison could not run (bun exited %s)\n' \
+      "$CI_JSON_STATUS" >&2
+  fi
+  return 2
 }
 
 # ---------------------------------------------------------------------------
@@ -538,11 +881,13 @@ catalog_missing_bars() {
 # Known gaps — the committed list of roles allowed to ship without BARS.
 #
 # The completeness assertion needs a middle setting, and the two extremes are
-# both wrong. Fail unconditionally and CI is permanently red over SRX.json,
-# which is 54 indicators of expert assessment content nobody can produce on
-# demand; a gate that cannot go green gets deleted within a week and then
-# protects nothing. Warn only, and it is silently green over an incomplete
-# binding catalog, which is how this survived in the first place.
+# both wrong. Fail unconditionally and CI would stay permanently red over
+# content nobody can produce on demand — SRX.json was exactly that, 54
+# indicators of expert assessment content, until bars-catalogue-completion
+# Phase 6 authored it; a gate that cannot go green gets deleted within a week
+# and then protects nothing. Warn only, and it is silently green over an
+# incomplete binding catalog, which is how the SRX gap survived undetected
+# in the first place.
 #
 # So: fail for anything NOT on an explicit, committed list, and — the half that
 # keeps the list honest — fail for anything ON the list that no longer needs to
@@ -605,9 +950,12 @@ catalog_stale_gap_exemptions() {
 #
 # One level finer than everything above. `catalog_missing_bars` and its two
 # callers ask "does bars/<ROLE>.json EXIST" — a question with only two
-# answers, yes or no. A file can exist and still be PARTIAL: FLL, MLL and BUL
-# each anchor 8 of their 18 assigned competencies, and the role-level gate is
-# structurally blind to that — the file is there, so it passes.
+# answers, yes or no. A file can exist and still be PARTIAL, and the
+# role-level gate is structurally blind to that — the file is there, so it
+# passes. Until bars-catalogue-completion this was the live state, not a
+# hypothetical: FLL and MLL anchored 8 of their 18 assigned competencies and
+# BUL 8 of its 14. All 83 pairs are anchored now; this gate is what would
+# catch a regression back.
 #
 # Deliberately asks its question ONLY of roles whose bars file EXISTS. A role
 # with no file at all is the role-level gate's business
@@ -843,23 +1191,33 @@ catalog_unexpected_missing_bars_pairs() {
 # A THIRD shape, caught by neither direction until this fix — verified
 # independently and stated precisely so it cannot regress unnoticed: a pair
 # naming a role that IS declared in roles.json but has NO bars/<ROLE>.json
-# file at ALL (SRX's shape, today). `catalog_missing_bars_pairs` skips such a
-# role BY DESIGN (`[ -f ... ] || continue` — the pair-level gate is not this
-# role's business, the role-level gate is); Direction 1 below requires the
-# file to exist and so never runs; Direction 2 finds the pair legitimately
-# declared in roles.json and so never fires either. Net effect before this
-# fix: a line shaped like "SRX:PRS" is accepted onto the per-pair list,
-# produces NO error in either existing direction, and stays mute FOREVER —
-# until the day bars/SRX.json is authored, at which point it fires in a
-# commit that has nothing to do with it. The file's own header already
-# states the POLICY ("SRX's pairs stay under the role-level list, not here");
-# Direction 3 below is what enforces it mechanically instead of by hoping
-# nobody adds one.
+# file at ALL (this was SRX's shape before bars-catalogue-completion Phase 6
+# authored bars/SRX.json — kept as the reference example below, not a claim
+# about SRX today). `catalog_missing_bars_pairs` skips such a role BY DESIGN
+# (`[ -f ... ] || continue` — the pair-level gate is not this role's
+# business, the role-level gate is); Direction 1 below requires the file to
+# exist and so never runs; Direction 2 finds the pair legitimately declared
+# in roles.json and so never fires either. Net effect before this fix: a
+# line shaped like "SRX:PRS" would be accepted onto the per-pair list,
+# produce NO error in either existing direction, and stay mute FOREVER —
+# until the day the role's bars file was authored, at which point it would
+# fire in a commit that has nothing to do with it. The file's own header
+# already states the POLICY ("SRX's pairs stay under the role-level list,
+# not here"); Direction 3 below is what enforces it mechanically instead of
+# by hoping nobody adds one.
 catalog_stale_competency_gap_exemptions() {
   CI_CSCGE_TREE="$1"
   CI_CSCGE_DECLARED=$(mktemp)
-  role_competency_pairs "$CI_CSCGE_TREE" > "$CI_CSCGE_DECLARED" 2>/dev/null
-  CI_CSCGE_STATUS=$?
+  # if/else, not `cmd` then `STATUS=$?` on the next line: under `set -e` the
+  # shell aborts on the failing command and the status is never read, so the
+  # entire could-not-read path becomes dead code. This function is called from
+  # step (f) outside an `if` condition, where that abort is real. Same rule
+  # json_canonical_equal follows and wrapper-ci.yml documents at its call sites.
+  if role_competency_pairs "$CI_CSCGE_TREE" > "$CI_CSCGE_DECLARED" 2>/dev/null; then
+    CI_CSCGE_STATUS=0
+  else
+    CI_CSCGE_STATUS=$?
+  fi
 
   known_gap_pairs | while IFS= read -r CI_CSCGE_PAIR; do
     [ -n "$CI_CSCGE_PAIR" ] || continue
@@ -920,6 +1278,15 @@ stale_competency_gap_exemption_reason() {
       echo "anchored"
       return 0
     fi
+    # The bars file exists and this competency is NOT anchored in it. That is
+    # a LIVE gap, not a stale exemption — unless roles.json no longer declares
+    # the pair at all, which is the orphaned shape. Printing "orphaned"
+    # unconditionally here broke the contract three lines up ("prints nothing
+    # when the pair is not actually stale") and would have told an operator to
+    # delete an exemption that is doing its job.
+    if role_competency_pairs "$CI_SCGER_TREE" 2>/dev/null | grep -qxF "$CI_SCGER_PAIR"; then
+      return 1
+    fi
     echo "orphaned"
     return 0
   fi
@@ -971,4 +1338,1230 @@ competency_gaps_role_order_violations() {
   done < "$CI_CGRO_FILE"
 
   rm -f "$CI_CGRO_FILE"
+}
+
+# ---------------------------------------------------------------------------
+# Partial IT-coverage control file (framework-catalog-it-translations,
+# design D6). NEW, both-direction doctrine — same shape as
+# scripts/framework-known-gaps.txt and scripts/framework-competency-gaps.txt,
+# distinct from both (they answer "does a BARS file/pair exist at all",
+# never "is a pair's translation complete") — see that file's own header.
+#
+# `catalog_locale_coverage` is the RAW FACT: for tree $1 and locale $2,
+# prints `LOCALE:ROLE:COMP`, one per line, for every ANCHORED pair (declared
+# in roles.json AND non-empty in its bars file — an unanchored pair is
+# `competency_no_bars`'s business, not this guard's, mirroring
+# `catalog_missing_bars_pairs`'s own scoping) whose 12 required strings (3
+# indicators × {text/indicator, anchor_5, anchor_3, anchor_1}) do NOT all
+# carry a non-empty value for that locale. 11 of 12 counts as 0 — same unit
+# the scoring-engine's own per-competency hard-fail uses, and the same rule
+# the seeder's `resolveOrRecordTranslationGap` applies to the DB-side gap.
+#
+# Skips (silently) any role with no bars file at all — role-level absence is
+# `catalog_missing_bars`'s business — and any role that fails to parse,
+# per the "a guard that cannot read its subject must never pass it" rule;
+# such a role's pairs are simply absent from the output, which the CALLER
+# must not misread as "fully covered" (the same caution
+# `catalog_missing_bars_pairs`'s own header states for its analogous case).
+# ---------------------------------------------------------------------------
+# shellcheck disable=SC2016
+CI_LOCALE_COVERAGE_SCRIPT='
+  const tree = process.env.CI_TREE;
+  const locale = process.env.CI_LOCALE;
+  let roles;
+  try {
+    roles = JSON.parse(await Bun.file(`${tree}/roles.json`).text());
+  } catch (e) {
+    console.error(`ci-guards: cannot read or parse ${tree}/roles.json: ${e.message}`);
+    process.exit(1);
+  }
+  if (roles === null || typeof roles !== "object" || Array.isArray(roles)) {
+    console.error(`ci-guards: ${tree}/roles.json must be a JSON OBJECT keyed by role code.`);
+    process.exit(1);
+  }
+
+  const out = [];
+
+  for (const role of Object.keys(roles)) {
+    const comps = Array.isArray(roles[role]?.competencies) ? roles[role].competencies : [];
+    let bars;
+    try {
+      bars = JSON.parse(await Bun.file(`${tree}/bars/${role}.json`).text());
+    } catch {
+      continue; // no bars file at all — role-level gate is responsible, not this one
+    }
+    if (bars === null || typeof bars !== "object" || Array.isArray(bars)) continue;
+
+    for (const comp of comps) {
+      const entries = bars[comp];
+      if (!Array.isArray(entries) || entries.length === 0) continue; // unanchored — competency_no_bars business
+
+      let complete = true;
+      for (const entry of entries) {
+        if (entry === null || typeof entry !== "object") { complete = false; break; }
+        const values = [entry.indicator, entry.scale?.["5"], entry.scale?.["3"], entry.scale?.["1"]];
+        for (const v of values) {
+          const text = v && typeof v === "object" ? v[locale] : undefined;
+          if (typeof text !== "string" || text.length === 0) { complete = false; break; }
+        }
+        if (!complete) break;
+      }
+
+      if (!complete) {
+        out.push(`${locale}:${role}:${comp}`);
+      }
+    }
+  }
+
+  console.log(out.join("\n"));
+'
+
+catalog_locale_coverage() {
+  CI_TREE="$1"
+  CI_LOCALE="$2"
+  export CI_TREE CI_LOCALE
+  if [ ! -f "$CI_TREE/roles.json" ]; then
+    echo "ci-guards: $CI_TREE/roles.json does not exist." >&2
+    return 1
+  fi
+  bun --eval "$CI_LOCALE_COVERAGE_SCRIPT"
+}
+
+# CI_LOCALE_GAPS_FILE mirrors the override seam of CI_KNOWN_GAPS_FILE /
+# CI_COMPETENCY_GAPS_FILE / CI_CROSSROLE_BASELINE_FILE, so the self-test can
+# point these functions at a fixture list without touching the committed one.
+CI_LOCALE_GAPS_FILE="${CI_LOCALE_GAPS_FILE:-scripts/framework-locale-gaps.txt}"
+
+# The LOCALE:ROLE:COMP entries on the list, one per line. Same parsing
+# discipline as every sibling control file: '#' to end of line is a
+# comment, blank lines dropped, only the first whitespace field read.
+known_locale_gap_pairs() {
+  [ -f "$CI_LOCALE_GAPS_FILE" ] || return 0
+  sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]].*$//' "$CI_LOCALE_GAPS_FILE" \
+    | grep -v '^$' || true
+}
+
+# Direction 1: an incomplete, undeclared pair is a build failure — someone's
+# translation is missing and nobody recorded it as a known, tracked gap.
+# Propagates catalog_locale_coverage's read failure rather than absorbing it.
+catalog_unexpected_locale_gaps() {
+  CI_CULG_TREE="$1"
+  CI_CULG_LOCALE="$2"
+  CI_CULG_KNOWN=$(known_locale_gap_pairs)
+  CI_CULG_FOUND=$(catalog_locale_coverage "$CI_CULG_TREE" "$CI_CULG_LOCALE") || return 1
+  printf '%s\n' "$CI_CULG_FOUND" | while IFS= read -r CI_CULG_PAIR; do
+    [ -n "$CI_CULG_PAIR" ] || continue
+    printf '%s\n' "$CI_CULG_KNOWN" | grep -qxF "$CI_CULG_PAIR" && continue
+    printf '%s\n' "$CI_CULG_PAIR"
+  done
+}
+
+# Direction 2: a listed exemption that is now fully translated, OR whose pair
+# no longer exists at all (roles.json dropped it), is a stale note — the
+# same "note outliving its fact" defect every sibling control file guards
+# against. Both sub-cases collapse into ONE check here: `catalog_locale_
+# coverage` only ever emits a currently-declared, currently-incomplete pair,
+# so ANY listed entry it does NOT re-emit is stale, for either reason.
+catalog_stale_locale_gap_exemptions() {
+  CI_CSLG_TREE="$1"
+  CI_CSLG_LOCALE="$2"
+  CI_CSLG_FOUND=$(catalog_locale_coverage "$CI_CSLG_TREE" "$CI_CSLG_LOCALE") || return 1
+  known_locale_gap_pairs | while IFS= read -r CI_CSLG_PAIR; do
+    [ -n "$CI_CSLG_PAIR" ] || continue
+    CI_CSLG_PAIR_LOCALE=${CI_CSLG_PAIR%%:*}
+    [ "$CI_CSLG_PAIR_LOCALE" = "$CI_CSLG_LOCALE" ] || continue
+    printf '%s\n' "$CI_CSLG_FOUND" | grep -qxF "$CI_CSLG_PAIR" && continue
+    printf '%s\n' "$CI_CSLG_PAIR"
+  done
+}
+
+# Direction 3, the property unique to THIS control file (design D6): no role
+# may ship half-translated. Per (locale, role), the number of that role's
+# pairs LISTED in the gaps file must be exactly 0 (role fully translated) or
+# the role's FULL declared pair count (role not yet started) — any count in
+# between means some of the role's pairs are translated and some are not,
+# which is exactly the "competency A composes, competency B 422s" partial
+# state the whole-role rule exists to make impossible to ship silently.
+# Prints `LOCALE:ROLE:LISTED/FULL` for every violating (locale, role).
+locale_gaps_whole_role_violations() {
+  CI_LGWR_TREE="$1"
+  CI_LGWR_FILE=$(mktemp)
+  known_locale_gap_pairs > "$CI_LGWR_FILE"
+
+  CI_LGWR_COMBOS=$(cut -d: -f1,2 "$CI_LGWR_FILE" | sort -u)
+  printf '%s\n' "$CI_LGWR_COMBOS" | while IFS= read -r CI_LGWR_COMBO; do
+    [ -n "$CI_LGWR_COMBO" ] || continue
+    CI_LGWR_LOCALE=${CI_LGWR_COMBO%%:*}
+    CI_LGWR_ROLE=${CI_LGWR_COMBO#*:}
+    # grep -c ALWAYS prints a count (0 on no match) but EXITS 1 on zero
+    # matches — `|| true` keeps that from aborting a caller running under
+    # `set -e`, the exact trap this repo's own guards keep tripping on.
+    CI_LGWR_LISTED=$(grep -c "^${CI_LGWR_LOCALE}:${CI_LGWR_ROLE}:" "$CI_LGWR_FILE" || true)
+    CI_LGWR_FULL=$(role_competency_pairs "$CI_LGWR_TREE" | grep -c "^${CI_LGWR_ROLE}:" || true)
+    if [ "$CI_LGWR_LISTED" -ne 0 ] && [ "$CI_LGWR_LISTED" -ne "$CI_LGWR_FULL" ]; then
+      printf '%s:%s:%s/%s\n' "$CI_LGWR_LOCALE" "$CI_LGWR_ROLE" "$CI_LGWR_LISTED" "$CI_LGWR_FULL"
+    fi
+  done
+
+  rm -f "$CI_LGWR_FILE"
+}
+
+# Role-order grouping check for framework-locale-gaps.txt — sibling of
+# competency_gaps_role_order_violations above, same reviewability property
+# ("a role's entries are not interleaved with another role's"), read via
+# known_locale_gap_pairs's SAME parsing discipline. The role is field 2
+# (LOCALE:ROLE:COMP), not field 1 — the only structural difference from its
+# sibling.
+locale_gaps_role_order_violations() {
+  CI_LGRO_FILE=$(mktemp)
+  known_locale_gap_pairs > "$CI_LGRO_FILE"
+
+  CI_LGRO_SEEN=""
+  CI_LGRO_LAST=""
+  while IFS= read -r CI_LGRO_ENTRY; do
+    [ -n "$CI_LGRO_ENTRY" ] || continue
+    CI_LGRO_ROLE=$(printf '%s' "$CI_LGRO_ENTRY" | cut -d: -f2)
+
+    if [ "$CI_LGRO_ROLE" = "$CI_LGRO_LAST" ]; then
+      continue
+    fi
+
+    case " $CI_LGRO_SEEN " in
+      *" $CI_LGRO_ROLE "*) printf '%s\n' "$CI_LGRO_ROLE" ;;
+    esac
+    CI_LGRO_SEEN="$CI_LGRO_SEEN $CI_LGRO_ROLE"
+    CI_LGRO_LAST="$CI_LGRO_ROLE"
+  done < "$CI_LGRO_FILE"
+
+  rm -f "$CI_LGRO_FILE"
+}
+
+# ---------------------------------------------------------------------------
+# roles.json / competencies.json locale-map shape (framework-catalog-it-
+# translations design D2, row 8). NEW. 46 strings (5 roles × {name,
+# responsibilities} + 18 competencies × {name, definition}) that NOTHING
+# ELSE reads: `role_keys`/`role_competency_pairs` read only `code` and
+# `competencies`, never `name`/`responsibilities` (see D2 row 2's own "never
+# read" note); `catalog_malformed_bars_entries` reads bars files only.
+# Without this guard, these 46 strings would carry the new locale dimension
+# under ZERO content guards — Decision 1's failure mode.
+#
+# Prints `COMPETENCIES:<code>:<field>:<reason>` or `ROLES:<code>:<field>:
+# <reason>`, one per line — reasons drawn from the SAME vocabulary
+# `catalog_malformed_bars_entries` uses (not-a-locale-map, missing-en,
+# unknown-locale-<x>, blank-<locale>), so an operator reading either guard's
+# output already knows what the reason means.
+#
+# roles.json's `responsibilities` is the ONE field allowed a blank `en`
+# (mirrors the seeder's own `allowBlankEn` — a role not yet authored is a
+# real, pre-existing, non-malformed state, tracked by the SEPARATE
+# `missing_role_meta` gap, not this guard's business). Every other field
+# (role `name`, competency `name`/`definition`) requires a non-blank `en`.
+# ---------------------------------------------------------------------------
+# shellcheck disable=SC2016
+CI_META_LOCALE_SHAPE_SCRIPT='
+  const tree = process.env.CI_TREE;
+  const knownLocales = (process.env.CI_LOCALES || "en").split(" ").filter(Boolean);
+  const isBlank = (s) => typeof s !== "string" || s.length === 0;
+  const hasEdgeWhitespace = (s) => typeof s === "string" && s !== s.trim();
+
+  const localeMapReason = (value, allowBlankEn) => {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      return "not-a-locale-map";
+    }
+    if (!allowBlankEn && (isBlank(value.en) || hasEdgeWhitespace(value.en))) {
+      return "missing-en";
+    }
+    if (allowBlankEn && (typeof value.en !== "string")) {
+      return "missing-en";
+    }
+    for (const key of Object.keys(value)) {
+      if (!knownLocales.includes(key)) return `unknown-locale-${key}`;
+    }
+    for (const key of Object.keys(value)) {
+      if (key === "en" && allowBlankEn && value[key] === "") continue;
+      if (isBlank(value[key]) || hasEdgeWhitespace(value[key])) return `blank-${key}`;
+    }
+    return null;
+  };
+
+  const out = [];
+
+  let competencies;
+  try {
+    competencies = JSON.parse(await Bun.file(`${tree}/competencies.json`).text());
+  } catch (e) {
+    console.error(`ci-guards: cannot read or parse ${tree}/competencies.json: ${e.message}`);
+    process.exit(1);
+  }
+  if (competencies === null || typeof competencies !== "object" || Array.isArray(competencies)) {
+    console.error(`ci-guards: ${tree}/competencies.json must be a JSON OBJECT keyed by competency code.`);
+    process.exit(1);
+  }
+  for (const code of Object.keys(competencies)) {
+    const entry = competencies[code];
+    const nameReason = localeMapReason(entry?.name, false);
+    if (nameReason) out.push(`COMPETENCIES:${code}:name:${nameReason}`);
+    const defReason = localeMapReason(entry?.definition, false);
+    if (defReason) out.push(`COMPETENCIES:${code}:definition:${defReason}`);
+  }
+
+  let roles;
+  try {
+    roles = JSON.parse(await Bun.file(`${tree}/roles.json`).text());
+  } catch (e) {
+    console.error(`ci-guards: cannot read or parse ${tree}/roles.json: ${e.message}`);
+    process.exit(1);
+  }
+  if (roles === null || typeof roles !== "object" || Array.isArray(roles)) {
+    console.error(`ci-guards: ${tree}/roles.json must be a JSON OBJECT keyed by role code.`);
+    process.exit(1);
+  }
+  for (const code of Object.keys(roles)) {
+    const entry = roles[code];
+    const nameReason = localeMapReason(entry?.name, false);
+    if (nameReason) out.push(`ROLES:${code}:name:${nameReason}`);
+    const respReason = localeMapReason(entry?.responsibilities, true);
+    if (respReason) out.push(`ROLES:${code}:responsibilities:${respReason}`);
+  }
+
+  console.log(out.join("\n"));
+'
+
+catalog_meta_locale_shape() {
+  CI_TREE="$1"
+  export CI_TREE
+  if [ ! -f "$CI_TREE/competencies.json" ] || [ ! -f "$CI_TREE/roles.json" ]; then
+    echo "ci-guards: $CI_TREE/competencies.json or roles.json does not exist." >&2
+    return 1
+  fi
+  bun --eval "$CI_META_LOCALE_SHAPE_SCRIPT"
+}
+
+# ---------------------------------------------------------------------------
+# roles.json / competencies.json locale COMPLETENESS — the gap the shape
+# guard above deliberately does not close.
+#
+# `catalog_meta_locale_shape` asks "is every locale value THAT IS PRESENT
+# well-formed" — `en` is mandatory there, every OTHER key is optional, so
+# `{"en": "..."}` alone passes it. That is exactly the shape 46 strings (18
+# competencies x {name, definition}, 5 roles x {name, responsibilities})
+# shipped in for an unmeasured period: authored in `en` only, never
+# translated, and invisible to every gate that existed. This function asks
+# the other question — "is every locale the catalogue CLAIMS to support
+# actually here" — which is a different assertion (mandatory-vs-optional
+# key), not a stricter reading of the same one.
+#
+# It closes the gap `scripts/framework-locale-gaps.txt` structurally cannot:
+# that file, and the four guards built on `known_locale_gap_pairs`, track
+# role x competency BARS PAIRS only (`role_competency_pairs`'s own
+# ROLE:COMP vocabulary) and have nothing to say about a `roles.json` or
+# `competencies.json` FIELD. Nor is it the same fact as the runtime's global
+# `missing_translation` FrameworkGap, which is scored over the same BARS
+# pairs and reported "it locale: all 83 of 83 role x competency pairs
+# translated" while these 46 strings sat untranslated in production — true
+# about its own domain, silent about this one.
+#
+# WHICH LOCALES ARE EXPECTED: read from `CI_LOCALES`, the SAME env var step
+# (d) already exports once ("en it") for `catalog_meta_locale_shape` and the
+# cross-locale/partial-coverage guards beside it — not re-derived here.
+# Deriving "expected" from "present" is circular and would have passed
+# exactly the bug this guard exists to catch: every one of the 46 strings
+# HAD an en key, so a completeness check that inferred its locale set from
+# whatever keys happened to exist would infer {"en"} for every one of them
+# and report the catalogue complete. `CI_LOCALES` is a fact asserted by a
+# human once, in one place, ahead of content landing (see that export's own
+# comment in step (d)) precisely so no guard downstream of it can fall into
+# that trap.
+#
+# NO EXEMPTION SEAM, unlike the three sibling control files this guard's own
+# comment block up top cites (framework-known-gaps.txt, framework-
+# competency-gaps.txt, framework-crossrole-baseline.txt) and unlike
+# framework-locale-gaps.txt beside it. Those all exist because their subject
+# is authored INCREMENTALLY across many files and many PRs — 83 role x
+# competency pairs, 996 BARS anchors, cross-role duplicates accumulated over
+# several completion phases — so a legitimate "not there yet, tracked
+# on purpose" state exists and needs a place to live without turning CI
+# permanently red. `competencies.json`/`roles.json` metadata is the opposite
+# shape: 46 leaf strings living in exactly TWO files, added only when a
+# competency or role is added at all (a rare event), and cheap enough for
+# one author to translate in the SAME PR that introduces the English. There
+# is no legitimate half-landed state here to give a name to — either the
+# 46 strings ship translated or the PR that adds them is not done — so an
+# exemption file would not relieve real authoring pressure the way its
+# siblings do; it would just be a second, quieter way to reintroduce this
+# exact incident, opt-in, without even a build failure to notice it by.
+#
+# The ONE recognized incomplete state is `roles.json`'s `responsibilities`
+# with a deliberately blank `en` — and it already has a home. That is the
+# seeder's own `allowBlankEn` sentinel for "this role has not been authored
+# at all yet" (FrameworkGap kind=`n`, `api/database/seeders/
+# FrameworkCatalogSeeder.php`), which `catalog_meta_locale_shape` already
+# encodes and this guard MUST agree with rather than re-litigate: a role
+# with no responsibilities in ANY locale is not a translation gap, it is a
+# role that does not exist yet, and asking "where is its `it`" is the wrong
+# question. Skipped entirely, the same as the shape guard skips it.
+#
+# Prints `COMPETENCIES:<code>:<field>:missing-<locale>` or
+# `ROLES:<code>:<field>:missing-<locale>`, one per line, for every
+# translatable field lacking a non-empty value for a locale `CI_LOCALES`
+# expects. Empty output means the catalogue is fully translated.
+#
+# FAILS CLOSED (nonzero exit, nothing useful on stdout — "the guard failed
+# to run", never "nothing to report", the same contract every reader in
+# this file obeys) on: a missing file, unparseable JSON, either top-level
+# document not a JSON object keyed by code, a translatable field that is
+# present but not itself a locale-map object, or an `en` that is absent (not
+# a string at all) on a field that requires one. This is independent of
+# `catalog_meta_locale_shape` — it is NOT assumed to have already run — so a
+# malformed field is never read as "complete" by a caller that invokes this
+# guard on its own. The one field allowed a blank (not absent) `en` is
+# `responsibilities`, per the sentinel above; every other field requires a
+# non-blank `en` before completeness is even asked.
+# ---------------------------------------------------------------------------
+# shellcheck disable=SC2016
+# Single-quoted for the same reason as CI_META_LOCALE_SHAPE_SCRIPT above:
+# this is a JavaScript template literal that must reach bun untouched.
+CI_META_LOCALE_COMPLETENESS_SCRIPT='
+  const tree = process.env.CI_TREE;
+  const knownLocales = (process.env.CI_LOCALES || "en").split(" ").filter(Boolean);
+  const isBlank = (s) => typeof s !== "string" || s.length === 0;
+
+  // Independent of catalog_meta_locale_shape by design (see the comment
+  // above this script): fails closed on the same two shapes that guard names
+  // ("not-a-locale-map", "missing-en"), so a caller that runs this guard
+  // alone never reads a malformed field as complete.
+  const shapeOk = (value, allowBlankEn) => {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+    if (allowBlankEn) return typeof value.en === "string";
+    return !isBlank(value.en);
+  };
+
+  const out = [];
+
+  const checkField = (entry, code, field, allowBlankEn, prefix) => {
+    const value = entry ? entry[field] : undefined;
+    if (!shapeOk(value, allowBlankEn)) {
+      console.error(`ci-guards: ${tree} ${prefix}:${code}:${field} is not a well-formed locale map (not an object, or its en is absent) -- see catalog_meta_locale_shape.`);
+      process.exit(1);
+    }
+    // The documented sentinel: a role whose responsibilities.en is itself
+    // blank has not been authored at all yet (FrameworkGap kind=n). No
+    // locale is expected for it, it or otherwise, until en exists.
+    if (allowBlankEn && value.en === "") return;
+    for (const locale of knownLocales) {
+      if (isBlank(value[locale])) {
+        out.push(`${prefix}:${code}:${field}:missing-${locale}`);
+      }
+    }
+  };
+
+  let competencies;
+  try {
+    competencies = JSON.parse(await Bun.file(`${tree}/competencies.json`).text());
+  } catch (e) {
+    console.error(`ci-guards: cannot read or parse ${tree}/competencies.json: ${e.message}`);
+    process.exit(1);
+  }
+  if (competencies === null || typeof competencies !== "object" || Array.isArray(competencies)) {
+    console.error(`ci-guards: ${tree}/competencies.json must be a JSON OBJECT keyed by competency code.`);
+    process.exit(1);
+  }
+  for (const code of Object.keys(competencies)) {
+    checkField(competencies[code], code, "name", false, "COMPETENCIES");
+    checkField(competencies[code], code, "definition", false, "COMPETENCIES");
+  }
+
+  let roles;
+  try {
+    roles = JSON.parse(await Bun.file(`${tree}/roles.json`).text());
+  } catch (e) {
+    console.error(`ci-guards: cannot read or parse ${tree}/roles.json: ${e.message}`);
+    process.exit(1);
+  }
+  if (roles === null || typeof roles !== "object" || Array.isArray(roles)) {
+    console.error(`ci-guards: ${tree}/roles.json must be a JSON OBJECT keyed by role code.`);
+    process.exit(1);
+  }
+  for (const code of Object.keys(roles)) {
+    checkField(roles[code], code, "name", false, "ROLES");
+    checkField(roles[code], code, "responsibilities", true, "ROLES");
+  }
+
+  console.log(out.join("\n"));
+'
+
+catalog_meta_locale_completeness() {
+  CI_TREE="$1"
+  export CI_TREE
+  if [ ! -f "$CI_TREE/competencies.json" ] || [ ! -f "$CI_TREE/roles.json" ]; then
+    echo "ci-guards: $CI_TREE/competencies.json or roles.json does not exist." >&2
+    return 1
+  fi
+  bun --eval "$CI_META_LOCALE_COMPLETENESS_SCRIPT"
+}
+
+# ---------------------------------------------------------------------------
+# Shape and completeness of an ANCHORED pair (bars-catalogue-completion).
+#
+# `bars_competency_keys` answers "is this competency COVERED at all" with a
+# single test — `length > 0` — which a one-indicator stub with empty anchor
+# text satisfies. It is the right question for the role/pair coverage gates
+# above, and the wrong one for whether what covers a pair is actually a
+# complete, non-degenerate anchor set. This is the question those gates never
+# asked.
+#
+# Prints ROLE:COMP:REASON, one per line, for every competency key in
+# `<tree>/bars/<ROLE>.json` whose entries do not have EXACTLY:
+#   * 3 indicator objects (an EMPTY array is a stub, not malformed — that is
+#     `bars_competency_keys`'s uncovered case, not this guard's business, so
+#     `[]` is skipped rather than flagged)
+#   * each with an `indicator` that is a valid LOCALE-MAP (see below)
+#   * a `scale` object with EXACTLY the keys "5", "3", "1" — no more, no
+#     fewer (a missing level, or an extra stray key, both fail)
+#   * every one of those three scale values a valid LOCALE-MAP
+#
+# Locale-map shape (framework-catalog-it-translations, design D1): every
+# translatable leaf is `{"en": "...", "it": "..."}`, never a bare string.
+# REASON for a locale-map violation is one of:
+#   not-a-locale-map    — the value is not an object (e.g. still a bare
+#                         string — the pre-migration shape; a guard that
+#                         has not been updated for the new shape MUST stop
+#                         reading here, not silently pass it)
+#   missing-en           — no `en` key, or `en` is blank/whitespace-only
+#   unknown-locale-<x>   — a key outside the known-locale set (CI_LOCALES)
+#   blank-<locale>       — a present locale's value is blank or has
+#                          leading/trailing whitespace (folds in the
+#                          pre-locale `hasEdgeWhitespace` check)
+# The FIRST violation found for an entry is reported — same "stop at the
+# first defect" discipline the pre-locale version used for `ok=false; break`.
+#
+# Empty output means the file's anchored competencies are all shape-complete.
+# Fails closed (non-zero, nothing useful on stdout) when the file is missing,
+# unparseable, or not a JSON object — the same rule every other reader in
+# this file obeys.
+# ---------------------------------------------------------------------------
+# shellcheck disable=SC2016
+CI_MALFORMED_BARS_SCRIPT='
+  const path = process.env.CI_BARS_FILE;
+  const role = process.env.CI_MALFORMED_ROLE;
+  const knownLocales = (process.env.CI_LOCALES || "en").split(" ").filter(Boolean);
+  let bars;
+  try {
+    bars = JSON.parse(await Bun.file(path).text());
+  } catch (e) {
+    console.error(`ci-guards: cannot read or parse ${path}: ${e.message}`);
+    process.exit(1);
+  }
+  if (bars === null || typeof bars !== "object" || Array.isArray(bars)) {
+    const got = Array.isArray(bars) ? "an array" : bars === null ? "null" : typeof bars;
+    console.error(`ci-guards: ${path} must be a JSON OBJECT keyed by competency code, got ${got}.`);
+    process.exit(1);
+  }
+  const isBlank = (s) => typeof s !== "string" || s.length === 0;
+  const hasEdgeWhitespace = (s) => typeof s === "string" && s !== s.trim();
+  // Returns a reason string ("not-a-locale-map", "missing-en",
+  // "unknown-locale-<x>", "blank-<locale>") or null when the value is a
+  // well-formed locale map.
+  const localeMapReason = (value) => {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      return "not-a-locale-map";
+    }
+    if (isBlank(value.en) || hasEdgeWhitespace(value.en)) {
+      return "missing-en";
+    }
+    for (const key of Object.keys(value)) {
+      if (!knownLocales.includes(key)) {
+        return `unknown-locale-${key}`;
+      }
+    }
+    for (const key of Object.keys(value)) {
+      if (isBlank(value[key]) || hasEdgeWhitespace(value[key])) {
+        return `blank-${key}`;
+      }
+    }
+    return null;
+  };
+  const out = [];
+  for (const comp of Object.keys(bars)) {
+    const entries = bars[comp];
+    if (!Array.isArray(entries)) {
+      out.push(`${role}:${comp}:not-an-array`);
+      continue;
+    }
+    if (entries.length === 0) {
+      continue;
+    }
+    // 3 is RATIFIED, not assumed: openspec/specs/framework-catalog/spec.md
+    // "Every role\u00d7competency pair declared in roles.json MUST have exactly 3
+    // indicators". That is why this guard has no exemption seam while its
+    // siblings do — an exemption seam here would let a pair ship with two
+    // indicators, which the scoring engine has no defined behaviour for.
+    // Changing the count is an SDD question, not a CI-config one.
+    if (entries.length !== 3) {
+      out.push(`${role}:${comp}:count-${entries.length}`);
+      continue;
+    }
+    let reason = null;
+    for (const entry of entries) {
+      if (entry === null || typeof entry !== "object") { reason = "malformed-entry"; break; }
+      reason = localeMapReason(entry.indicator);
+      if (reason) break;
+      const scale = entry.scale;
+      if (scale === null || typeof scale !== "object" || Array.isArray(scale)) { reason = "malformed-entry"; break; }
+      if (Object.keys(scale).sort().join(",") !== "1,3,5") { reason = "malformed-entry"; break; }
+      reason = localeMapReason(scale["5"]);
+      if (reason) break;
+      reason = localeMapReason(scale["3"]);
+      if (reason) break;
+      reason = localeMapReason(scale["1"]);
+      if (reason) break;
+    }
+    if (reason) {
+      out.push(`${role}:${comp}:${reason}`);
+    }
+  }
+  console.log(out.join("\n"));
+'
+
+catalog_malformed_bars_entries() {
+  CI_BARS_FILE="$1/bars/$2.json"
+  CI_MALFORMED_ROLE="$2"
+  export CI_BARS_FILE CI_MALFORMED_ROLE
+  if [ ! -f "$CI_BARS_FILE" ]; then
+    echo "ci-guards: $CI_BARS_FILE does not exist." >&2
+    return 1
+  fi
+  bun --eval "$CI_MALFORMED_BARS_SCRIPT"
+}
+
+# ---------------------------------------------------------------------------
+# Cross-role anchor identity (bars-catalogue-completion).
+#
+# "FLL's PRS is MLL's PRS with different words" is a comparison between roles
+# FOR THE SAME COMPETENCY — invisible to every guard above, which each read
+# one role's file in isolation. This one reads every `bars/*.json` file in a
+# tree together and asks, per competency, whether any `indicator` or anchor
+# (`scale.5`/`scale.3`/`scale.1`) STRING is byte-identical across two or more
+# roles.
+#
+# Prints `ROLE_A:ROLE_B:COMP:LOCALE:FIELD`, one per line, for every such
+# duplicate — `ROLE_A`/`ROLE_B` alphabetically ordered so the same real-world
+# duplicate always prints the same line regardless of directory read order,
+# `LOCALE` is one of CI_LOCALES (e.g. `en`, `it`), and `FIELD` is one of
+# `indicator`, `anchor_5`, `anchor_3`, `anchor_1`. Deliberately NOT a
+# `<file>:<line>` reference: line numbers shift every time an earlier
+# competency block grows, which every future content PR does, and a baseline
+# keyed on them would drift out from under itself. The role/competency/
+# locale/field tuple is what stays stable while indicators pile up around it.
+#
+# Locale-map shape (framework-catalog-it-translations design D1): each of
+# `indicator`/`anchor_5`/`anchor_3`/`anchor_1` is `{"en": "...", "it": "..."}`.
+# This is the SECOND guard design D1 names as "the identical `continue`" the
+# word-count guard had — the pre-locale version did
+# `if (typeof val !== "string" || val.length === 0) continue`, which under
+# the new shape examines the locale-map OBJECT and silently skips every
+# value, forever. A non-locale-map value here is now a hard `process.exit(1)`
+# (the SAME "guard that would go silently blind" defect, fixed the SAME way
+# as the word-count guard); a locale key simply ABSENT from the map is
+# skipped (not yet authored — legitimate); a PRESENT value that is not a
+# string is also a hard failure.
+#
+# Compared ACROSS roles only — never within one role's own file — matching
+# the spec's own wording ("identical across roles"). A duplicate only within
+# a single role's array is a different defect this guard does not claim.
+#
+# Fails closed (non-zero, nothing useful on stdout) when the bars/ directory
+# cannot be listed, any file in it is missing, unparseable, or not a JSON
+# object keyed by competency code, or any translatable value is not a valid
+# locale-map object.
+# ---------------------------------------------------------------------------
+# shellcheck disable=SC2016
+CI_CROSSROLE_SCRIPT='
+  import { readdirSync } from "node:fs";
+
+  const tree = process.env.CI_TREE;
+  const barsDir = `${tree}/bars`;
+  const locales = (process.env.CI_LOCALES || "en").split(" ").filter(Boolean);
+
+  let files;
+  try {
+    files = readdirSync(barsDir).filter((f) => f.endsWith(".json")).sort();
+  } catch (e) {
+    console.error(`ci-guards: cannot read ${barsDir}: ${e.message}`);
+    process.exit(1);
+  }
+
+  const roles = files.map((f) => f.replace(/\.json$/, ""));
+  const perRole = {};
+
+  for (const role of roles) {
+    let bars;
+    try {
+      bars = JSON.parse(await Bun.file(`${barsDir}/${role}.json`).text());
+    } catch (e) {
+      console.error(`ci-guards: cannot read or parse ${barsDir}/${role}.json: ${e.message}`);
+      process.exit(1);
+    }
+    if (bars === null || typeof bars !== "object" || Array.isArray(bars)) {
+      const got = Array.isArray(bars) ? "an array" : bars === null ? "null" : typeof bars;
+      console.error(`ci-guards: ${barsDir}/${role}.json must be a JSON OBJECT keyed by competency code, got ${got}.`);
+      process.exit(1);
+    }
+    perRole[role] = bars;
+  }
+
+  const FIELDS = ["indicator", "anchor_5", "anchor_3", "anchor_1"];
+  // competency -> field -> locale -> string -> Set(roles that use it)
+  const index = {};
+
+  for (const role of roles) {
+    const bars = perRole[role];
+    for (const comp of Object.keys(bars)) {
+      const entries = bars[comp];
+      if (!Array.isArray(entries)) continue;
+      for (const entry of entries) {
+        if (entry === null || typeof entry !== "object") continue;
+        const localeMaps = {
+          indicator: entry.indicator,
+          anchor_5: entry.scale && entry.scale["5"],
+          anchor_3: entry.scale && entry.scale["3"],
+          anchor_1: entry.scale && entry.scale["1"],
+        };
+        for (const field of FIELDS) {
+          const map = localeMaps[field];
+          if (map === undefined) continue;
+          if (map === null || typeof map !== "object" || Array.isArray(map)) {
+            console.error(`ci-guards: ${barsDir}/${role}.json ${comp} ${field} is not a locale-map object (got ${typeof map}); expected {"en":...,"it":...}.`);
+            process.exit(1);
+          }
+          for (const locale of locales) {
+            if (!(locale in map)) continue; // not yet authored for this locale
+            const val = map[locale];
+            if (typeof val !== "string") {
+              console.error(`ci-guards: ${barsDir}/${role}.json ${comp} ${field}.${locale} is not a string (got ${typeof val}).`);
+              process.exit(1);
+            }
+            if (val.length === 0) continue;
+            index[comp] ??= {};
+            index[comp][field] ??= {};
+            index[comp][field][locale] ??= {};
+            index[comp][field][locale][val] ??= new Set();
+            index[comp][field][locale][val].add(role);
+          }
+        }
+      }
+    }
+  }
+
+  const dupPairs = new Set();
+  for (const comp of Object.keys(index)) {
+    for (const field of Object.keys(index[comp])) {
+      for (const locale of Object.keys(index[comp][field])) {
+        for (const val of Object.keys(index[comp][field][locale])) {
+          const roleSet = [...index[comp][field][locale][val]].sort();
+          if (roleSet.length < 2) continue;
+          for (let i = 0; i < roleSet.length; i++) {
+            for (let j = i + 1; j < roleSet.length; j++) {
+              dupPairs.add(`${roleSet[i]}:${roleSet[j]}:${comp}:${locale}:${field}`);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  console.log([...dupPairs].sort().join("\n"));
+'
+
+catalog_crossrole_duplicates() {
+  CI_TREE="$1"
+  export CI_TREE
+  if [ ! -d "$CI_TREE/bars" ]; then
+    echo "ci-guards: $CI_TREE/bars does not exist." >&2
+    return 1
+  fi
+  bun --eval "$CI_CROSSROLE_SCRIPT"
+}
+
+# The committed baseline of cross-role duplicates that predate this guard —
+# scripts/framework-crossrole-baseline.txt, generated (never hand-typed) by
+# running catalog_crossrole_duplicates against the catalogue BEFORE any of
+# the 44 new pairs landed. Retro-review of the 39 pre-existing pairs is out
+# of scope for bars-catalogue-completion, so these two are recorded rather
+# than fixed, with the SAME both-direction doctrine as
+# scripts/framework-known-gaps.txt and scripts/framework-competency-gaps.txt:
+# an entry whose duplicate is gone is as much a build failure as a duplicate
+# that is not on the list. New pairs may add ZERO entries to this file.
+#
+# CI_CROSSROLE_BASELINE_FILE mirrors the override seam of
+# CI_KNOWN_GAPS_FILE/CI_COMPETENCY_GAPS_FILE so the self-test can point these
+# functions at a fixture list without touching the committed one.
+CI_CROSSROLE_BASELINE_FILE="${CI_CROSSROLE_BASELINE_FILE:-scripts/framework-crossrole-baseline.txt}"
+
+# The baseline entries, one per line. Same parsing discipline as
+# known_gap_roles/known_gap_pairs: '#' to end of line is a comment, blank
+# lines dropped, only the first whitespace-delimited field is read.
+known_crossrole_baseline_entries() {
+  [ -f "$CI_CROSSROLE_BASELINE_FILE" ] || return 0
+  sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]].*$//' "$CI_CROSSROLE_BASELINE_FILE" \
+    | grep -v '^$' || true
+}
+
+# Cross-role duplicates found in <tree> that are NOT on the committed
+# baseline. Any output is a build failure: a new pair introduced the same
+# reworded-copy defect the scope-shift table and this guard both exist to
+# catch, and the baseline is closed to new entries by design.
+#
+# Propagates catalog_crossrole_duplicates's failure rather than absorbing it
+# — the same "a guard that cannot read its subject must never pass it" rule
+# every other function in this file obeys.
+catalog_unexpected_crossrole_duplicates() {
+  CI_CUCD_KNOWN=$(known_crossrole_baseline_entries)
+  CI_CUCD_FOUND=$(catalog_crossrole_duplicates "$1") || return 1
+  printf '%s\n' "$CI_CUCD_FOUND" | while IFS= read -r CI_CUCD_ENTRY; do
+    [ -n "$CI_CUCD_ENTRY" ] || continue
+    printf '%s\n' "$CI_CUCD_KNOWN" | grep -qxF "$CI_CUCD_ENTRY" && continue
+    printf '%s\n' "$CI_CUCD_ENTRY"
+  done
+}
+
+# Baseline entries that no longer correspond to a real duplicate in <tree> —
+# the half that keeps the baseline honest, the same shape as
+# catalog_stale_gap_exemptions/catalog_stale_competency_gap_exemptions. Any
+# output is a build failure: a baseline entry outliving the duplicate it
+# describes is the identical note-outliving-its-fact defect those two files
+# exist to prevent, applied to this third control file.
+catalog_stale_crossrole_baseline_entries() {
+  CI_SCBE_FOUND=$(catalog_crossrole_duplicates "$1") || return 1
+  known_crossrole_baseline_entries | while IFS= read -r CI_SCBE_ENTRY; do
+    [ -n "$CI_SCBE_ENTRY" ] || continue
+    printf '%s\n' "$CI_SCBE_FOUND" | grep -qxF "$CI_SCBE_ENTRY" && continue
+    printf '%s\n' "$CI_SCBE_ENTRY"
+  done
+}
+
+# ---------------------------------------------------------------------------
+# Cross-locale duplicate divergence (framework-catalog-it-translations,
+# design D2a). NEW, BLOCKING.
+#
+# The mechanical fidelity check design D2a argues actually exists, for one
+# narrow class: whether a translator SILENTLY IMPROVED or FLATTENED the
+# English while translating (Constraint 1's most likely violation, and the
+# one no other mechanical check catches — see the change proposal's own
+# admission that "no mechanical check can distinguish a faithful translation
+# from an improved one", true in general, false for exactly this class).
+#
+# For every (roleA, roleB, competency, field) pair where the ENGLISH value is
+# byte-identical across the two roles (a cross-role duplicate, same shape
+# `catalog_crossrole_duplicates` already detects for `en`): the ITALIAN
+# value at that SAME (role, competency, field) position — once authored for
+# BOTH roles — MUST ALSO be identical. If it diverges, the translator
+# differentiated Italian where English does not, i.e. improved (or altered)
+# the source during "translation".
+#
+# The MIRROR direction is checked too: for every (roleA, roleB, competency,
+# field) where the ITALIAN value is byte-identical across two roles, the
+# ENGLISH value at that position MUST ALSO be identical. If English differs
+# there, the translator FLATTENED a real English distinction into the same
+# Italian wording — the opposite failure, equally a Constraint-1 violation.
+#
+# Both directions are SKIPPED (not reported) for any (role, comp, field)
+# position where Italian is not yet authored for BOTH roles being compared —
+# a real translation gap is `catalog_locale_coverage`'s question, not this
+# guard's; this guard only fires once there is something to compare.
+#
+# Prints `ROLE_A:ROLE_B:COMP:FIELD:diverges-though-en-identical` or
+# `ROLE_A:ROLE_B:COMP:FIELD:converges-though-en-differs`, one per line.
+# Empty output means every IT value that exists agrees with its EN
+# counterpart's cross-role identity/distinctness. Fails closed (non-zero,
+# nothing useful on stdout) on the same read/shape failures
+# `catalog_crossrole_duplicates` fails closed on.
+# ---------------------------------------------------------------------------
+# shellcheck disable=SC2016
+CI_CROSSLOCALE_DIVERGENCE_SCRIPT='
+  import { readdirSync } from "node:fs";
+
+  const tree = process.env.CI_TREE;
+  const barsDir = `${tree}/bars`;
+
+  let files;
+  try {
+    files = readdirSync(barsDir).filter((f) => f.endsWith(".json")).sort();
+  } catch (e) {
+    console.error(`ci-guards: cannot read ${barsDir}: ${e.message}`);
+    process.exit(1);
+  }
+
+  const roles = files.map((f) => f.replace(/\.json$/, ""));
+  const FIELDS = ["indicator", "anchor_5", "anchor_3", "anchor_1"];
+  // comp -> field -> role -> { en: string, it: string|undefined }[] (one per entry/position)
+  const perPosition = {};
+
+  for (const role of roles) {
+    let bars;
+    try {
+      bars = JSON.parse(await Bun.file(`${barsDir}/${role}.json`).text());
+    } catch (e) {
+      console.error(`ci-guards: cannot read or parse ${barsDir}/${role}.json: ${e.message}`);
+      process.exit(1);
+    }
+    if (bars === null || typeof bars !== "object" || Array.isArray(bars)) {
+      const got = Array.isArray(bars) ? "an array" : bars === null ? "null" : typeof bars;
+      console.error(`ci-guards: ${barsDir}/${role}.json must be a JSON OBJECT keyed by competency code, got ${got}.`);
+      process.exit(1);
+    }
+    for (const comp of Object.keys(bars)) {
+      const entries = bars[comp];
+      if (!Array.isArray(entries)) continue;
+      entries.forEach((entry, position) => {
+        if (entry === null || typeof entry !== "object") return;
+        const localeMaps = {
+          indicator: entry.indicator,
+          anchor_5: entry.scale && entry.scale["5"],
+          anchor_3: entry.scale && entry.scale["3"],
+          anchor_1: entry.scale && entry.scale["1"],
+        };
+        for (const field of FIELDS) {
+          const map = localeMaps[field];
+          if (map === null || typeof map !== "object" || Array.isArray(map)) continue;
+          const en = typeof map.en === "string" ? map.en : undefined;
+          const it = typeof map.it === "string" && map.it.length > 0 ? map.it : undefined;
+          perPosition[comp] ??= {};
+          perPosition[comp][field] ??= {};
+          perPosition[comp][field][role] ??= [];
+          perPosition[comp][field][role][position] = { en, it };
+        }
+      });
+    }
+  }
+
+  const out = new Set();
+
+  for (const comp of Object.keys(perPosition)) {
+    for (const field of Object.keys(perPosition[comp])) {
+      const byRole = perPosition[comp][field];
+      const roleList = Object.keys(byRole).sort();
+
+      for (let i = 0; i < roleList.length; i++) {
+        for (let j = i + 1; j < roleList.length; j++) {
+          const roleA = roleList[i];
+          const roleB = roleList[j];
+          const entriesA = byRole[roleA];
+          const entriesB = byRole[roleB];
+
+          // Compare every (posA, posB) combination — the same "any position,
+          // not just matching index" discipline catalog_crossrole_duplicates
+          // itself uses (it dedups by VALUE across the whole competency
+          // block, not by array index).
+          for (const a of entriesA) {
+            if (!a || a.en === undefined) continue;
+            for (const b of entriesB) {
+              if (!b || b.en === undefined) continue;
+
+              if (a.en === b.en) {
+                // EN identical — IT, once authored on BOTH sides, must agree too.
+                if (a.it !== undefined && b.it !== undefined && a.it !== b.it) {
+                  out.add(`${roleA}:${roleB}:${comp}:${field}:diverges-though-en-identical`);
+                }
+              } else if (a.it !== undefined && b.it !== undefined && a.it === b.it) {
+                // EN differs, but IT converged — the mirror-direction defect.
+                out.add(`${roleA}:${roleB}:${comp}:${field}:converges-though-en-differs`);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  console.log([...out].sort().join("\n"));
+'
+
+# Prints the cross-locale divergences for tree $1. Fails closed on the same
+# "cannot read its subject" conditions catalog_crossrole_duplicates obeys.
+catalog_crosslocale_duplicate_divergence() {
+  CI_TREE="$1"
+  export CI_TREE
+  if [ ! -d "$CI_TREE/bars" ]; then
+    echo "ci-guards: $CI_TREE/bars does not exist." >&2
+    return 1
+  fi
+  bun --eval "$CI_CROSSLOCALE_DIVERGENCE_SCRIPT"
+}
+
+# ---------------------------------------------------------------------------
+# Anchor word-count drift (bars-catalogue-completion, Phase 5).
+#
+# Phase 4's own apply-progress records the defect this guard exists to close:
+# a first draft where roughly half of ~90 new anchors ran 19-26 words against
+# the house-voice standard's own rule — leader anchors are "one sentence,
+# 10-18 words" (framework-authoring/house-voice-and-anti-hedge-standard.md
+# §1.2) — caught only by a throwaway word-count script run BY HAND against
+# Phase 3's already-measured anchors, because no CI guard checked anchor
+# length at all. That exact regression would have shipped clean through
+# every gate that existed at the time — "a check that cannot fail on the
+# thing it claims to cover", the defect class this file's own header names.
+#
+# Word count, not character count: the standard's own unit is words, and a
+# character-length proxy drifts from it the moment vocabulary shifts (short
+# common words vs. longer domain terms expressing the same idea). Counted the
+# way a human reading the rule would: trim, then split on whitespace,
+# filtering empty tokens so doubled or edge whitespace cannot inflate the
+# count — the SAME whitespace discipline `catalog_malformed_bars_entries`
+# already enforces on these exact strings, so a string that guard accepts is
+# measured here without surprises.
+#
+# Prints ROLE:COMP:LEVEL:LOCALE:WORDCOUNT for every scale anchor (5, 3 and 1 —
+# an INDICATOR's own word count is a different rule, §1.1's 6-16 words, and
+# not this guard's business), for EVERY locale present in that anchor's
+# locale map, in <tree>/bars/<role>.json, regardless of length — the raw
+# fact, the same shape as every other raw-fact reader in this file
+# (`role_competency_pairs`, `bars_competency_keys`). Policy — what counts as
+# too long or too short, PER LOCALE — is layered on by the two functions
+# below it, not decided here. WORDCOUNT stays the LAST field on purpose, so
+# `${LINE##*:}` (used by both policy functions) is untouched by adding the
+# LOCALE field ahead of it.
+#
+# Locale-map shape (framework-catalog-it-translations design D1): each scale
+# value is `{"en": "...", "it": "..."}`. This is the ONE line design D1 calls
+# out as "the guard that would go silently blind" — the pre-locale version
+# did `if (typeof text !== "string") continue`, which under the new shape
+# examines the LOCALE-MAP object, is never a string, and silently emits
+# nothing, so `catalog_overlong_bars_anchors` would pass VACUOUSLY over an
+# entire tree of un-migrated or malformed content. That line is now a hard
+# `process.exit(1)`: a scale value that is not a locale-map object at all is
+# a shape defect this guard refuses to silently skip past. Once inside a
+# genuine locale map: a MISSING locale key is skipped (that locale is simply
+# not yet authored — legitimate during a partial rollout); a PRESENT value
+# that is not a string is the same "silently blind" defect one level down
+# and is also a hard failure; a present EMPTY string is skipped (blankness
+# is `catalog_malformed_bars_entries`'s question, not this guard's).
+#
+# Fails closed (nothing on stdout, non-zero exit) on a missing, unparseable,
+# or wrongly-shaped bars file, OR a scale value that is not a locale-map
+# object — the same rule every reader in this file obeys.
+# ---------------------------------------------------------------------------
+# shellcheck disable=SC2016
+CI_ANCHOR_WORDCOUNT_SCRIPT='
+  const path = process.env.CI_BARS_FILE;
+  const role = process.env.CI_WC_ROLE;
+  const locales = (process.env.CI_LOCALES || "en").split(" ").filter(Boolean);
+  let bars;
+  try {
+    bars = JSON.parse(await Bun.file(path).text());
+  } catch (e) {
+    console.error(`ci-guards: cannot read or parse ${path}: ${e.message}`);
+    process.exit(1);
+  }
+  if (bars === null || typeof bars !== "object" || Array.isArray(bars)) {
+    const got = Array.isArray(bars) ? "an array" : bars === null ? "null" : typeof bars;
+    console.error(`ci-guards: ${path} must be a JSON OBJECT keyed by competency code, got ${got}.`);
+    process.exit(1);
+  }
+  const wc = (s) => (typeof s === "string" ? s.trim().split(/\s+/).filter(Boolean).length : 0);
+  const out = [];
+  for (const comp of Object.keys(bars)) {
+    const entries = bars[comp];
+    if (!Array.isArray(entries)) continue;
+    for (const entry of entries) {
+      if (entry === null || typeof entry !== "object") continue;
+      const scale = entry.scale;
+      if (scale === null || typeof scale !== "object") continue;
+      for (const level of ["5", "3", "1"]) {
+        const localeMap = scale[level];
+        if (localeMap === undefined) continue;
+        // THE line design D1 names: a non-locale-map value here used to be
+        // silently `continue`d past. It is now a hard failure — see the
+        // comment block above.
+        if (localeMap === null || typeof localeMap !== "object" || Array.isArray(localeMap)) {
+          console.error(`ci-guards: ${path} ${comp} scale.${level} is not a locale-map object (got ${typeof localeMap}); expected {"en":...,"it":...}.`);
+          process.exit(1);
+        }
+        for (const locale of locales) {
+          if (!(locale in localeMap)) continue; // not yet authored for this locale
+          const text = localeMap[locale];
+          if (typeof text !== "string") {
+            console.error(`ci-guards: ${path} ${comp} scale.${level}.${locale} is not a string (got ${typeof text}).`);
+            process.exit(1);
+          }
+          if (text.length === 0) continue;
+          out.push(`${role}:${comp}:${level}:${locale}:${wc(text)}`);
+        }
+      }
+    }
+  }
+  console.log(out.join("\n"));
+'
+
+bars_anchor_word_counts() {
+  CI_BARS_FILE="$1/bars/$2.json"
+  CI_WC_ROLE="$2"
+  export CI_BARS_FILE CI_WC_ROLE
+  if [ ! -f "$CI_BARS_FILE" ]; then
+    echo "ci-guards: $CI_BARS_FILE does not exist." >&2
+    return 1
+  fi
+  bun --eval "$CI_ANCHOR_WORDCOUNT_SCRIPT"
+}
+
+# The role this blocking maximum does NOT apply to — a role name, not a
+# magic number, exactly so this comment can say what it means: ICO's anchors
+# follow a DIFFERENT, documented register — two sentences, 20-30 words
+# (house-voice-and-anti-hedge-standard.md §1.2) — not the leader-file
+# one-sentence, 10-18-word shape this ceiling exists to hold every NEW pair
+# to. ICO's anchors are not new content under this change and are not being
+# retro-reviewed against a rule written for a different role's voice. The
+# exemption is role-level and LOCALE-BLIND (framework-catalog-it-translations
+# design D2, row 5): ICO's register is inherited by its Italian translation
+# too, so an ICO `it` anchor is not examined either, for the same reason.
+#
+# Lives INSIDE the policy function below, not in the workflow step that calls
+# it, so a self-test can prove the exemption against the SAME function the
+# real gate calls (per this file's own header thesis) instead of trusting a
+# `[ "$ROLE" = "ICO" ] && continue` typed a second time at the call site.
+CI_ANCHOR_WORDCOUNT_EXEMPT_ROLE="ICO"
+
+# The blocking EN ceiling. Measured, not guessed: at the time this guard was
+# written, FLL, MLL, BUL and the staged SRX content already top out at 18
+# words — see this function's self-test row in wrapper-ci.yml step (f) for
+# the proof against a genuinely-violating fixture. Needs no committed
+# baseline the way the cross-role check above does, because nothing today
+# exceeds it.
+CI_ANCHOR_WORDCOUNT_MAX=18
+
+# The floor is a DIFFERENT question, deliberately not enforced by the
+# function below this one — see catalog_short_bars_anchors's own comment.
+CI_ANCHOR_WORDCOUNT_MIN=10
+
+# The Italian ceiling/floor (framework-catalog-it-translations design D3).
+# Deliberately UNSET here — Phase 5 of that change measures a 36-anchor pilot
+# (PRS x {FLL,MLL,BUL,SRX}) and derives these from the measured EN/IT length
+# RATIO (R = 90th percentile), the SAME "measured, not guessed" discipline
+# CI_ANCHOR_WORDCOUNT_MAX's own comment claims for English. Reusing the EN
+# number outright, or inventing an IT number without a measurement, is
+# EXACTLY the failure mode this file's own header names ("a check that
+# cannot fail on the thing it claims to cover") — so
+# `catalog_overlong_bars_anchors`/`catalog_short_bars_anchors` FAIL CLOSED
+# (non-zero, explained on stderr) when asked to check `it` before this is
+# set, rather than silently applying the English number or silently passing
+# everything. A self-test may override these via the environment (the same
+# seam every other constant in this file already exposes) to prove the
+# mechanism without waiting for the real Phase 5 measurement.
+#
+# MEASURED 2026-08-18, recorded in full at
+# docs/app_description/02-domain/framework-authoring/it/anchor-length-ceiling-measurement.md:
+# 36 anchors (PRS x {FLL,MLL,BUL,SRX}), authored BLIND to the existence of any
+# ceiling. Ratio wc_it/wc_en: median 1.172, p90 1.414, max 1.444.
+# ceil(18 * 1.414) = 26, and 0 of 36 exceed it, so the falsification clause did
+# not fire. Note that ceil(18 * max) is ALSO 26 — p90 and max agree, so the
+# number does not depend on which statistic was picked, which is the strongest
+# evidence available at this sample size that 26 is a property of the language
+# pair rather than of these 36 sentences.
+# Amending it means appending a fresh table to that file, never a silent bump.
+CI_ANCHOR_WORDCOUNT_MAX_IT="${CI_ANCHOR_WORDCOUNT_MAX_IT:-26}"
+# The floor stays unset and therefore non-blocking, matching English: the EN
+# floor is a report because legacy anchors run to six words, and there is no
+# Italian legacy to measure a floor against yet.
+CI_ANCHOR_WORDCOUNT_MIN_IT="${CI_ANCHOR_WORDCOUNT_MIN_IT:-}"
+
+# BLOCKING: anchors over the LOCALE's ceiling ($3, default "en"), for one
+# role in one tree. Prints ROLE:COMP:LEVEL:LOCALE:WORDCOUNT for every anchor
+# whose word count exceeds that locale's ceiling. Empty output means every
+# anchor in <tree>/bars/<role>.json for that locale is at or under the
+# limit, OR the role is the documented ICO exemption above.
+#
+# Propagates bars_anchor_word_counts's failure rather than absorbing it — the
+# same "a guard that cannot read its subject must never pass it" rule every
+# other function here obeys. The ICO exemption is checked FIRST and returns
+# success without reading the file at all: an exempt role is not examined,
+# not examined-and-found-clean. An UNCONFIGURED locale ceiling (e.g. `it`
+# before Phase 5's pilot measurement lands) is ALSO a fail-closed condition,
+# not a silent pass — see CI_ANCHOR_WORDCOUNT_MAX_IT's own comment.
+catalog_overlong_bars_anchors() {
+  CI_COBA_TREE="$1"
+  CI_COBA_ROLE="$2"
+  CI_COBA_LOCALE="${3:-en}"
+  [ "$CI_COBA_ROLE" = "$CI_ANCHOR_WORDCOUNT_EXEMPT_ROLE" ] && return 0
+
+  case "$CI_COBA_LOCALE" in
+    en) CI_COBA_MAX="$CI_ANCHOR_WORDCOUNT_MAX" ;;
+    it) CI_COBA_MAX="$CI_ANCHOR_WORDCOUNT_MAX_IT" ;;
+    *)
+      echo "ci-guards: catalog_overlong_bars_anchors: unknown locale [$CI_COBA_LOCALE]." >&2
+      return 1
+      ;;
+  esac
+
+  if [ -z "$CI_COBA_MAX" ]; then
+    echo "ci-guards: catalog_overlong_bars_anchors: no measured ceiling configured for locale [$CI_COBA_LOCALE] (CI_ANCHOR_WORDCOUNT_MAX_IT unset — see design D3 pilot)." >&2
+    return 1
+  fi
+
+  CI_COBA_COUNTS=$(bars_anchor_word_counts "$CI_COBA_TREE" "$CI_COBA_ROLE") || return 1
+  printf '%s\n' "$CI_COBA_COUNTS" | while IFS= read -r CI_COBA_LINE; do
+    [ -n "$CI_COBA_LINE" ] || continue
+    CI_COBA_LINE_LOCALE=$(printf '%s' "$CI_COBA_LINE" | cut -d: -f4)
+    [ "$CI_COBA_LINE_LOCALE" = "$CI_COBA_LOCALE" ] || continue
+    CI_COBA_WC=${CI_COBA_LINE##*:}
+    # `continue` on the FALSE branch, not a bare `[ ] &&` — a `while` pipeline's
+    # exit status is that of the LAST command run in its body, and a bare
+    # failing `[ ]` test on the final line would leak "false" as the whole
+    # function's exit status even though nothing was actually wrong. Verified:
+    # without this, `catalog_overlong_bars_anchors` returned 1 on a fully
+    # compliant file (BUL, every anchor <=18 words) purely because the LAST
+    # anchor checked happened to be under the ceiling.
+    [ "$CI_COBA_WC" -gt "$CI_COBA_MAX" ] || continue
+    printf '%s\n' "$CI_COBA_LINE"
+  done
+}
+
+# NON-BLOCKING REPORT: anchors under the LOCALE's floor ($3, default "en"),
+# for one role in one tree. Same doctrine as the hedge-marker rate in
+# house-voice-and-anti-hedge-standard.md §2.3: printed for a human to read
+# during review, never a build failure — the caller in wrapper-ci.yml step
+# (d) must NOT set FAIL on this function's output.
+#
+# The floor is not made blocking for the same reason the hedge ceiling is
+# advisory rather than enforced: FLL and MLL each carry legacy anchors as
+# short as 6 and 7 words, authored long before this change and explicitly
+# out of its retro-review scope (house-voice-and-anti-hedge-standard.md
+# §Scope). Blocking a floor of 10 today would fail on content this change is
+# not touching, for the sole reason that a later, unrelated PR happened to
+# read it. An unconfigured locale floor (e.g. `it` before Phase 5) returns
+# non-zero rather than silently reporting nothing, for the same reason the
+# blocking ceiling above fails closed.
+#
+# No role exemption here, unlike the maximum above — a floor is advisory by
+# construction, so there is nothing for an exemption to protect against.
+catalog_short_bars_anchors() {
+  CI_CSBA_TREE="$1"
+  CI_CSBA_ROLE="$2"
+  CI_CSBA_LOCALE="${3:-en}"
+
+  case "$CI_CSBA_LOCALE" in
+    en) CI_CSBA_MIN="$CI_ANCHOR_WORDCOUNT_MIN" ;;
+    it) CI_CSBA_MIN="$CI_ANCHOR_WORDCOUNT_MIN_IT" ;;
+    *)
+      echo "ci-guards: catalog_short_bars_anchors: unknown locale [$CI_CSBA_LOCALE]." >&2
+      return 1
+      ;;
+  esac
+
+  if [ -z "$CI_CSBA_MIN" ]; then
+    echo "ci-guards: catalog_short_bars_anchors: no measured floor configured for locale [$CI_CSBA_LOCALE] (CI_ANCHOR_WORDCOUNT_MIN_IT unset — see design D3 pilot)." >&2
+    return 1
+  fi
+
+  CI_CSBA_COUNTS=$(bars_anchor_word_counts "$CI_CSBA_TREE" "$CI_CSBA_ROLE") || return 1
+  printf '%s\n' "$CI_CSBA_COUNTS" | while IFS= read -r CI_CSBA_LINE; do
+    [ -n "$CI_CSBA_LINE" ] || continue
+    CI_CSBA_LINE_LOCALE=$(printf '%s' "$CI_CSBA_LINE" | cut -d: -f4)
+    [ "$CI_CSBA_LINE_LOCALE" = "$CI_CSBA_LOCALE" ] || continue
+    CI_CSBA_WC=${CI_CSBA_LINE##*:}
+    # Same `continue`-on-false discipline as catalog_overlong_bars_anchors
+    # above, for the same reason — see its comment.
+    [ "$CI_CSBA_WC" -lt "$CI_CSBA_MIN" ] || continue
+    printf '%s\n' "$CI_CSBA_LINE"
+  done
 }

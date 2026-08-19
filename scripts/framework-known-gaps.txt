@@ -40,26 +40,20 @@
 # to get a red pipeline green.
 
 # ---------------------------------------------------------------------------
-# SRX — Senior Executive.
+# History. SRX — Senior Executive — was listed here from the catalog's split
+# into role-level BARS files until bars-catalogue-completion Phase 6. It was
+# absent from BOTH trees (docs/app_description/02-domain/framework/bars/ and
+# the vendored api/database/framework/bars/); a parity-only gate stayed green
+# over it for exactly that reason — the two copies agreed, and both were
+# wrong. roles.json assigns SRX 18 competencies
+# (docs/app_description/02-domain/01-ruoli-e-competenze.md line 53, the
+# "N. competenze" column); bars-catalogue-completion Phase 6 landed
+# bars/SRX.json in both trees — 18 competencies, 54 indicators, authored to
+# the same standard as every other role — and removed the SRX line below in
+# the SAME commit, per the rule this file enforces on itself.
 #
-# Absent from BOTH trees: docs/app_description/02-domain/framework/bars/ and
-# the vendored api/database/framework/bars/. A parity-only gate stayed green
-# over it for exactly that reason — the two copies agreed, and both were wrong.
-#
-# Size of the debt, so it is not mistaken for a small one. roles.json assigns
-# SRX 18 competencies (docs/app_description/02-domain/01-ruoli-e-competenze.md
-# line 53, the "N. competenze" column). Every BARS file in this catalog carries
-# 3 anchored indicators per competency (the 5/3/1 scale), and ICO is the only
-# role authored to full coverage: 15 competencies, 45 indicators. Authored to
-# that same standard, SRX.json is 18 competencies and 54 indicators of expert
-# assessment content. That is domain work for an assessment specialist, not
-# something a code change can produce.
-#
-# Consequence while this line stands: no participant can be scored as SRX.
-# App\Exceptions\Scoring\RoleNoBarsException is the runtime end of the same
-# gap. The catalog ships knowingly incomplete, not accidentally.
-#
-# Remove this line in the SAME commit that adds bars/SRX.json to the authored
-# source and vendors it into api/database/framework/bars/.
+# Empty today — no lines below this comment. An empty role list is not a
+# stale file: the both-direction enforcement above still runs on every build
+# and still fails if a role's BARS file ever goes missing again without a
+# line here to excuse it.
 # ---------------------------------------------------------------------------
-SRX

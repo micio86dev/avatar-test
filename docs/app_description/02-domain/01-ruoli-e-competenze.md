@@ -17,7 +17,7 @@ I file strutturati completi sono in `framework/`:
 | **FLL** | Front Line Leader | Coordinamento operativo, unità funzionale singola, costi operativi |
 | **MLL** | Mid-Level Leader | Allineamento strategico paese/area, 1–2 funzioni correlate |
 | **BUL** | Business Unit Leader | Strategia paese/regione, P&L completo, funzioni multiple |
-| **SRX** | Senior Executive | Livello executive (responsabilità da definire in configurazione) |
+| **SRX** | Senior Executive | Direzione strategica pluriennale (3-5 anni), organizzazione/regione multi-paese, P&L consolidato |
 
 ## Competenze standard
 
@@ -75,12 +75,19 @@ Esempio (estratto ICO / PRS):
 |------------|-----------|-----------|-----------|
 | Recognizes symptoms that indicate problems | Utilizza sintomi e pattern come indizi delle cause profonde | Riconosce sintomi e differenzia problemi da sintomi | Si concentra sui sintomi superficiali |
 
-**Copertura BARS.** Non tutte le coppie ruolo×competenza dichiarate in `roles.json` hanno ancore
-comportamentali. L'elenco esatto è nei due file di controllo CI — `scripts/framework-known-gaps.txt`
-(ruoli senza alcun file BARS) e `scripts/framework-competency-gaps.txt` (coppie ruolo×competenza senza
-ancore) — mantenuti esatti in entrambe le direzioni dallo step (d) di `.github/workflows/wrapper-ci.yml`:
-una coppia scoperta e non elencata fa fallire la CI, e un'esenzione la cui lacuna è stata colmata fa
-fallire la CI finché non viene rimossa.
+**Copertura BARS.** Tutte le 83 coppie ruolo×competenza dichiarate in `roles.json` hanno ancore
+comportamentali (5/3/1) — 249 indicatori, 747 testi di ancoraggio, su ICO/FLL/MLL/BUL/SRX. La copertura
+è completata da `bars-catalogue-completion`: `bars/SRX.json` (18 competenze, 54 indicatori) è l'ultimo
+file arrivato, insieme al completamento delle 26 coppie residue di FLL/MLL/BUL. I due file di controllo
+CI — `scripts/framework-known-gaps.txt` (ruoli senza alcun file BARS) e
+`scripts/framework-competency-gaps.txt` (coppie ruolo×competenza senza ancore) — sono entrambi vuoti oggi
+e restano il meccanismo di verifica per qualunque lacuna futura, mantenuti esatti in entrambe le
+direzioni dallo step (d) di `.github/workflows/wrapper-ci.yml`: una coppia scoperta e non elencata fa
+fallire la CI, e un'esenzione la cui lacuna è stata colmata fa fallire la CI finché non viene rimossa.
+I 132 indicatori (396 testi di ancoraggio) autorati da questo cambiamento sono una bozza calibrata in
+attesa di validazione da parte di uno specialista di assessment prima di essere usati per valutare
+candidati reali (vedi `openspec/specs/framework-catalog/spec.md`, requisito "Calibrated Draft Pending
+Specialist Sign-Off").
 
 ## Regole di configurazione progetto
 

@@ -1,0 +1,97 @@
+# BEAI — framework catalog cross-role anchor-identity baseline (CI control file)
+#
+# One "ROLE_A:ROLE_B:COMP:LOCALE:FIELD" entry per line. Everything from a '#'
+# to end of line is a comment. An entry names two roles that share a
+# byte-identical `indicator` or anchor (`scale.5`/`scale.3`/`scale.1`,
+# printed as `anchor_5`/`anchor_3`/`anchor_1`) string, IN A GIVEN LOCALE, for
+# the SAME competency — `catalog_crossrole_duplicates` (scripts/ci-guards.sh)
+# is the mechanism, and .github/workflows/wrapper-ci.yml step (d) is the
+# caller.
+#
+# LOCALE-QUALIFIED FORMAT (framework-catalog-it-translations, design D2a).
+# Previously this file's entries were "ROLE_A:ROLE_B:COMP:FIELD" with no
+# locale field — implicitly English, because no other locale existed. Once
+# Italian translation lands (a locale dimension added to every leaf, design
+# D1), a FAITHFUL translation of two byte-identical English sentences
+# produces two byte-identical Italian sentences: Italian legitimately adds
+# entries here, one per already-baselined EN duplicate whose pair gets
+# translated — not a new violation, and not something to fix by rewording
+# the Italian differently from the English (that would score the two
+# locales differently on the exact indicator this file already excuses,
+# which Constraint 1 of the IT-translations proposal forbids).
+#
+# THIS IS NOT A MUTE SWITCH — same doctrine, same both-direction enforcement,
+# as scripts/framework-known-gaps.txt and scripts/framework-competency-gaps.txt:
+#
+#   * a cross-role duplicate found and NOT listed here        -> CI fails
+#   * an entry listed here whose duplicate is no longer real  -> CI fails
+#
+# bars-catalogue-completion authors 132 NEW indicators specifically to close
+# the "FLL's PRS is MLL's PRS with different words" failure mode (per-pair
+# scope-shift tables, authored before prose, rejected on an identical row).
+# So this baseline is CLOSED TO NEW SOURCE DUPLICATES: it exists to record
+# the two ENGLISH duplicates that predate the mechanical check, in the 39
+# pairs already authored before that change and explicitly left
+# un-retouched (retro-review is a deferred, separate decision — see that
+# change's proposal, Question 2), PLUS — once authored — the faithful
+# Italian translation of each. NEW pairs, and NEW divergences between what a
+# faithful translation would produce, may add ZERO entries here. A new
+# duplicate is a real defect in the new content and must be fixed by
+# rewording, not exempted by editing this file.
+#
+# CURRENT STATE (framework-catalog-it-translations Phase 2 — shape migration
+# only, no Italian content authored yet): 2 entries, both English. The
+# companion `it:indicator` line for each pair lands in a LATER, content-only
+# PR, the moment BUL/MLL's INF pair and FLL/MLL's RES pair are translated —
+# see design D2a's own worked example (4 entries once both are translated).
+# Adding those two lines is NOT this PR's job (no Italian content is
+# authored by the shape-migration change) and MUST NOT be anticipated here:
+# an entry for a translation that does not yet exist is itself a stale
+# exemption the moment this file's other direction is checked.
+#
+# GENERATED, NOT TYPED. Produced by, and reviewed against:
+#   . ./scripts/ci-guards.sh
+#   CI_LOCALES="en it" catalog_crossrole_duplicates docs/app_description/02-domain/framework
+# Committed verbatim — do not hand-edit the entry list, only the comments.
+# The English two predate bars-catalogue-completion's Phase 3 (JDG/TMG); see
+# that change's own history for how they were first captured.
+
+# ---------------------------------------------------------------------------
+# INF — Influence. MLL and BUL's second INF indicator ("Identify the motives
+# and objectives of the interlocutors and use them to argue own positions")
+# is the same sentence in both files — MLL.json and BUL.json, each at the
+# `"indicator"` line inside their INF block. The three anchor texts beneath
+# it differ per role; only the indicator itself is identical.
+# ---------------------------------------------------------------------------
+BUL:MLL:INF:en:indicator
+# The `it` line below is not a new defect. It is the `en` duplicate above,
+# faithfully translated: a faithful translation of two byte-identical English
+# sentences produces two byte-identical Italian ones. Breaking the Italian
+# duplication to shorten this list would make the two locales score
+# differently on exactly this indicator — invisibly, and only for candidates
+# assessed in Italian. Fidelity outranks tidiness.
+#
+# So `closed` means closed to new SOURCE duplicates. A duplicate in any locale
+# that does NOT mirror an existing `en` duplicate is still a defect, still
+# unlisted, and still fails.
+BUL:MLL:INF:it:indicator
+
+# ---------------------------------------------------------------------------
+# RES — Resilience. FLL and MLL's second RES indicator ("Constructively
+# handle mistakes, accepting responsibility and learning from experience")
+# is the same sentence in both files — FLL.json and MLL.json, each at the
+# `"indicator"` line inside their RES block. Same shape as the INF case
+# above: the anchors differ, the indicator does not.
+# ---------------------------------------------------------------------------
+FLL:MLL:RES:en:indicator
+# The `it` line below is not a new defect. It is the `en` duplicate above,
+# faithfully translated: a faithful translation of two byte-identical English
+# sentences produces two byte-identical Italian ones. Breaking the Italian
+# duplication to shorten this list would make the two locales score
+# differently on exactly this indicator — invisibly, and only for candidates
+# assessed in Italian. Fidelity outranks tidiness.
+#
+# So `closed` means closed to new SOURCE duplicates. A duplicate in any locale
+# that does NOT mirror an existing `en` duplicate is still a defect, still
+# unlisted, and still fails.
+FLL:MLL:RES:it:indicator
