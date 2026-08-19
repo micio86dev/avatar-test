@@ -409,12 +409,36 @@ The candidate arrives via a signed magic-link JWT. The entry point:
 
 ### 7.2 Pre-Interview Check
 
-After consent:
-1. Camera permission prompt (handled by the browser).
-2. Microphone permission prompt.
-3. Browser support check (if not Chrome/Edge/Opera/Safari → gate).
-4. Device check summary (camera OK, mic OK, browser OK).
-5. Start interview button.
+After consent. The device check is the last screen before the assessment and the highest
+abandonment risk in the product: BEAI holds no candidate contact data, so a candidate stuck
+here is unreachable. Every state must be self-explanatory and recoverable on this screen.
+
+**Layout** — single column, `max-w-xl` card, top to bottom:
+1. **Camera preview** — fills the full width of the card's content column at the camera's
+   **native aspect ratio**, read from the live video track (`getSettings()`, corrected by
+   `loadedmetadata`). Never a hardcoded ratio, never cropped: `object-fit: contain`, ratio
+   clamped to `[3/4, 21/9]` so a portrait camera cannot produce an overlong box. Background
+   `--color-avatar-bg`; a `Skeleton` holds a 16:9 box until the first frame.
+2. **Camera picker** and **microphone picker** — `Field` + `FieldLabel` + `Select`, populated
+   from `enumerateDevices()` and kept current on `devicechange`. 44px trigger
+   (`--spacing-control`), `border-input`. Disabled while a switch is in flight and
+   permanently after the candidate continues. Blank platform labels fall back to
+   "Camera 1" / "Microphone 1".
+3. **Live microphone level meter** — `Progress`, `role="progressbar"`, **not** in a live
+   region. A threshold marker shows the pass point. The screen-reader equivalent is the
+   static "say a few words" instruction plus a single `role="status"` announcement when the
+   level first crosses the threshold.
+4. **Status rows** — camera and microphone, pass/fail. Indicator dots are `aria-hidden`;
+   the adjacent text carries the semantics.
+5. **Instructional copy per step**, and on any failure an `Alert` with browser-neutral
+   permission-recovery guidance ("select the camera icon in your browser's address bar…")
+   plus a **Retry** control. No failure state on this screen may be terminal.
+6. **Continue** — enabled only when camera and microphone both pass. The mic gate is
+   deliberately hard: a spoken assessment with a dead microphone is unusable.
+
+Browser support (Chrome/Edge/Opera/Safari; Firefox and mobile gated by SA-11) is checked
+before this screen renders. Every string is i18n-keyed in `it` and `en` — zero literals.
+Device preference persistence: see the change design D4.
 
 ### 7.3 Interview View
 
