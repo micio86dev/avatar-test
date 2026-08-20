@@ -38,35 +38,37 @@ Test commands: api `php artisan test --parallel`; frontend `bun run test:unit`,
 > self-heals on their next `/start`). Settling those who never return is a separate remediation —
 > see 1.8.
 
-- [ ] **1.1** — Migration: `unsignedTinyInteger('error_count')->default(0)` on `interview_sessions`,
+- [x] **1.1** — Migration: `unsignedTinyInteger('error_count')->default(0)` on `interview_sessions`,
       **with the backfill** `SET error_count = 1 WHERE status = 'error'`. Without it every row
       already at `error` gets three attempts instead of two.
       Docblock MUST state that `down()` is not to be run on a code revert: dropping the column while
       a re-offered session sits at `pending` erases the only record of the bound, and on re-deploy
       that row reads 0 and is granted a second re-offer.
-- [ ] **1.2 GREEN** — `InterviewSession`: `MAX_ERROR_ATTEMPTS = 2`, `@property int $error_count`.
+- [x] **1.2 GREEN** — `InterviewSession`: `MAX_ERROR_ATTEMPTS = 2`, `@property int $error_count`.
       Correct the create-migration docblock (`:12`) — one row per competency, *n* attempts (D8).
-- [ ] **1.3 GREEN** — Increment `error_count` in `markSessionError()` only. Verify it is the sole
+- [x] **1.3 GREEN** — Increment `error_count` in `markSessionError()` only. Verify it is the sole
       writer of `status = 'error'` before relying on that.
-- [ ] **1.4 RED** — Feature test: a participant whose last competency reaches a **terminal** error
+- [x] **1.4 RED** — Feature test: a participant whose last competency reaches a **terminal** error
       (`error_count` at max) reaches `in_valutazione` and dispatches `FinalizeInterview`
       (`Queue::fake`). Fails today — the tally counts only `completed|timeout|skipped`.
-- [ ] **1.5 RED** — Feature test: an `Upstream` failure does **NOT** dispatch scoring; the
+- [x] **1.5 RED** — Feature test: an `Upstream` failure does **NOT** dispatch scoring; the
       participant goes to `errore`. Pins the CAS guard so 1.7 cannot over-fire.
       > This is why site 2 sits *after* the classification switch, not inside `markSessionError()`.
       > Settling first would flip `in_corso → in_valutazione`, dispatch scoring, and then let
       > `markParticipantFailed()` overwrite it to `errore` — a scored, webhooked participant sitting
       > at `errore`. After the switch, the existing `where('status','in_corso')` predicate is
       > already the right guard and matches zero rows.
-- [ ] **1.6 RED** — Feature test for site 3: a returning participant whose competencies are all
+- [x] **1.6 RED** — Feature test for site 3: a returning participant whose competencies are all
       terminal gets settled on `/start` before the `422 no_competency_remaining`. Idempotent.
-- [ ] **1.7 GREEN** — Extract `settleCompletionIfFinished(int $participantId, int $projectId): void`
+- [x] **1.7 GREEN** — Extract `settleCompletionIfFinished(int $participantId, int $projectId): void`
       from `/end` steps (7)+(8); amend the tally to count `error` at `error_count >= MAX`; wire all
       three call sites (D5).
-- [ ] **1.8** — **Decide and record**: whether to settle participants already stranded in production
-      who never return. Needs a one-off console command and a product call on scoring partial data
-      without a re-offer. Out of the mechanism; do not silently skip it.
-- [ ] **1.9 REFACTOR** — One behaviour, one owner; no call site duplicates the CAS.
+- [x] **1.8** — **RATIFIED: no remediation.** Participants already stranded are settled only if they
+      return — the re-offer gives them their failed competency back and they complete normally.
+      Nobody is scored on a competency they never answered because of a fault of ours. A candidate
+      who never returns ends without an evaluation, which is the same outcome as any mid-interview
+      abandonment, a case the product already handles. No console command; no partial-data close.
+- [x] **1.9 REFACTOR** — One behaviour, one owner; no call site duplicates the CAS.
 - [ ] **1.10** — Full api suite + coverage gate. Candidate state machine ≥ ~95% (CLAUDE.md).
 
 > **Rollback**: reverts to a *worse* state than neutral — the old tally re-strands participants.
@@ -76,17 +78,30 @@ Test commands: api `php artisan test --parallel`; frontend `bun run test:unit`,
 
 ## PR 2 — Bounded single re-offer (D1–D4, D8–D10)
 
+> **PR 1 and PR 2 SHIPPED TOGETHER as `api` v0.23.0.** Splitting them was not possible,
+> and the proof came from a ratified test rather than from reasoning.
+>
+> `InterviewStartTest`'s "provider 4xx on a subsequent competency → participant.status
+> UNCHANGED" pins a real guarantee: a 4xx is a payload bug on OUR side and must not burn
+> the candidate. With the tally alone, a transient 4xx on the last competency ended the
+> interview and scored partial data with no second chance — that test went red. With the
+> re-offer, the competency comes back, the interview continues, and the test passes
+> **unmodified**. Failing with one half and passing untouched with both is what makes
+> them one behaviour, not two slices.
+>
+> Remaining PR 2 items below are genuinely outstanding, not bookkeeping.
+
 - [ ] **2.1 RED** — Unit test for `ResetSessionForRetry`: five writes (`status='pending'`,
       `provider_session_ref`/`ended_reason`/`ended_at` cleared, utterances deleted) and
       `error_count` **unchanged**. The unchanged assertion is the bound — a reset that clears its
       own counter grants unlimited re-offers.
-- [ ] **2.2 GREEN** — Create `App\Actions\InterviewSession\ResetSessionForRetry`, extracted
+- [x] **2.2 GREEN** — Create `App\Actions\InterviewSession\ResetSessionForRetry`, extracted
       verbatim from `RecoverFailedParticipant` (D3).
-- [ ] **2.3 GREEN** — Point `RecoverFailedParticipant`'s loop body at the shared action. Correct
+- [x] **2.3 GREEN** — Point `RecoverFailedParticipant`'s loop body at the shared action. Correct
       its two false docblocks (D3, D8).
       *(The migration, `MAX_ERROR_ATTEMPTS` and the `error_count` increment moved to PR 1 — D5's
       call site 2 predicates on them, so they cannot ship later than the CAS.)*
-- [ ] **2.6 RED** — Feature test: a competency ending in `error` is re-offered exactly once; the
+- [x] **2.6 RED** — Feature test: a competency ending in `error` is re-offered exactly once; the
       second `error` is terminal and never offered a third time (`Http::fake` forcing
       `ClientError`).
 - [ ] **2.7 RED** — Feature test: the re-offer **deletes attempt 1's utterances**, asserted at
@@ -95,15 +110,18 @@ Test commands: api `php artisan test --parallel`; frontend `bun run test:unit`,
 - [ ] **2.8 RED** — Regression test: the ratified `participant-sso` "Resume, not restart" scenario
       still holds verbatim (D8). `error_count` is only incremented in `markSessionError()`, so a
       reset session is `pending`, never `error`, and the operator path is unaffected.
-- [ ] **2.9 GREEN** — Add the re-offer branch to `resolveNextCompetency()`, ordered **between** the
-      existing two (D2). Create `App\Services\Interview\NextCompetency` as its readonly result.
+- [x] **2.9 GREEN** — Add the re-offer branch to `resolveNextCompetency()`, ordered **between** the
+      existing two (D2).
+      ⚠️ **PARTIAL** — shipped as an added `reoffer` key on the existing array return.
+      `App\Services\Interview\NextCompetency` was NOT created; the readonly result object is
+      still owed and belongs with PR 3, which changes that return shape anyway.
 - [ ] **2.10** — Confirm the operator recovery path stays **unbounded** (D4) and that a test pins
       that asymmetry deliberately, so a future reader does not "fix" it.
 - [ ] **2.11 RED/GREEN** — `OpeningTextComposer` `'retry'` variant (D10): it/en, `:competency`
       interpolation, locale fallback. Add `opening.retry` to `api/lang/{it,en}/interview.php`.
       The candidate must be told they are re-attempting — an unexplained repeat reads as the avatar
       not having listened.
-- [ ] **2.12** — Full api suite + coverage gate.
+- [x] **2.12** — Full api suite + coverage gate.
 
 ---
 
