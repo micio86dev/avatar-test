@@ -248,13 +248,18 @@ configured yet.
 When no active template is resolved, or when resolution itself fails for any
 reason, the provider payload sent at session start MUST be byte-identical to
 what was sent before avatar templates existed: an empty config MUST produce an
-empty payload fragment, merged into (never assigned over) the existing
-`competency_code` / `question_index` / `system_prompt` body.
+empty payload fragment, merged into (never assigned over) the provider's real
+wire body — `{name, prompt, opening_text}` at HeyGen `POST /v1/contexts`, the full avatar-identity shape at HeyGen
+`POST /v1/sessions/token`, or `{replica_id, persona_id, conversational_context,
+custom_greeting, properties}` at Tavus `POST /v2/conversations`. The merge call site is
+unchanged by this correction; only the field names it was documented against were wrong.
 
 Resolution failures MUST be swallowed at the call site, not propagated: an
 interview session MUST NOT fail to start because a cosmetic setting could not
-be read. The fallback is the provider's own account defaults, which is exactly
-what every candidate received before this capability existed.
+be read. The fallback is the provider's own account defaults, exactly what
+every candidate received before this capability existed.
+(Previously: named the merge target as "the existing `competency_code` / `question_index`
+/ `system_prompt` body" — none of these are real wire fields.)
 
 #### Scenario: An organization with no active template resolves to null
 
@@ -278,8 +283,12 @@ what every candidate received before this capability existed.
 
 - GIVEN no active template (or an active template with an empty `config`)
 - WHEN the HeyGen or Tavus provider payload is built for session start
-- THEN the resulting payload fragment is `{}` (empty) — nothing is added, and
-  nothing regresses for a tenant that has not configured a template
+- THEN the resulting TEMPLATE payload fragment is `{}` (empty) — nothing is added,
+  and nothing regresses for a tenant that has not configured a template
+- AND the outbound `POST /v1/contexts` body is exactly `{name, prompt, opening_text}`,
+  while `POST /v1/sessions/token` carries no template-sourced avatar field beyond
+  BEAI's own platform defaults (see `interview-session`, "Platform-Default Avatar
+  Identity When No Template Exists")
 
 ### Requirement: Template config reaches the provider payload — unset means absent, never null
 

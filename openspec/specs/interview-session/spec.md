@@ -338,15 +338,14 @@ This is a backward-compatible addition to the existing `/start` response shape. 
 five-endpoint contract, the C7a failure matrix, and all other `question_context` fields
 are unchanged.
 
-**SECURITY — the composed `system_prompt` MUST NOT appear in the `/start` response.** The
-system prompt embeds the BARS indicator anchors that C9 uses to score the candidate;
-returning it to the candidate client would expose the scoring rubric to the person being
-assessed. The composed `system_prompt` is therefore delivered ONLY server-to-server: the
-controller passes it through the extended `QuestionContext` to
-`ProviderSessionService::issue()`, which injects it into the provider session at creation.
-The candidate client receives only `prompt_version` for traceability. The C7a control flow
-(create-or-resume, provider-outside-txn, failure matrix, UNIQUE resume path) is UNCHANGED by
-this widening.
+**SECURITY — the composed system prompt content MUST NOT appear in the `/start` response.**
+It embeds BARS indicator anchors used for scoring; exposing it to the candidate client
+would leak the scoring rubric. The composed content is delivered ONLY server-to-server,
+under whichever wire field name the target provider actually accepts (`prompt` for HeyGen
+`POST /v1/contexts`, `conversational_context` for Tavus `POST /v2/conversations`) — **NOT**
+under a literal `system_prompt` key on either provider's body; that key does not exist in
+either contract. The candidate client receives only `prompt_version`.
+(Previously: asserted the composed prompt appears under a literal `system_prompt` wire key.)
 
 #### Scenario: /start returns question_context.prompt_version for standard session
 
@@ -359,8 +358,11 @@ this widening.
 - GIVEN a project with assessment_type='standard', language='it', and competency PRS with factory-authored Italian BARS indicators
 - WHEN `POST /api/candidate/interview/start` returns HTTP 201
 - THEN the response body contains `question_context.prompt_version`
-- AND NO field of the response body contains the composed `system_prompt` text or its BARS anchor content
-- AND the composed `system_prompt` IS present in the outbound provider `issue()` request body (server-to-server only)
+- AND NO field of the response body contains the composed prompt text or its BARS anchor content
+- AND the composed prompt IS present in the outbound provider `issue()` request body,
+  under that provider's OWN field name (`prompt` for HeyGen `/v1/contexts`,
+  `conversational_context` for Tavus `/v2/conversations`) — server-to-server only,
+  and never under a literal `system_prompt` wire key
 
 #### Scenario: Composition failure (anchor_translation_missing) returns 422 — no session created
 
@@ -373,6 +375,15 @@ this widening.
 - GIVEN a provider 5xx hard-failure during `/start`
 - WHEN `ProviderSessionService::issue()` receives the extended `QuestionContext`
 - THEN session status = 'error', participant → errore, HTTP 502 — identical to pre-C8 behavior
+
+#### Scenario: A malformed-request 4xx does not reuse the 5xx failure matrix
+
+- GIVEN `HeygenProvider::issue()` sends a body the provider rejects with a 4xx
+  (`client_contract_error`, see "Provider 4xx Is a Client Contract Error, Not a
+  Provider Failure")
+- WHEN `ProviderSessionService::issue()` receives that rejection
+- THEN the participant status is left UNCHANGED (not `errore`) and HTTP 500 is
+  returned, not 502
 
 ---
 
@@ -841,6 +852,226 @@ and UNIQUE(participant_id, competency_code) resume behavior.
 
 ---
 
+### Requirement: HeyGen Context Creation Wire Contract
+
+`POST https://api.liveavatar.com/v1/contexts` MUST be called with a body containing EXACTLY
+`{name, prompt, opening_text}` — no other keys. The context id MUST be read from `data.id`.
+The body MUST NOT contain `competency_code`, `question_index`, `system_prompt`, or any
+avatar-identity field.
+
+#### Scenario: /contexts body is the exact three-field shape
+- GIVEN a candidate starting a HeyGen interview
+- WHEN `HeygenProvider::issue()` builds the `/contexts` request
+- THEN the body is exactly `{name, prompt, opening_text}`
+
+#### Scenario: Context id is read from data.id
+- GIVEN LiveAvatar returns `{data: {id: 'ctx_123'}}`
+- WHEN the response is parsed
+- THEN the extracted context id is `'ctx_123'`; a response without `data.id` fails parsing
+  rather than yielding an empty id
+
+---
+
+### Requirement: HeyGen Context Name Is Unique and PII-Free
+
+`name` on `POST /v1/contexts` MUST be unique per LiveAvatar account and MUST NOT carry
+candidate-identifying information beyond BEAI's opaque `candidate_ref`. `name` MUST be
+keyed on `interview_session_id`.
+
+#### Scenario: Two consecutive interviews on the same account both succeed
+- GIVEN two candidates each start an interview against the same LiveAvatar account
+- WHEN each calls `POST /start`
+- THEN each `name` is distinct, derived from its own `interview_session_id`; neither collides
+
+#### Scenario: name carries no PII
+- GIVEN a candidate identified only by an opaque `candidate_ref`
+- WHEN `name` is built
+- THEN it contains `interview_session_id` and no email, display name, or free text
+
+---
+
+### Requirement: Avatar Identity Belongs to the Session-Token Call
+
+`POST https://api.liveavatar.com/v1/sessions/token` MUST carry `mode`, `avatar_id`,
+`is_sandbox`, `video_settings`, `interactivity_type`, and
+`avatar_persona{voice_id, context_id, language}`. These fields MUST NOT appear on
+`POST /v1/contexts`.
+
+The response MUST be read as `data.session_token` — `data.access_token` does NOT
+exist in the real contract. `data.session_id` is NULLABLE and MUST NOT be treated as
+a malformed response: `provider_session_ref` is nullable end-to-end, and a null
+`session_id` degrades exactly like an already-supported "no ref" session (transcript
+reconciliation returns `[]`, a later resume's teardown is skipped). A missing
+`data.session_token`, by contrast, MUST fail loudly as a malformed response.
+
+#### Scenario: Token call carries full avatar configuration
+- GIVEN a HeyGen session with an existing `context_id`
+- WHEN `HeygenProvider::issue()` builds `/sessions/token`
+- THEN the body carries `mode`, `avatar_id`, `is_sandbox`, `video_settings`,
+  `interactivity_type`, `avatar_persona.{voice_id, context_id, language}`
+
+#### Scenario: /contexts never carries avatar identity
+- GIVEN any HeyGen `/start` call, with or without an active avatar template
+- WHEN the outbound `/contexts` body is inspected
+- THEN it contains no `avatar_id`, `voice_id`, `video_settings`, or `interactivity_type` key
+
+#### Scenario: The session token is read from data.session_token
+
+- GIVEN LiveAvatar returns `{data: {session_token: 'tok_1', session_id: 'sess_1'}}`
+- WHEN the response is parsed
+- THEN the token is `'tok_1'` and `provider_session_ref` is `'sess_1'`
+- AND a response missing `data.session_token` fails loudly as malformed
+
+#### Scenario: A null session_id is tolerated, not fatal
+
+- GIVEN LiveAvatar returns `{data: {session_token: 'tok_1', session_id: null}}`
+- WHEN the response is parsed
+- THEN `provider_session_ref` is `null` and `/start` succeeds; transcript
+  reconciliation later returns `[]` and teardown is skipped
+
+---
+
+### Requirement: Transcript Parsing from the Real Provider Response Shape
+
+`GET /v1/sessions/{ref}/transcript` MUST be parsed as `data.transcript_data`, rows keyed
+`role`/`transcript`. `reconcileTranscript()` MUST NOT read `data` directly or the key
+`content`. A response missing `data.transcript_data` or with malformed rows MUST fail
+loudly (throw) rather than silently yield an empty transcript — this feeds C9 scoring, a
+~95%-coverage zone.
+
+#### Scenario: A non-empty transcript is parsed correctly
+- GIVEN LiveAvatar returns `{data:{transcript_data:[{role:'user',transcript:'Hello'},
+  {role:'avatar',transcript:'Hi there'}]}}`
+- WHEN `reconcileTranscript()` processes the response
+- THEN two `Utterance` rows are produced with correct `role` and text
+
+#### Scenario: A shape mismatch fails loudly
+- GIVEN a response without `data.transcript_data` (e.g. legacy `data:[...]`, or a row
+  missing `transcript`)
+- WHEN `reconcileTranscript()` processes it
+- THEN it throws rather than returning zero `Utterance` rows silently
+
+---
+
+### Requirement: Tavus Conversation Wire Contract
+
+`POST https://tavusapi.com/v2/conversations` MUST be called with
+`{replica_id, persona_id, conversational_context, custom_greeting, properties}` — no
+`competency_code`/`question_index`. The conversation id/URL MUST be read from the
+TOP-LEVEL `conversation_id`/`conversation_url`, not nested under `data`. Teardown MUST be
+`POST /v2/conversations/{id}/end`, never `DELETE`.
+
+#### Scenario: /conversations body is the real shape
+- GIVEN a candidate starting a Tavus interview
+- WHEN `TavusProvider::issue()` builds the request
+- THEN the body contains `replica_id`, `persona_id`, `conversational_context`,
+  `custom_greeting`, `properties`, and no `competency_code`/`question_index`
+
+#### Scenario: Response ids are read top-level
+- GIVEN Tavus returns `{conversation_id:'conv_1', conversation_url:'https://...'}`
+- WHEN the response is parsed
+- THEN both values are extracted from the top level
+
+#### Scenario: Teardown ends, does not delete
+- GIVEN an active Tavus conversation
+- WHEN `TavusProvider::teardown()` is called
+- THEN it issues `POST /v2/conversations/{id}/end`; no `DELETE` is made
+
+---
+
+### Requirement: Tavus Concurrency Self-Heal Before Surfacing 429
+
+On a Tavus concurrency-limit rejection, `TavusProvider` MUST retry creation up to 3
+times, 2 seconds apart, BEFORE returning 429. Only after all retries are exhausted
+MUST the request degrade to a client-facing 429 `provider_busy`.
+
+`TavusProvider` MUST NOT reap (list-and-end) another active Tavus conversation to make
+room for this request. BEAI is multi-tenant; an account-wide "end every active
+conversation" self-heal — as legacy-demo's single-tenant `endActiveTavusConversations()`
+performed — would terminate another tenant's in-flight interview. That is cross-tenant
+data destruction disguised as resilience, and a direct violation of tenant isolation.
+Retry-with-backoff is ported; the reap is deliberately, permanently rejected (design D8).
+
+#### Scenario: A concurrency rejection self-heals via retry
+- GIVEN a concurrency-limit rejection on the first attempt
+- WHEN `TavusProvider::issue()` handles the rejection
+- THEN it retries (no reap, no cross-tenant call); a successful retry returns 201, no 429
+
+#### Scenario: Exhausted retries degrade to 429
+- GIVEN 3 retries, 2 seconds apart, all still hit the limit
+- WHEN `TavusProvider::issue()` gives up
+- THEN `/start` returns HTTP 429 `provider_busy`
+
+#### Scenario: No other tenant's conversation is ever queried or ended
+- GIVEN any concurrency-limit rejection, retried or not
+- WHEN `TavusProvider::issue()` handles it
+- THEN no `GET /v2/conversations?status=active` (or any conversation-listing) call is made, and no conversation other than this request's own is ever ended
+
+---
+
+### Requirement: Provider 4xx Is a Client Contract Error, Not a Provider Failure
+
+A provider rejection caused by a malformed BEAI-originated request (HTTP 4xx, excluding
+429) MUST be classified as a distinct `client_contract_error`, separate from the existing
+retryable (429) and hard-5xx buckets. `InterviewController::handleProviderFailure()` MUST
+respond HTTP 500 (not 502 `provider_error`) and MUST leave the participant's status
+UNCHANGED (not `errore`). This requirement governs only classification and the immediate
+response; it does NOT define recovery — that belongs to `participant-error-recovery`,
+sequenced to land after this change.
+
+#### Scenario: A 4xx from a malformed body is not a provider_error
+- GIVEN HeyGen rejects `/contexts` with HTTP 422 due to a BEAI-side invalid field
+- WHEN `handleProviderFailure()` handles the exception
+- THEN the response is HTTP 500, not 502; the participant's status is unchanged
+
+#### Scenario: A genuine 5xx still uses the pre-existing hard-failure path
+- GIVEN HeyGen returns HTTP 503
+- WHEN `handleProviderFailure()` handles the exception
+- THEN session status='error', participant→`errore`, HTTP 502 — unchanged from today
+
+---
+
+### Requirement: Redaction Preserves the Provider's Diagnostic Message
+
+On a provider failure, the exception message and log context MUST include the provider's
+own complaint, extracted as `message ?? error ?? data.message`. The extracted string MUST
+have the API key stripped via a targeted `str_replace`, not the whole body discarded. The
+API key MUST NEVER appear in a log line, exception message, or Sentry event.
+
+#### Scenario: A rejected-field message reaches the log
+- GIVEN LiveAvatar responds 422 with `{message:"prompt is required"}`
+- WHEN the failure is logged and raised
+- THEN both the log context and exception message contain "prompt is required"
+
+#### Scenario: The API key never reaches diagnostics even if echoed
+- GIVEN a response body synthetically contains the API key inside `message`
+- WHEN the error is extracted and logged
+- THEN the text contains `[REDACTED]` in place of the key; the raw key appears nowhere
+
+---
+
+### Requirement: Provider Wire Contracts Are Pinned Against Recorded Real Responses
+
+Tests asserting HeyGen/Tavus request or response shape MUST be backed by a committed
+fixture captured from a real provider response (or explicitly documented as
+provider-docs-verified) — not a hand-authored stub of BEAI's own assumed shape. A test
+built entirely from an invented `Http::fake` response proves only that the parser agrees
+with itself; it MUST NOT be cited as evidence the provider accepts the outbound request.
+
+#### Scenario: A fixture-backed test proves parsing, not acceptance
+- GIVEN a committed fixture recorded from a real (or docs-verified) response
+- WHEN a test asserts the adapter parses it correctly
+- THEN the test proves response-shape parsing ONLY — it makes no claim about whether the
+  provider accepts BEAI's outbound request body
+
+#### Scenario: A hand-authored stub test is not a substitute for the fixture layer
+- GIVEN a test stubs `Http::fake` with a response invented by the test author
+- WHEN that test is reviewed against this requirement
+- THEN it MUST NOT be cited as evidence of correct wire-contract shape; only the
+  fixture-backed layer or the gated live smoke check may be cited for that claim
+
+---
+
 ## ADDED Requirements (C10)
 
 ### Requirement: POST /end — progress event dispatch on competency-session commit (C10 addendum)
@@ -933,16 +1164,21 @@ When issuing a provider session (`ProviderSessionService::issue()`, both the
 `HeygenProvider` and `TavusProvider` implementations), the system MUST resolve
 the calling organization's active `AvatarTemplate` (via
 `ActiveTemplateResolver`) and merge its provider-specific config into the
-outbound HeyGen or Tavus request body, using the same mapping the
-`avatar-templates` capability defines (`TemplatePayload::heygen()` /
-`::tavus()`).
+outbound provider request(s), using the same mapping the `avatar-templates`
+capability defines (`TemplatePayload::heygen()` / `::tavus()`).
 
-The template's fields MUST be merged as the BASE of the request body, with the
-interview-specific fields (`competency_code`, `question_index`, and the C8
-`system_prompt` / `conversational_context` key) applied ON TOP. The template
-MAY only add fields describing the avatar's appearance and voice; it MUST NOT
-be able to override which competency is being asked or what system prompt
-drives it — those describe the interview, not its presentation.
+For HeyGen, avatar-identity fields (`avatar_id`, `avatar_persona.voice_id`,
+`avatar_persona.language`, `interactivity_type`, `video_settings.*`) MUST be
+merged into `POST /v1/sessions/token` — NEVER into `POST /v1/contexts`, which
+accepts only `{name, prompt, opening_text}` and has no concept of avatar
+identity. For Tavus, the template's fields MUST be merged into the single
+`POST /v2/conversations` body.
+
+Template fields MUST be merged ON TOP of the platform defaults (see
+"Platform-Default Avatar Identity") but UNDER the composed prompt and opening
+greeting, which the template MUST NOT be able to override. The template MAY
+only add fields describing the avatar's appearance and voice; it MUST NOT be
+able to override what the interview asks.
 
 Resolving the active template, and mapping its config, MUST NOT be able to
 fail the `/start` request. Any error while resolving or mapping the template
@@ -954,31 +1190,35 @@ This is purely additive to the existing C7a/C8 `/start` contract: the
 create-or-resume logic, the failure matrix (429/502/500), the response shape,
 and every existing `/start` scenario are unchanged by this delta.
 
-#### Scenario: An organization's active template configures the HeyGen session
+(Previously: merged avatar identity into `/contexts` and named the
+interview-specific fields as `competency_code`/`question_index`/`system_prompt`
+— none of these are real wire fields on either provider.)
+
+#### Scenario: An organization's active template configures the HeyGen token call
 
 - GIVEN organization O has an active template with `provider = 'heygen'` and
   `config = {avatarId: 'Ann_Therapist_public', voiceId: 'en-US-JennyNeural'}`
 - WHEN a candidate of organization O calls `POST /start`
-- THEN the outbound HeyGen `POST /contexts` request body carries `avatar_id =
-  'Ann_Therapist_public'` and `avatar_persona.voice_id = 'en-US-JennyNeural'`,
-  in addition to the existing `competency_code` and `question_index` fields
+- THEN the outbound `POST /v1/sessions/token` body carries `avatar_id =
+  'Ann_Therapist_public'` and `avatar_persona.voice_id = 'en-US-JennyNeural'`
+- AND the outbound `POST /v1/contexts` body carries none of these fields
 
 #### Scenario: An organization's active template configures the Tavus session
 
 - GIVEN organization O has an active template with `provider = 'tavus'` and
   `config = {faceId: 'face-123', palId: 'pal-456', llmModel: 'gpt-4'}`
 - WHEN a candidate of organization O calls `POST /start`
-- THEN the outbound Tavus conversation-initiation request body carries the
-  configured face, PAL, and LLM settings (via the persona-level mapping), in
-  addition to the existing `competency_code` and `question_index` fields
+- THEN the outbound `POST /v2/conversations` body carries the mapped face, PAL,
+  and LLM settings alongside `conversational_context` and `custom_greeting`
 
-#### Scenario: An organization with no active template sends empty config
+#### Scenario: An organization with no active template sends only interview content plus platform defaults
 
 - GIVEN organization O has no active template
 - WHEN a candidate of organization O calls `POST /start`
-- THEN the outbound provider request body contains only the interview-specific
-  fields (`competency_code`, `question_index`, `system_prompt`); no template
-  config is merged
+- THEN `/v1/contexts` contains only `{name, prompt, opening_text}`, and the
+  Tavus body contains only `{replica_id, persona_id, conversational_context,
+  custom_greeting, properties}` — no template-sourced field is merged, and the
+  only avatar-identity values present are the platform defaults
 
 #### Scenario: Template resolution error degrades to empty config
 
@@ -993,12 +1233,83 @@ and every existing `/start` scenario are unchanged by this delta.
   (e.g., an unrecognized provider type)
 - WHEN `POST /start` is called
 - THEN the mapping error is caught and an empty payload fragment is used (fallback);
-  the `/start` request succeeds; the session begins with the provider's account defaults
+  the `/start` request succeeds; the session begins with the platform/provider defaults
 
-#### Scenario: Interview-specific fields are never overridden by template
+#### Scenario: Interview content is never overridden by template
 
-- GIVEN an organization's template config is `{competency_code: 'WRONG', question_index: 999}`
-  (malformed)
-- WHEN `POST /start` is called for competency code PRS at question_index 0
-- THEN the outbound request body carries `competency_code: 'PRS'` and
-  `question_index: 0` (interview values take precedence)
+- GIVEN a malformed template config attempts to set `prompt` (HeyGen) or
+  `conversational_context` / `custom_greeting` (Tavus)
+- WHEN `POST /start` is called
+- THEN the outbound request carries BEAI's own composed prompt and opening
+  greeting, not the template's override
+
+---
+
+### Requirement: Platform-Default Avatar Identity When No Template Exists
+
+Avatar identity MUST NOT depend on an organization having configured an
+`AvatarTemplate`. Both providers MUST apply a platform-default identity floor
+on every `/start`, so an organization with no template still produces a
+provider-acceptable request body.
+
+For HeyGen, `POST /v1/sessions/token` MUST always carry the proven-constant
+`interactivity_type` and `video_settings.quality`, plus `avatar_id` and
+`avatar_persona.voice_id` sourced from configuration
+(`interview.heygen.{avatar_id, voice_id}`), and `avatar_persona.language`
+sourced from the PROJECT's language (falling back to
+`interview.heygen.language` only when the caller supplies none — BEAI is
+multi-tenant and multilingual, so the avatar's language MUST NOT be a fixed
+deployment-wide value). For Tavus, `POST /v2/conversations` MUST always carry
+`replica_id` and `persona_id` sourced from configuration
+(`interview.tavus.{replica_id, persona_id}`).
+
+Precedence MUST be, weakest to strongest: (1) platform default, (2) the
+organization's active template, (3) provider-owned protocol constants
+(HeyGen `mode`, `is_sandbox`, `avatar_persona.context_id`) and the
+call-specific interview content. Merging MUST be RECURSIVE
+(`array_replace_recursive`, never a shallow merge) so that a template setting
+one key under `avatar_persona` cannot silently drop the platform default's
+sibling keys. A configured value that is unset or empty MUST be OMITTED from
+the body, never sent as `""` or `null`.
+
+(This behaviour was hotfixed after the wire-contract specs were written —
+HeyGen 0.22.1, a production 422 `avatar_id: Field required`, and Tavus 0.22.2,
+a production 400 demanding `replica_id`/`persona_id`. Both had the same root
+cause: identity came ONLY from a template no organization had.)
+
+#### Scenario: An organization with no template still sends a complete HeyGen identity
+
+- GIVEN organization O has no active `AvatarTemplate` and `interview.heygen.avatar_id`
+  and `interview.heygen.voice_id` are configured
+- WHEN a candidate of O calls `POST /start`
+- THEN `POST /v1/sessions/token` carries `avatar_id`, `avatar_persona.voice_id`,
+  `avatar_persona.language`, `interactivity_type` and `video_settings.quality`
+- AND the provider does not reject the request for a missing `avatar_id`
+
+#### Scenario: An organization with no template still sends a complete Tavus identity
+
+- GIVEN organization O has no active `AvatarTemplate` and
+  `interview.tavus.{replica_id, persona_id}` are configured
+- WHEN a candidate of O calls `POST /start`
+- THEN `POST /v2/conversations` carries `replica_id` and `persona_id`
+
+#### Scenario: A template overrides the platform default per key, not wholesale
+
+- GIVEN a template that sets only `voiceId`
+- WHEN the `/sessions/token` body is built
+- THEN `avatar_persona.voice_id` is the template's value AND
+  `avatar_persona.language` from the platform default is still present — the
+  recursive merge does not replace the whole `avatar_persona` node
+
+#### Scenario: The avatar speaks the project's language, not a deployment-wide constant
+
+- GIVEN two organizations running projects with `language = 'it'` and `'en'`
+- WHEN each starts an interview
+- THEN each `/sessions/token` body carries its own project's language in
+  `avatar_persona.language`
+
+#### Scenario: An unset configured default is omitted, never sent empty
+
+- GIVEN `interview.heygen.avatar_id` is unset or an empty string
+- WHEN the `/sessions/token` body is built
+- THEN the `avatar_id` key is ABSENT from the body — it is never sent as `""`
