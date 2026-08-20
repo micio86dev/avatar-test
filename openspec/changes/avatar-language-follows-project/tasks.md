@@ -69,7 +69,7 @@ backoffice `bun run test:unit`.
 - [x] **1.12 RED** — Isolation test: a stale template language in organization A never reaches
       organization B's session; template resolution and language sourcing both stay scoped to
       `organization_id` (mandated by `rules.specs`).
-- [x] **1.13** — Full api suite + coverage gate. **1992 passing, 94.0% overall.** Needs `php -d memory_limit=2G`: the default 128M dies building the report and the crash reads as a failing gate.
+- [x] **1.13** — Full api suite + coverage gate. **1995 passing of 2000 (5 skipped), 94.0% overall.** Needs `php -d memory_limit=2G`: the default 128M dies building the report and the crash reads as a failing gate.
 
 ---
 
@@ -115,7 +115,7 @@ CI fails on a seed step, not an assertion.
       only SQLite.
 - [x] **2.9** — Note in the change log that pre-change template **exports become unimportable**
       (F11): they carry a key the validator now rejects. Expected, not a regression.
-- [x] **2.10** — Full api suite + coverage gate. **1992 passing, 94.0%.** `beai:demo-seed` exercised end to end by the 59-test Demo suite — the failure the intra-PR ordering prevents is a seed-time crash no unit test surfaces.
+- [x] **2.10** — Full api suite + coverage gate. **1995 passing of 2000, 94.0%.** `beai:demo-seed` exercised end to end by the 59-test Demo suite — the failure the intra-PR ordering prevents is a seed-time crash no unit test surfaces.
 
 ### 2.c Correct the six census statements (D8)
 
@@ -153,7 +153,12 @@ CI fails on a seed step, not an assertion.
 
 ## Close-out
 
-- [x] **4.1** — `sdd-verify` against spec, design and this checklist.
+- [x] **4.1** — `sdd-verify` against spec, design and this checklist. **PASS** on the second run.
+      The first returned three CRITICAL — two of them tasks marked done that were not, plus a
+      missing `apply-progress`. Closed in `api` v0.26.1, along with three findings the verifier
+      raised unprompted. The second run actively FALSIFIED the two highest-risk fixes: it reverted
+      them, confirmed the new tests fail against the reintroduced defect, then restored. That is
+      the difference between a test existing and a test working.
 - [ ] **4.2** — **Pre-deploy check, carried from the open questions**: determine whether any real
       tenant has an active avatar template with a language set. Not answerable from the repo — it
       needs a production query. If any exist, their avatars change spoken language on deploy, and

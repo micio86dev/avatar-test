@@ -10,6 +10,7 @@ worth recording rather than quietly fixing twice.
 |---|---|
 | `api` v0.26.0 | PR 1 (cut the override, Tavus platform default at its path, closing-phrase source swap) and PR 2 (retire the operator control, one-way config migration, census comments) |
 | `backoffice` v0.14.0 | PR 3 (two i18n keys) |
+| `api` v0.26.1 | The `sdd-verify` fix release — see its own cycles below |
 
 `api` shipped before `backoffice`. The reverse order is an operator-visible
 defect: the api would still emit the FieldSpec while its translation was gone,
@@ -25,6 +26,19 @@ and the form would render the raw key.
 | 4 | `AvatarLanguageTest` — closing phrases resolved from the participant | both `buildSuccessResponse` call sites read `$ctx->language` |
 | 5 | `StripTemplateLanguageMigrationTest` — no migration existed | one-way JSONB key-strip with a documented no-op `down()` |
 | 6 | `ProviderFieldSpecTest` / `TemplatePayloadTest` / C14 API tests — configs carrying `language` were accepted | FieldSpec and `LANGUAGES` retired; the validator now rejects the key, which is correct |
+
+## Fix release cycles (api v0.26.1, after the first verify)
+
+| # | RED | GREEN |
+|---|---|---|
+| 7 | Tavus `properties.language` nesting and the project-over-template override had no test | Two cases in `AvatarLanguageTest`; the nesting one also asserts NO top-level key |
+| 8 | The null-`$ctx` Tavus fallback had no test | Reflection case resolving `interview.tavus.language` through `TavusLanguage` |
+| 9 | Two projects in ONE organization sharing one active template had no test | The scenario the design named and nobody wrote — it is the whole argument for why a template cannot own this field |
+
+Not cycles, but part of the same release: four `InterviewController` docblocks
+still attributed the closing phrases to the participant; the migration fixture
+duplicated the migration's SQL instead of running it; D8's mandate to cite a
+pinning test was unhonoured at all five corrected comments.
 
 ## Superseded tests
 
