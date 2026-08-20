@@ -36,7 +36,7 @@ the failure matrix, and all other `question_context` fields are unchanged.
 ### Requirement: POST /end response body — next_action directive (interview-continuous-flow addendum)
 
 `POST /api/candidate/interview/end` MUST return a JSON body on success — replacing
-today's empty `response()->json(null, 200)` — carrying `completed_competencies` (int),
+today's empty `response()->json(null, 200)` — carrying `ended_competencies` (int),
 `total_competencies` (int), and `next_action` ∈ `{continue, pause, done}`. These values
 MUST be derived from the SAME counters the base "POST /end" requirement's step 4 already
 computes inside its explicit transaction — no new query.
@@ -45,8 +45,8 @@ computes inside its explicit transaction — no new query.
 
 | Condition | `next_action` |
 |---|---|
-| `completed_competencies === total_competencies` (last question) | `done` |
-| Not done, AND `project.pause_every_n_competencies` is non-null AND `completed_competencies % pause_every_n_competencies === 0` | `pause` |
+| `ended_competencies === total_competencies` (last question) | `done` |
+| Not done, AND `project.pause_every_n_competencies` is non-null AND `ended_competencies % pause_every_n_competencies === 0` | `pause` |
 | Otherwise | `continue` |
 
 `done` MUST take precedence over `pause`: a pause is never signalled on the final
@@ -65,7 +65,7 @@ This is purely additive: HTTP 200 on success, the CAS single-winner semantics, t
 
 - GIVEN a project with `pause_every_n_competencies = 3` and 8 competencies; 1 of 8 just completed
 - WHEN `POST /end` returns `200`
-- THEN the body is `{completed_competencies: 1, total_competencies: 8, next_action: 'continue'}`
+- THEN the body is `{ended_competencies: 1, total_competencies: 8, next_action: 'continue'}`
 
 #### Scenario: next_action=pause on the scheduled competency
 
@@ -132,7 +132,7 @@ otherwise address.
 - **Second `error`** (a re-offer already consumed): the competency is TERMINAL. It is
   NEVER selected again, and its `error` status MUST be included in the completion count
   that step 4 of "POST /end" computes, alongside `{completed, timeout, skipped}` — so
-  `completed_competencies` can reach `total_competencies` and `in_valutazione` remains
+  `ended_competencies` can reach `total_competencies` and `in_valutazione` remains
   reachable.
 
 The utterance deletion at re-offer time MUST happen regardless of whether the failed
@@ -184,7 +184,7 @@ session-scoped mutation in this domain (`resolveOwnedSession`).
 - GIVEN a project with 3 competencies; competency 2 has exhausted its single re-offer
   (terminal `error`); competencies 1 and 3 are `completed`
 - WHEN the 3rd `/end` commits
-- THEN `completed_competencies === total_competencies === 3`, the CAS transitions the
+- THEN `ended_competencies === total_competencies === 3`, the CAS transitions the
   participant to `in_valutazione`, and `FinalizeInterview` is dispatched exactly once
 
 #### Scenario: A participant stranded before this change can now complete (regression)
@@ -342,7 +342,7 @@ permanently unreachable for a participant whose only failure was never resolved.
    idempotent, but trigger-emission dedup is C7a's responsibility.
 6. If NOT the last competency: leave `participant.status = 'in_corso'`.
 7. Return HTTP 200, with the response body widened by the "POST /end response body —
-   next_action directive" addendum above (`completed_competencies`, `total_competencies`,
+   next_action directive" addendum above (`ended_competencies`, `total_competencies`,
    `next_action`); this requirement's own scope (transaction atomicity, CAS, idempotency)
    is otherwise unchanged.
 

@@ -204,8 +204,8 @@ Requires PR 3 deployed.
 
 ## Close-out
 
-- [ ] **5.1** — `sdd-verify` against spec, design and this checklist.
-- [ ] **5.2** — Confirm no artifact still disagrees with another (the D13 spec/design conflict was
+- [x] **5.1** — `sdd-verify` against spec, design and this checklist.
+- [x] **5.2** — Confirm no artifact still disagrees with another (the D13 spec/design conflict was
       corrected mid-flight; re-check before archive).
 - [ ] **5.3** — `sdd-archive`: merge the three delta specs into the live specs, including the
       factual correction to `interview-frontend/spec.md:24-25` ("no backend column exists" — the
