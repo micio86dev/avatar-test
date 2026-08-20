@@ -46,6 +46,59 @@ variables. Key differences from local docker-compose values:
 | `REDIS_HOST` | `redis` (compose service name) | Railway Redis private host |
 | `NUXT_PUBLIC_API_BASE` | `http://api:9000/api` | HTTPS API service URL |
 | `NUXT_PUBLIC_APP_ENV` | `local` | `staging` or `production` |
+| `CORS_ALLOWED_ORIGINS` (api) | `http://localhost:3001,http://localhost:3000` | Both deployed Nuxt origins — see below |
+
+## CORS Allowlist (`api`, backoffice-session-refresh-hardening D1)
+
+`api/config/cors.php` reads its allowlist from `CORS_ALLOWED_ORIGINS` — a
+comma-separated list, **no wildcard, no regex pattern**. It MUST contain BOTH
+deployed Nuxt origins in every environment:
+
+- the `backoffice` origin (operator login, session refresh)
+- the `frontend` origin (candidate SSO exchange, interview) — the candidate
+  app also calls `api/*`, so an allowlist covering only `backoffice` silently
+  takes the candidate app down.
+
+```
+CORS_ALLOWED_ORIGINS=https://backoffice.<env>.beai.app,https://frontend.<env>.beai.app
+```
+
+`supports_credentials` is unconditionally `true` (required by the httpOnly
+refresh cookie), which is why the allowlist can never contain `*` — the two
+are mutually exclusive per the Fetch spec, and every browser refuses the
+combination.
+
+## Refresh Tokens Are Database-Backed, Not Redis (backoffice-session-refresh-hardening — corrected)
+
+`App\Support\Auth\RefreshTokenStore` persists refresh-token families in the
+`refresh_tokens` PostgreSQL table (migration
+`2026_08_20_000001_create_refresh_tokens_table.php`), not Redis.
+
+An earlier version of this change stored refresh-token families in Redis and
+required `maxmemory-policy=noeviction` on the instance backing `CACHE_STORE`.
+That was rejected: `api/.env.example` sets `CACHE_STORE=redis`,
+`QUEUE_CONNECTION=redis` and `SESSION_DRIVER=redis` — the SAME Redis instance
+serves cache, queues and sessions. Forcing `noeviction` on it means that once
+memory fills, cache writes and queue pushes fail outright and the application
+breaks. A cache must stay evictable; durable authentication state belongs in
+the database, following the same shape Laravel already uses for
+`password_reset_tokens` and Sanctum's `personal_access_tokens`, plus a
+scheduled `model:prune` of expired/revoked rows (`bootstrap/app.php`'s
+`withSchedule()`, run by `schedule:work`).
+
+There is no Redis eviction-policy deploy gate for refresh tokens anymore —
+`beai:check-redis-eviction` has been removed. `GET /api/health/queue`'s
+`redis_eviction_policy` field still reports the shared cache Redis's actual
+policy for general observability, but nothing requires it to be
+`noeviction` — a cache should normally run an eviction policy, not
+`noeviction`.
+
+**Deploy-risk note**: this is the change's first migration. Railway runs
+`php artisan migrate --force` as a pre-deploy command, so
+`2026_08_20_000001_create_refresh_tokens_table.php` WILL execute against the
+live database on the next deploy. It is purely additive (`CREATE TABLE`, one
+new foreign key to the existing `users` table, no column/table alterations),
+so it is safe to run against a live database with no downtime.
 
 ## Recovering a Locked-Out User
 

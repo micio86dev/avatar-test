@@ -180,12 +180,16 @@ If additional locale codes are added, their `/[locale]/interview/**` patterns MU
 ### Requirement: Pre-join device check
 
 Before entering the live interview, the system MUST present a device-check gate that:
-(a) acquires a camera and microphone stream via a single `getUserMedia` call,
+(a) acquires exactly one live camera and microphone stream at a time, re-acquired via a
+fresh `getUserMedia` call with `deviceId: { exact }` constraints whenever the candidate
+switches camera or microphone, always stopping every track of the previous stream before
+the replacement becomes active — never two live streams concurrently, never a camera left
+hot after a switch,
 (b) verifies the camera produces a live video track,
 (c) verifies the microphone produces audio above an RMS threshold after the candidate speaks,
-(d) hands the camera stream to the proctoring collector without issuing a second
-`getUserMedia`. A candidate MUST NOT be able to proceed to fullscreen until both checks pass.
-All device-check UI copy MUST be i18n-keyed.
+(d) after confirmation, hands the camera stream to the proctoring collector without issuing a
+second `getUserMedia`. A candidate MUST NOT be able to proceed to fullscreen until both checks
+pass. All device-check UI copy MUST be i18n-keyed.
 
 #### Scenario: Both devices confirmed — proceed allowed
 
@@ -205,6 +209,210 @@ All device-check UI copy MUST be i18n-keyed.
 - GIVEN a live video track is present but the candidate does not speak above threshold
 - WHEN the device check timer expires without passing the mic test
 - THEN the mic error state is shown and the proceed control remains disabled
+
+#### Scenario: Device switch releases the previous stream before acquiring the replacement
+
+- GIVEN an active device-check stream from a prior `getUserMedia` acquisition
+- WHEN the candidate switches the camera or microphone via the device picker
+- THEN every track of the previous stream reports `readyState !== 'live'` before the
+  replacement stream's `getUserMedia` call resolves — release-before-replace is an
+  ordering, not a race
+
+#### Scenario: Switch fails mid-flight — nothing left hot, pickers stay usable
+
+- GIVEN a device switch is in flight
+- WHEN the replacement `getUserMedia` call rejects
+- THEN nothing is left live (the previous stream was already released), an actionable
+  error is shown, and the device pickers remain usable so the candidate can choose a
+  different device instead of being stuck
+
+#### Scenario: Stale deviceId on switch — OverconstrainedError ladder
+
+- GIVEN the candidate selects a device whose id is no longer valid (e.g. unplugged
+  between enumeration and selection)
+- WHEN the switch's `getUserMedia` call rejects with `OverconstrainedError`
+- THEN the system retries once with the constraint dropped (unconstrained), and on
+  success reconciles the active selection to the device actually obtained
+
+#### Scenario: Two rapid switches — only the latest stream survives
+
+- GIVEN the candidate switches devices twice in rapid succession, before the first
+  switch's `getUserMedia` call has resolved
+- WHEN both acquisitions eventually resolve
+- THEN only the stream from the LATEST switch becomes active; the superseded stream's
+  tracks are stopped and it never becomes the active stream
+
+#### Scenario: Unmount during a switch — the late-arriving stream is stopped, never activated
+
+- GIVEN a device switch is in flight when the device-check screen unmounts
+- WHEN the switch's `getUserMedia` call resolves after the unmount
+- THEN the late-arriving stream is stopped immediately and never becomes the active
+  stream — the only mechanism that stops a stream that did not exist when the unmount
+  ran
+
+#### Scenario: Microphone unavailable — recoverable, not a dead end
+
+- GIVEN the acquired stream has no audio track, or `AudioContext` construction throws
+- WHEN the device check evaluates the microphone
+- THEN the system reports a `micUnavailable` state instead of leaving the check
+  permanently unresolved; an explicit Retry (release then re-check) reopens it
+
+---
+
+### Requirement: Device preview geometry
+
+The device-check camera preview MUST fill the full width of its content column and
+render at the camera's MEASURED native aspect ratio — never a hardcoded ratio, never
+cropped. The ratio MUST be clamped to `[3/4, 21/9]` so a portrait camera cannot produce
+an overlong box. Before the ratio is known, the preview MUST hold a placeholder rather
+than shift after first paint.
+
+#### Scenario: Ratio unknown before metadata — no layout shift
+
+- GIVEN the device-check screen has just mounted and no video track geometry is known yet
+- WHEN the preview renders
+- THEN a placeholder holds the expected space; once the track's geometry resolves, the
+  common case renders without a visible shift
+
+#### Scenario: Ratio changes on device switch — no crop
+
+- GIVEN an active preview at one camera's aspect ratio
+- WHEN the candidate switches to a camera with a different native aspect ratio
+- THEN the preview updates to the new ratio without cropping the image
+
+#### Scenario: Portrait camera — clamped, letterboxed not cropped
+
+- GIVEN a camera whose native aspect ratio is narrower than `3/4` (e.g. a 9:16 portrait
+  camera)
+- WHEN the preview renders
+- THEN the container is clamped to the `3/4` floor and the video letterboxes rather than
+  being cropped or producing an overlong box
+
+---
+
+### Requirement: Live microphone level meter
+
+The device-check screen MUST expose a live, numeric microphone level (not merely a
+pass/fail boolean) with a non-visual equivalent for screen-reader users.
+
+#### Scenario: Visible level moves as the candidate speaks
+
+- GIVEN the device check is evaluating the microphone
+- WHEN the candidate speaks
+- THEN a visible level indicator moves in response, before the pass state is reached
+
+#### Scenario: Screen reader gets one status announcement, not a continuous live region
+
+- GIVEN a screen-reader user on the device-check screen
+- WHEN the microphone level first crosses the pass threshold
+- THEN exactly ONE status announcement fires (not a continuously updating live region,
+  which would be a screen-reader denial of service), and a static instruction tells the
+  candidate to speak
+
+---
+
+### Requirement: Camera and microphone device selection
+
+The device-check screen MUST let the candidate select which camera and microphone to
+use, populated from `enumerateDevices()` and kept current on the `devicechange` event.
+
+#### Scenario: Device labels populate only post-grant
+
+- GIVEN the candidate has not yet granted camera/microphone permission
+- WHEN the device pickers are populated
+- THEN entries with a blank platform label render a numbered fallback name (e.g.
+  "Camera 1"), and remain selectable
+
+#### Scenario: Picker list updates live on plug/unplug
+
+- GIVEN the device-check screen is open
+- WHEN a camera or microphone is connected or disconnected
+- THEN the corresponding picker's option list updates without a page reload
+
+#### Scenario: Denied permission still renders selectable fallback labels
+
+- GIVEN the candidate has denied camera/microphone permission
+- WHEN the device pickers render
+- THEN they still show numbered fallback labels and remain selectable (selecting one
+  does not itself grant permission, but the control is not disabled or hidden)
+
+---
+
+### Requirement: Device preference persistence
+
+The system MUST persist the candidate's device selection in a cookie readable across
+every interview locale path (the cookie MUST NOT be scoped to a path narrower than `/`,
+since `strategy: 'prefix_except_default'` puts the English locale on
+`/en/interview/...`, which a `/interview`-scoped cookie would not cover). A stored
+device id that no longer exists MUST fall back to the system default, never a dead end,
+and the stored preference MUST be rewritten to whatever was actually obtained.
+
+#### Scenario: Returning candidate gets the same device
+
+- GIVEN a candidate previously selected a specific camera and microphone
+- WHEN they return to the device-check screen on a later visit (same locale path)
+- THEN the same devices are pre-selected and acquired
+
+#### Scenario: Stored device id gone — falls back to default, preference rewritten
+
+- GIVEN a stored device id that is no longer present on the system
+- WHEN the device check runs
+- THEN it falls back to the system default device without dead-ending, and the stored
+  preference is rewritten to the device actually obtained
+
+#### Scenario: Preference honored regardless of locale path segment
+
+- GIVEN a candidate has a stored device preference set while on one locale's interview
+  path
+- WHEN they open the interview on a different locale path (e.g. `/en/interview/...`
+  after `/interview/...`)
+- THEN the same stored preference is honored — the cookie is not scoped to a single
+  locale's path segment
+
+---
+
+### Requirement: Instructional and permission-recovery copy
+
+Every step of the device-check screen MUST carry instructional copy, and a denied
+permission state MUST show a browser-neutral recovery path — no user-agent-specific
+instructions. Zero literal strings: every string MUST be i18n-keyed in both `it` and
+`en`.
+
+#### Scenario: Denied-state recovery copy shown
+
+- GIVEN the candidate has denied camera or microphone permission
+- WHEN the device-check screen renders the failure state
+- THEN browser-neutral recovery guidance is shown (anchored on the address-bar
+  permission control every supported browser exposes), along with a Retry control — no
+  failure state on this screen is terminal
+
+#### Scenario: Full-screen i18n-key coverage across every state
+
+- GIVEN any device-check state (default, error, confirmed)
+- WHEN the rendered output is inspected
+- THEN every visible string resolves through an i18n key present in both `it.json` and
+  `en.json` — zero literal strings
+
+---
+
+### Requirement: Device-check accessibility
+
+The device-check screen MUST be operable and understandable via assistive technology:
+pickers MUST be labelled, the microphone meter MUST have a non-visual equivalent, and
+all instructional copy MUST be reachable by a screen reader.
+
+#### Scenario: Picker accessible name and selection announced on focus
+
+- GIVEN a screen-reader user focuses a device picker
+- WHEN the picker receives focus
+- THEN its accessible name (e.g. "Camera" / "Microphone") and current selection are
+  announced
+
+#### Scenario: Zero axe violations across default/error/confirmed states
+
+- GIVEN the device-check screen in its default, error, and confirmed states
+- WHEN an automated WCAG 2.1 AA accessibility scan runs against each state
+- THEN it reports zero violations, in both Chromium and WebKit
 
 ---
 
