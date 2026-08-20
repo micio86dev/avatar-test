@@ -1398,17 +1398,22 @@ outbound provider request(s), using the same mapping the `avatar-templates`
 capability defines (`TemplatePayload::heygen()` / `::tavus()`).
 
 For HeyGen, avatar-identity fields (`avatar_id`, `avatar_persona.voice_id`,
-`avatar_persona.language`, `interactivity_type`, `video_settings.*`) MUST be
-merged into `POST /v1/sessions/token` — NEVER into `POST /v1/contexts`, which
-accepts only `{name, prompt, opening_text}` and has no concept of avatar
-identity. For Tavus, the template's fields MUST be merged into the single
-`POST /v2/conversations` body.
+`interactivity_type`, `video_settings.*`) MUST be merged into
+`POST /v1/sessions/token` — NEVER into `POST /v1/contexts`, which accepts only
+`{name, prompt, opening_text}` and has no concept of avatar identity. For
+Tavus, the template's fields MUST be merged into the single
+`POST /v2/conversations` body. Neither list includes a language field: per
+`avatar-templates` ("Template config reaches the provider payload"), the
+mapping functions never emit one, so a template MUST NOT be able to set the
+avatar's spoken language, regardless of which provider or which merge-time
+defense (e.g., HeyGen's field allowlist) happens to also apply — the
+invariant holds at the mapper, not at any one filter.
 
 Template fields MUST be merged ON TOP of the platform defaults (see
 "Platform-Default Avatar Identity") but UNDER the composed prompt and opening
 greeting, which the template MUST NOT be able to override. The template MAY
 only add fields describing the avatar's appearance and voice; it MUST NOT be
-able to override what the interview asks.
+able to override what the interview asks, or the language it is asked in.
 
 Resolving the active template, and mapping its config, MUST NOT be able to
 fail the `/start` request. Any error while resolving or mapping the template
@@ -1473,6 +1478,44 @@ interview-specific fields as `competency_code`/`question_index`/`system_prompt`
 - THEN the outbound request carries BEAI's own composed prompt and opening
   greeting, not the template's override
 
+#### Scenario: A template's stored language, if any, is never merged into either provider's payload
+
+- GIVEN organization O's active template config still carries a `language`
+  key (e.g., a row written before this change), differing from O's project
+  language
+- WHEN a candidate of organization O calls `POST /start`
+- THEN neither `POST /v1/sessions/token` (HeyGen) nor `POST /v2/conversations`
+  (Tavus) carries a template-sourced language value — the merged language
+  equals O's own project language in both cases
+
+#### Scenario: A stale template language never crosses into another organization's session
+
+- GIVEN organization A has a project with `language = 'it'` and an active
+  template whose stored config still carries `language: 'fr'`
+- AND organization B has an unrelated active template and a project with
+  `language = 'en'`
+- WHEN a candidate of organization A calls `POST /start`
+- THEN the resulting avatar language is Italian — never French (A's own
+  stale template value) and never English (organization B's project or
+  template) — template resolution and language sourcing both stay scoped to
+  `organization_id`
+
+---
+
+> Informational (no wording change): "POST /start question_context —
+> localized completion phrases" already requires `end_phrase`/`final_phrase`
+> "localized to the project language" and is unaffected by this delta — the
+> code (`InterviewController`'s two `buildSuccessResponse(...)` call sites)
+> currently contradicts this ALREADY-RATIFIED requirement by sourcing from
+> `participant.language` instead; bringing the code into line is an
+> implementation task, not a spec change.
+>
+> Informational (no wording change): "Avatar Identity Belongs to the
+> Session-Token Call" (`avatar_persona.{voice_id, context_id, language}` on
+> `POST /v1/sessions/token`) stays TRUE and unchanged — the avatar's language
+> still rides `/sessions/token`; only its SOURCE moved from
+> template-or-platform-default to platform-default-only.
+
 ---
 
 ### Requirement: Platform-Default Avatar Identity When No Template Exists
@@ -1491,7 +1534,12 @@ sourced from the PROJECT's language (falling back to
 multi-tenant and multilingual, so the avatar's language MUST NOT be a fixed
 deployment-wide value). For Tavus, `POST /v2/conversations` MUST always carry
 `replica_id` and `persona_id` sourced from configuration
-(`interview.tavus.{replica_id, persona_id}`).
+(`interview.tavus.{replica_id, persona_id}`), AND `properties.language` —
+nested under `properties`, never top-level — sourced from the PROJECT's
+language, translated into Tavus's own vocabulary (`it` → `italian`,
+`en` → `english`) the same way a template's language value was translated
+before this change, falling back to the platform's own configured default
+language only when the caller supplies none.
 
 Precedence MUST be, weakest to strongest: (1) platform default, (2) the
 organization's active template, (3) provider-owned protocol constants
@@ -1500,12 +1548,23 @@ call-specific interview content. Merging MUST be RECURSIVE
 (`array_replace_recursive`, never a shallow merge) so that a template setting
 one key under `avatar_persona` cannot silently drop the platform default's
 sibling keys. A configured value that is unset or empty MUST be OMITTED from
-the body, never sent as `""` or `null`.
+the body, never sent as `""` or `null`. For the avatar's spoken language
+specifically, this precedence collapses to a single source: the platform
+default (the project's language) is the ONLY source of `avatar_persona.language`
+(HeyGen) and `properties.language` (Tavus) — a template's config is never
+mapped into either field, even for a stored row that still carries one (see
+`avatar-templates`, "Template config reaches the provider payload").
 
 (This behaviour was hotfixed after the wire-contract specs were written —
 HeyGen 0.22.1, a production 422 `avatar_id: Field required`, and Tavus 0.22.2,
 a production 400 demanding `replica_id`/`persona_id`. Both had the same root
-cause: identity came ONLY from a template no organization had.)
+cause: no organization is required to have an active `AvatarTemplate` with
+those fields set — a state the product never guarantees for any organization,
+seeded or not. The platform defaults make that a supported state.)
+(Previously: Tavus carried no language platform default at all — the
+template was its only language source. The hotfix parenthetical also
+asserted "no organization" had an active template, a claim demo seeding had
+already made false; it now states the invariant instead of counting rows.)
 
 #### Scenario: An organization with no template still sends a complete HeyGen identity
 
@@ -1516,12 +1575,16 @@ cause: identity came ONLY from a template no organization had.)
   `avatar_persona.language`, `interactivity_type` and `video_settings.quality`
 - AND the provider does not reject the request for a missing `avatar_id`
 
-#### Scenario: An organization with no template still sends a complete Tavus identity
+#### Scenario: An organization with no template still sends a complete Tavus identity, including language at its own path
 
-- GIVEN organization O has no active `AvatarTemplate` and
-  `interview.tavus.{replica_id, persona_id}` are configured
+- GIVEN organization O has no active `AvatarTemplate`,
+  `interview.tavus.{replica_id, persona_id}` are configured, and O's project
+  has `language = 'it'`
 - WHEN a candidate of O calls `POST /start`
-- THEN `POST /v2/conversations` carries `replica_id` and `persona_id`
+- THEN `POST /v2/conversations` carries `replica_id`, `persona_id`, and
+  `properties.language = 'italian'` — nested under `properties`, never
+  top-level; a test asserting only that a language value is present, without
+  asserting this path, does NOT satisfy this scenario
 
 #### Scenario: A template overrides the platform default per key, not wholesale
 
@@ -1530,6 +1593,16 @@ cause: identity came ONLY from a template no organization had.)
 - THEN `avatar_persona.voice_id` is the template's value AND
   `avatar_persona.language` from the platform default is still present — the
   recursive merge does not replace the whole `avatar_persona` node
+
+#### Scenario: A template can never override the avatar's language, even if it tries
+
+- GIVEN a template whose config carries a `language` value different from the
+  project's language (a stale, pre-migration row)
+- WHEN the `/sessions/token` (HeyGen) or `/v2/conversations` (Tavus) body is
+  built
+- THEN the platform default's language — the project's — is what reaches the
+  provider; the template's stored value never appears anywhere in the
+  outbound body
 
 #### Scenario: The avatar speaks the project's language, not a deployment-wide constant
 
