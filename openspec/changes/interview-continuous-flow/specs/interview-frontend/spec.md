@@ -99,6 +99,41 @@ new for the second time with no explanation.
 - WHEN the candidate reaches it
 - THEN standard first/next/resume opening copy is shown, never the `reoffer` variant
 
+### Requirement: Live per-question timer suspends and resumes across a mute-pause
+
+The per-question timer's remaining time MUST be preserved across the ratified
+candidate-initiated mute-pause (`live → paused`): pausing stops the countdown; resuming
+(`paused → live`) continues it from the same remaining value, never re-arming the full
+5-minute limit. A new competency's timer always starts from the full limit, keyed on the
+`InterviewSession` id, independent of any pause activity on a prior competency.
+
+(This corrects a severe defect: with the countdown owned by a component the pause
+unmounted, every resume re-armed a full five minutes, so a candidate who paused
+repeatedly could extend a single question indefinitely. Fixed and released as `frontend`
+v0.6.4.)
+
+#### Scenario: Pausing suspends the countdown
+- GIVEN a live question with 3 minutes 12 seconds remaining
+- WHEN the candidate presses Pause
+- THEN the countdown stops advancing and holds at 3:12
+
+#### Scenario: Resuming continues from the same remaining value
+- GIVEN the countdown was suspended at 3:12 by a mute-pause
+- WHEN the candidate presses Resume
+- THEN the countdown resumes counting down from 3:12, not from the full 5-minute limit
+
+#### Scenario: A new competency always starts from the full limit
+- GIVEN the previous competency's timer was paused and resumed one or more times
+- WHEN the candidate advances to a new competency (a new `InterviewSession` id)
+- THEN its timer starts fresh at the full 5-minute limit, independent of the prior
+  competency's pause history
+
+#### Scenario: Repeated pausing cannot extend a question indefinitely (regression)
+- GIVEN a candidate pauses and resumes a live question multiple times
+- WHEN the cumulative live time (excluding paused intervals) reaches 5 minutes
+- THEN the question times out with `ended_reason = 'timeout'` — pausing never grants
+  additional time beyond the original 5-minute limit
+
 ## MODIFIED Requirements
 
 ### Requirement: Interview session loop — endpoint call order
@@ -233,12 +268,18 @@ competency (no auto-advance)" no longer holds.)
 The system MUST present the following named screens, each with all copy i18n-keyed
 (locale from the candidate JWT language claim, minimum it/en):
 
-**State machine:** `idle → device_check → connecting → live → end_of_question → done | error | terminal`
-(Previously: included a separate `paused` state entered from `end_of_question` on a
-candidate-optional pause. That between-competency candidate choice is removed — SA-04's
-scheduled pause is the only between-competency pause, and it reuses `end_of_question`
-directly as the pause screen. The independent, ratified, candidate-initiated mute-pause
-during a `live` question is unaffected and unchanged by this delta.)
+**State machine:** `idle → device_check → connecting → live ⇄ paused → end_of_question → done | error | terminal`
+(Previously: this line omitted `paused` entirely, contradicting the claim elsewhere in
+this delta that the ratified live mute-pause is unaffected — that pause **is** the
+`paused` state in shipped code (`useInterviewSession.ts:573-595`, `frontend` v0.6.3).
+Corrected per design decision **D13**: `paused` survives, with `live` as its sole entry
+AND exit — `live → paused` (Pause) and `paused → live` (Resume, now unconditional). What
+is actually removed is narrower than previously stated: only the
+**between-competency, candidate-optional** pause — the `end_of_question → paused` edge
+and the `paused → end_of_question` fallback (the `pausedFrom` bookkeeping it required) are
+deleted, because `end_of_question` becomes the SA-04 scheduled-pause screen and a Pause
+control on a pause screen is meaningless. The `live ⇄ paused` edges themselves are
+untouched by this change.)
 
 **`terminal` vs `error` distinction:**
 - `terminal` (no exit, no retry): `403` from any endpoint; absent/empty `end_phrase` or `final_phrase` (version mismatch / ops error). Shows a static localized screen; no retry control.
@@ -248,7 +289,8 @@ during a `live` question is unaffected and unchanged by this delta.)
 |---|---|---|---|
 | Consent | `idle` | Page mount; consent not yet accepted | Candidate accepts consent → `device_check` |
 | Device Check | `device_check` | Consent accepted | Both camera + mic confirmed → `connecting` |
-| Live Interview | `live` | `/start` returns `201` and provider is `ready` | Avatar signals completion / timer expires → `next_action` decides the destination; `403` → `terminal`; `502` → `error` |
+| Live Interview | `live` | `/start` returns `201` and provider is `ready` | Avatar signals completion / timer expires → `next_action` decides the destination; `403` → `terminal`; `502` → `error`; candidate presses Pause → `paused` |
+| Pause (live mute) | `paused` | Candidate presses Pause during `live`; mic muted, provider session kept alive | Candidate presses Resume → `live`, mic unmuted (sole destination) |
 | End of Question (SA-04 pause screen) | `end_of_question` | `/end` returns `200` with `next_action = 'pause'` — scheduled pause only, never candidate-optional | Candidate presses Resume → `connecting` (next `/start`) |
 | Done | `done` | `/end` returns `200` with `next_action = 'done'` | Terminal (no exit) |
 | Error + Retry | `error` | `502`, network failure, or 3× `provider_busy` | Candidate presses Retry → `connecting` (retry counter reset) |
@@ -261,11 +303,13 @@ enter `end_of_question` at all — it calls `POST /start` immediately and transi
 straight to `connecting`.
 
 (Previously: the table's `End of Question` row entry trigger was "`/end` returns `200`...
-and competencies remain," i.e. every non-final competency; and a separate `Pause / Resume`
-row existed for the candidate-optional `paused` state, entered by pressing Pause from
-`end_of_question`. Both are corrected above: the interstitial is conditional on the
-server's scheduled-pause directive, not on "competencies remain," and the candidate-choice
-pause row is removed.)
+and competencies remain," i.e. every non-final competency, and this note claimed the
+`Pause / Resume` row was removed outright. Corrected per **D13**: the interstitial is
+conditional on the server's scheduled-pause directive, not on "competencies remain" — that
+part still holds. But the row removal claim was too broad and is narrowed here: only the
+**between-competency** Pause/Resume row (`end_of_question → paused → end_of_question`) is
+removed. The live mute-pause row (`Pause (live mute)`, above) is retained, with a single
+entry edge from `live` and Resume returning unconditionally to `live`.)
 
 No literal strings MAY appear in Vue component templates or scripts. Every user-visible
 string MUST be an i18n key resolved at runtime.
@@ -309,3 +353,25 @@ string MUST be an i18n key resolved at runtime.
 - WHEN the candidate completes competencies 1 through 8 in order
 - THEN `end_of_question` (the SA-04 pause screen) is entered after the 3rd and 6th
   competency, and at no other point
+
+#### Scenario: The ratified live mute-pause is untouched by this change (D13 regression guard)
+
+- GIVEN a candidate on a `live` question
+- WHEN the candidate presses Pause
+- THEN the microphone is muted and the provider session stays alive (state transitions to
+  `paused`, never through `end_of_question`); pressing Resume unmutes the microphone and
+  returns unconditionally to `live`
+
+#### Scenario: Pause from end_of_question is a no-op (edge removed)
+
+- GIVEN the candidate is on the `end_of_question` (SA-04 pause) screen
+- WHEN any residual Pause affordance is invoked
+- THEN nothing happens — the `end_of_question → paused` edge no longer exists; the only
+  way to leave `end_of_question` is Resume → `connecting`
+
+#### Scenario: paused implies avatarMounted — the in-avatar resume control is always reachable
+
+- GIVEN the candidate is in the `paused` state
+- WHEN the screen is inspected
+- THEN the avatar player remains mounted and the resume control is reachable from within
+  it; no separate, unreachable "standalone paused" surface exists

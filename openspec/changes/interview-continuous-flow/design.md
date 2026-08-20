@@ -356,6 +356,78 @@ candidate watches the avatar vanish into grey boxes mid-conversation.
 The **first** connect keeps today's skeleton: it follows a device check the candidate just
 interacted with, which is a different expectation from an avatar disappearing mid-interview.
 
+### D13 — `paused` SURVIVES as a state, with one entry edge; `pausedFrom` is deleted
+
+The delta spec's state-machine line
+(`specs/interview-frontend/spec.md:236`) currently reads
+`idle → device_check → connecting → live → end_of_question → done | error | terminal`
+and the parenthetical at `:240-241` says the ratified live mute-pause is *"unaffected and
+unchanged"*. **Those two statements cannot both hold**: the shipped implementation of that ratified
+mute-pause **is** the `paused` state (`useInterviewSession.ts:573-595`, released in `frontend`
+v0.6.3). A machine without `paused` is not the machine the code implements.
+
+**Choice**: `paused` stays. Its `live` entry edge is untouched. Its `end_of_question` entry edge is
+**removed**, and the `pausedFrom` bookkeeping that existed only to serve that second edge is deleted
+with it.
+
+| Edge | Before (v0.6.3) | After | Why |
+|---|---|---|---|
+| `live → paused` | Pause control during `live`; mic muted; provider session **stays up** | **unchanged** | Ratified. Untouched by this change. |
+| `paused → live` | Resume; mic unmuted | **unchanged**, and now unconditional | Sole destination — see below. |
+| `end_of_question → paused` | Pause control on the between-competency screen | **REMOVED** | `end_of_question` becomes the SA-04 *scheduled pause* screen. A Pause control on a pause screen is meaningless, so the control is removed — and with it the only trigger for this edge. |
+| `paused → end_of_question` | `resume()`'s `pausedFrom ?? 'end_of_question'` fallback | **REMOVED** | Unreachable once the entry edge is gone, and actively harmful — see below. |
+
+**Why `pausedFrom` is deleted rather than left in place.** With a single entry edge it can only ever
+hold one value; a variable with one possible value is a comment, not state. More concretely, its
+`?? 'end_of_question'` fallback changes meaning under the new flow. Previously `end_of_question` was
+the ordinary between-competency screen, so landing there was harmless. Under this change it is the
+SA-04 scheduled-pause screen whose Continue control calls `/start` for the **next** competency — so
+the same fallback, firing during a live competency, tears the avatar down and restarts the current
+question from its opening line. (It does not *skip* the competency: the session is still `in_corso`,
+so `resolveNextCompetency()`'s untouched RESUME branch returns the same competency. The loss is the
+in-progress turn, not the competency.) Shipped code that outlives its reason does not stay inert; it
+acquires a new and worse meaning. It goes.
+
+**Two invariants that MUST be preserved — the v0.6.3 fix depends on both:**
+
+1. **`pause()` and `resume()` assign `state.value` directly and MUST NOT be routed through
+   `transitionTo()`.** `transitionTo()` calls `clearActiveProvider()` for
+   `end_of_question | done | error | terminal` (`:221-225`); `paused` is deliberately absent from
+   that list. Routing pause through it as a "consistency" cleanup would unmount `AvatarPlayer` and
+   destroy the provider session the ratified pause exists to keep alive.
+2. **The paused panel INSIDE the avatar branch of `session.vue` (`:110-120`) stays; the standalone
+   `paused` section (`:146-158`) is removed.** With `live` as the only entry, `paused` now implies
+   `avatarMounted`, so the in-avatar panel is the only reachable one and the resume control stays
+   reachable — which is exactly the defect v0.6.3 repaired. The standalone section becomes dead: its
+   own comment (`:107-108`) states its sole purpose is *"the between-competencies pause, where the
+   provider has already been unpublished"*, and this change removes that pause. Leaving it would
+   leave a second, unreachable resume affordance for a future reader to wire back up.
+
+The invariant `paused ⇒ avatarMounted` is what makes removing the standalone section safe, so it MUST
+be pinned by a unit test rather than left as a reading of the v-if chain. Nothing clears the provider
+while paused: `clearActiveProvider()` is reached only from `transitionTo()`'s terminal list,
+`confirmDevices()`, and `teardown()`, none of which run from `paused`.
+
+**This design does not narrow the `pause()` guard as a matter of taste** — it narrows it because the
+delta spec removes the product decision the second branch implemented. Retaining an unreachable
+`end_of_question` branch would leave a removed product decision encoded in shipped code, which is how
+it gets re-enabled by someone restoring "the missing Pause button".
+
+**Spec amendment required — route this back to `sdd-spec`.** The design and the delta spec disagree
+today, and the delta spec is the artifact that is wrong:
+
+- `:236` MUST include `paused`, e.g.
+  `idle → device_check → connecting → live ⇄ paused → end_of_question → done | error | terminal`.
+- `:237-241` MUST stop implying `paused` is gone. The correct claim is narrower: the
+  **between-competency, candidate-optional** pause is removed; the `paused` **state survives** with
+  its `end_of_question` entry edge removed and `live` as its sole entry and exit.
+- The screen table at `:247-257` MUST regain a row: **Pause (live mute)** | `paused` | entry
+  "candidate presses Pause during `live`; mic muted, provider session kept alive" | exit "candidate
+  presses Resume → `live`, mic unmuted".
+- The parenthetical at `:263-268` currently says the "Pause / Resume row is removed". That MUST be
+  narrowed to: the *between-competency* Pause/Resume row is removed; the live mute-pause row is
+  retained with a single entry edge.
+
 ---
 
 ## Sequence: auto-advance and the bounded re-offer
@@ -446,12 +518,13 @@ no scope at all.
 | `api/app/Services/Conversation/OpeningTextComposer.php` | Modify | `'retry'` variant (**D10**) |
 | `api/lang/{it,en}/interview.php` | Modify | `opening.retry` (**D10**) |
 | `api/openapi.json` → `frontend/openapi.json`, `frontend/app/types/api.ts` | Regenerate | Scramble → typed client; never hand-edited |
-| `frontend/app/composables/useInterviewSession.ts` | Modify | `callEnd` returns the directive; `advanceAfterQuestion(directive)`; `competencies` option deleted; server-fed progress; Skip removed; `EndQuestionReason` narrows to `'timeout'` (**D11**) |
-| `frontend/app/pages/interview/session.vue` | Modify | Skip control removed; `end_of_question` becomes the scheduled-pause screen; transition panel; real progress total (**D11**, **D12**) |
+| `frontend/app/composables/useInterviewSession.ts` | Modify | `callEnd` returns the directive; `advanceAfterQuestion(directive)`; `competencies` option deleted; server-fed progress; Skip removed; `EndQuestionReason` narrows to `'timeout'` (**D11**); `pause()` guard narrows to `live`, `pausedFrom` deleted, `resume()` returns unconditionally to `live` (**D13**) |
+| `frontend/app/pages/interview/session.vue` | Modify | Skip control removed; `end_of_question` becomes the scheduled-pause screen (its secondary Pause control removed); transition panel; real progress total (**D11**, **D12**); standalone `paused` section `:146-158` removed, in-avatar paused panel `:110-120` **kept** (**D13**) |
 | `frontend/i18n/locales/{it,en}.json` | Modify | `interview.live.skip` removed; `interview.scheduled_pause.*`, `interview.transition.*` added |
 | `api/app/Http/Controllers/Candidate/InterviewController.php` `:845-864` | **Unchanged** | `replaceUtterances()` guard is correct (**F3**) |
 | `backoffice/**` | **Unchanged** | Already ships `pause_every_n_competencies` |
 | `openspec/specs/interview-frontend/spec.md` `:24-25`, `:441`, `:450-462`, `:858-861`, `:867-871`, `:884` | Delta | `:24-25` is a factual correction (`sdd-spec` owns it) |
+| `openspec/changes/interview-continuous-flow/specs/interview-frontend/spec.md` `:236`, `:237-241`, `:247-257`, `:263-268` | **Delta correction owed** | The delta drops `paused` from the state machine while claiming the ratified live pause is unchanged. `sdd-spec` must restore `paused` and narrow the removal to the between-competency edge (**D13**) |
 | `openspec/specs/interview-session/spec.md` | Delta | Bounded re-offer, shared reset, `/start` + `/end` contracts |
 
 ---
@@ -479,6 +552,10 @@ being removed and must be corrected before any GREEN.
 | Unit (frontend) | Directive → transition matrix incl. `null → pause`, unknown → `pause`, `409 → noop` (**D11**) | Vitest, mocked `candidateFetch` |
 | Unit (frontend) | `isValidStartResponse` still passes when the new fields are **absent** (rollback guard) | Vitest |
 | Unit (frontend) | `i18n-interview-keys`: `interview.live.skip` gone; `scheduled_pause.*`/`transition.*` present in it **and** en | Existing harness |
+| Unit (frontend) | **Ratified live pause is untouched**: `pause()` from `live` mutes the mic, keeps the provider session alive, and `resume()` returns to `live` and unmutes (**D13**) | Vitest — the v0.6.3 regression guard |
+| Unit (frontend) | `pause()` from `end_of_question` is a **no-op** (edge removed), and `resume()` from `paused` can only land on `live` | Vitest |
+| Unit (frontend) | Invariant `paused ⇒ avatarMounted`, so the in-avatar resume control is always reachable — pinned before the standalone section is removed (**D13**) | Vue Test Utils on `session.vue` |
+| E2E | Pause during a live question, resume, and finish the same competency — no restart, no lost turn | Playwright chromium + webkit |
 | E2E | `pause_every_n = null`, N > 1: zero clicks between competencies, progress `1/N…N/N`, done screen | Playwright chromium + webkit |
 | E2E | `pause_every_n = 3`: pause screen after 3 and 6 only | Playwright |
 | Coverage | Candidate state machine ≥ ~95% per CLAUDE.md; api ≥ 85%; frontend ≥ 85% | `--coverage --min` gates |
@@ -528,6 +605,12 @@ projects become genuinely continuous.
       answerable after ship.
 - [ ] **`opening.retry` copy (it/en)** needs authoring against the **D10** stand-alone constraint.
       Wording is product; the constraint is not.
+- [ ] **Does the 5-minute per-question timer keep running while the candidate is paused?** Two
+      ratified decisions meet here and neither addresses the other: the timer stays, and the live
+      mute-pause stays. Today `endQuestion()` guards on `state === 'live'`, so a timer expiry that
+      lands during `paused` is swallowed and the question runs past its cap. Surfaced while writing
+      **D13**; not settled here because "pause the clock" and "the cap is wall-clock" are both
+      defensible product answers with different fairness implications.
 - [ ] **The `question_index` off-by-one (F2)** — `-1` for the first competency of every API-created
       project. Deliberately **not** fixed here (persisted column + shipped contract field + backfill
       decision). Should be raised as its own change; **D6** ensures this one does not depend on it.
