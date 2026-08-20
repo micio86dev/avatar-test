@@ -308,6 +308,43 @@ task test:load
 
 ---
 
+## Local Dev Cookie Story (backoffice-session-refresh-hardening D4/D11, A2/A3)
+
+The `beai_refresh` cookie is `HttpOnly; Secure; SameSite=None; Path=/api/auth/refresh`
+**unconditionally, in every environment including local dev** — there is deliberately no
+`cookie_secure` config knob (design D4). `Secure` requires a "secure context"; on
+`http://localhost` browsers grant an exemption for `Secure`, but `SameSite=None` still
+requires `Secure` to be present, so the assumption (A2) is that the `http://localhost`
+secure-context exemption is enough for local dev without real TLS.
+
+**A3 — the highest-risk assumption in this whole change — was verified EMPIRICALLY by
+`backoffice/tests/e2e/session-cookie.spec.ts` (D11) and found FALSE for WebKit** in this
+environment: WebKit **rejects** storing a `Secure` cookie over plain `http://localhost`.
+Chromium accepts it; WebKit does not. The gate is failing on `webkit` by design — per D11
+it must fail CI, not fail silently — and that failure is the accurate, expected signal
+until the fallback below is actually wired, not a bug in the test.
+
+**Pre-decided fallback (NOT yet implemented — task 6.3):** serve the Playwright
+`webServer` (and, for parity, the docker-compose stack) over HTTPS with a locally trusted
+certificate via [`mkcert`](https://github.com/FiloSottile/mkcert). `mkcert` is **not**
+part of the pinned toolchain above and was not installed in the apply session that found
+this — per the Dependency Resolution Policy (D37), adding a new local tool is a decision
+for a human, not something to silently install mid-implementation. Until this is wired:
+
+- `webkit` in `backoffice/tests/e2e/session-cookie.spec.ts` will keep failing locally and
+  in CI. **Do not weaken the cookie** (drop `Secure`, fall back to `SameSite=Lax`, or add
+  a `cookie_secure` env knob) to make it pass — that reopens exactly the exposure D4
+  exists to close.
+- Chromium's E2E coverage of the cookie mechanism is unaffected and remains the
+  authoritative signal for the `chromium` project.
+- To wire the fallback when approved: `brew install mkcert && mkcert -install`, generate
+  a `localhost`/`127.0.0.1` cert pair, point `playwright.config.ts`'s `webServer.command`
+  at an HTTPS-capable static server (`serve` supports `--ssl-cert`/`--ssl-key`), and
+  update `webServer.url`/`use.baseURL` to `https://`. Re-run
+  `session-cookie.spec.ts --project=webkit` to confirm before removing this note.
+
+---
+
 ## Docker Image Builds (local verification)
 
 ```bash
