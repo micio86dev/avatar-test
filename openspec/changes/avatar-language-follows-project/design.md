@@ -47,13 +47,29 @@ against Tavus would send no language and the null path would be untested. See **
 resolved once at `:91`. The edit is `$participant->language` → `$ctx->language` — no new parameter,
 no new query, no new relation load. See **D7**.
 
-**F7 — retiring the demo's `language` orphans a config surface, and one neighbouring key must
-survive.** `DemoWriter.php:152` reads `$identity['heygen']['language']`, which comes from
-`DemoDataset::avatarIdentity()` (`:712-724`, `:718`) reading `config('interview.demo.heygen.language')`
-(`config/interview.php:196`). All three go with it, plus the `@return` shape at `DemoDataset.php:708`.
-`config('interview.heygen.language')` (`:83`) — the *provider* key, a deliberately separate surface per
-its own docblock — **MUST NOT** be touched: it is HeyGen's null-`$ctx` fallback and the sole reason
-`ProviderSmokeCheck` works today.
+**F7 — retiring the demo's `language` orphans a config surface, and the key that must survive is a
+visual near-twin of the key that must go.** `DemoWriter.php:152` reads
+`$identity['heygen']['language']`, which comes from `DemoDataset::avatarIdentity()` (`:712-724`,
+`:718`) reading `config('interview.demo.heygen.language')`. That chain goes, plus the `@return` shape
+at `DemoDataset.php:708`.
+
+**The trap is that the two config keys are byte-identical expressions reading the same env vars, 113
+lines apart:**
+
+| Key | Line | Expression | Fate |
+|---|---|---|---|
+| `interview.heygen.language` | `config/interview.php:83` | `env('HEYGEN_LANGUAGE', env('LIVEAVATAR_LANGUAGE', 'it'))` | **SURVIVES — MUST NOT BE TOUCHED** |
+| `interview.demo.heygen.language` | `config/interview.php:196` | `env('HEYGEN_LANGUAGE', env('LIVEAVATAR_LANGUAGE', 'it'))` | **REMOVED** |
+
+The right-hand column is the only difference between them. `interview.heygen.language` is the
+**provider** surface — HeyGen's null-`$ctx` fallback (`HeygenProvider.php:272`), spec-ratified at
+`interview-session/spec.md:1258-1262`, and the sole reason `interview:smoke-check` resolves a language
+today. `interview.demo.heygen.language` is `beai:demo-seed`-scoped and dies with the demo fixture.
+`config/interview.php:64-72` states the separation is deliberate — *"this key is DELIBERATELY a
+separate config surface"* — but the two literals are indistinguishable at a glance, and a cleanup that
+deletes the wrong one **removes the platform default's fallback and reintroduces the 0.22.1 outage
+class** (the docblock at `:76-79` says as much about `avatar_id`). The env vars `HEYGEN_LANGUAGE` /
+`LIVEAVATAR_LANGUAGE` are **kept**, because `:83` still reads them; only the demo consumer goes.
 
 **F8 — the backoffice form is spec-driven, so the i18n removal is cleanup and the deploy order is
 one-directional.** `AvatarTemplateForm.vue` renders `$t(field.label_key)` (`:137`) and
@@ -68,11 +84,36 @@ project language label — the very field this change makes authoritative.
 `?`, which PDO reads as a parameter placeholder. The migration must use the function form
 `jsonb_exists(config, 'language')`. See **D6**.
 
-**F10 — a fourth census comment exists that the proposal did not list.**
-`ActiveTemplateResolver.php:12-15`: *"that is not defensive coding — it is the state EVERY existing
-organization is in the moment this ships."* Same claim, same falsehood (`DemoWriter.php:143-163`
-seeds an active template), same file family. Deliverable 11 covers **four** sites, not three. Archived
-copies under `openspec/changes/archive/**` are historical record and are **not** edited.
+**F10 — the census claim appears FIVE times, not three, and the two extra sites change what kind of
+finding this is.** The proposal listed three. Two more were found by verifying those three:
+
+| # | Site | Text | Source |
+|---|---|---|---|
+| 1 | `HeygenProvider.php:182` | *"No org has one today, so `$templateFields` was `[]`"* | proposal F1 |
+| 2 | `TavusProvider.php:82` | *"No org has one today"* | proposal F1 |
+| 3 | `interview-session/spec.md:1278` | *"a template no organization had"* — **ratified spec** | proposal F1 |
+| 4 | `ActiveTemplateResolver.php:13` | *"it is the state EVERY existing organization is in the moment this ships"* | **this design** |
+| 5 | `config/interview.php:61-62` | *"sourced avatar_id/voice_id/language ONLY from the org's active `AvatarTemplate`, **and NO org has one today**"* | **coordinator, verified here** |
+
+Site 5's docblock says it **twice**: `:72` adds *"this is only the fallback for the (today: universal)
+case where it does not."* Both are corrected as one edit.
+
+All five are false: `DemoWriter::writeAvatarTemplates()` (`:143-163`) seeds an **active** HeyGen
+template carrying a language, and `ProjectCompetenciesTest.php:75-76` asserts exactly one active
+template exists.
+
+**Why five instead of three reframes the finding.** Four of the five were written by *different*
+fixes at *different* times — C14's template feature, hotfix 0.22.1, hotfix 0.22.2, and the ratified
+spec that recorded them — and each author verified the claim before writing it. Every one of them was
+**correct on the day it was written**. This is not four instances of carelessness; it is one
+*recurring* failure mode with a shared shape: **a comment that describes the state of the DATA rather
+than the guarantee of the CODE.** Nothing in the process re-reads such a sentence when the data moves,
+because nothing knows it depends on data at all. Site 5 is the sharpest illustration — it sits
+directly above the config keys this change depends on (F7), so the next person cleaning up those keys
+reads a false premise first.
+
+Archived copies under `openspec/changes/archive/**` carry the same phrasing and are **not** edited —
+they are the historical record of what was believed when they were written.
 
 **F11 — the migration cannot reach template files already exported.**
 `AvatarTemplatePortabilityController.php:127` runs the same `ConfigValidator`, so a JSON export taken
@@ -328,28 +369,62 @@ about per-candidate language, explicitly out of scope (open question 2).
 
 ### D8 — Comments state the invariant, never the census
 
-**Choice.** Four sites are corrected. Every replacement describes what the code **supports**; none
-states how many organizations are in a given state.
+**Choice.** **Five** sites are corrected (F10). Every replacement describes what the code
+**guarantees**; none states how many organizations are in a given state.
 
-| Site | Current claim | Replacement states |
-|---|---|---|
-| `HeygenProvider.php:182` | *"No org has one today, so `$templateFields` was `[]`"* | Identity is sourced from the platform default and **may** be overridden per key by an active template; the 0.22.1 outage happened because there was **no** platform default. |
-| `TavusProvider.php:82-83` | *"No org has one today"* | Same, for the 0.22.2 400. |
-| `ActiveTemplateResolver.php:14-15` (**F10, new**) | *"it is the state EVERY existing organization is in"* | `null` is a **supported** resolution, not an exceptional one; the caller must degrade to platform defaults. |
-| `interview-session/spec.md:1278` | *"a template no organization had"* | *"a template that was optional and frequently absent"* — `sdd-spec` owns the wording. |
+| # | Site | Current claim | Replacement states |
+|---|---|---|---|
+| 1 | `HeygenProvider.php:182` | *"No org has one today, so `$templateFields` was `[]`"* | Identity is sourced from the platform default and **may** be overridden per key by an active template; the 0.22.1 outage happened because there was **no** platform default — not because templates were rare. |
+| 2 | `TavusProvider.php:82-83` | *"No org has one today"* | Same, for the 0.22.2 400. |
+| 3 | `ActiveTemplateResolver.php:13` (F10) | *"it is the state EVERY existing organization is in"* | `null` is a **supported** resolution, not an exceptional one; every caller must degrade to platform defaults. |
+| 4 | `config/interview.php:61-62` **and** `:72` (F10) | *"NO org has one today"* / *"the (today: universal) case"* | These keys are the **unconditional floor** for any request where the active template sets no value; that is a permanent contract, not a description of current tenants. |
+| 5 | `interview-session/spec.md:1278` | *"a template no organization had"* | *"a template that was optional and frequently absent"* — `sdd-spec` owns the final wording. |
 
-**Rationale.** All four are false as written: `DemoWriter::writeAvatarTemplates()` (`:143-163`) seeds
-an **active** HeyGen template with a language, and `ProjectCompetenciesTest.php:75-76` asserts exactly
-one active template exists. The next reader of `buildSessionTokenBody()` reasons from `:182` and
-concludes the template path is dead code.
+Site 4 is corrected **without touching the surrounding separation rationale** (`:64-72`,
+`:74-79`), which is a statement about code structure and remains true and load-bearing — it is what
+F7's near-twin trap depends on being read.
 
-**The rule, and why it is a design decision rather than a style note:** a comment that counts rows is
-a comment that expires. Its truth depends on data the reader cannot see, in an environment the
-comment cannot name, at a time the comment does not record — so it cannot be verified, cannot be
-tested, and decays silently into a confident falsehood. An invariant ("null is supported; degrade to
-the platform default") is checkable against the code beside it and is still true after any seed
-changes. **This rule applies to every comment and spec sentence written by this change**, including
-the new ones in **D3**, **D4** and **D6**.
+**The rule, and why it is a design decision rather than a style note.** A comment that counts rows is
+a comment that expires. Its truth depends on data the reader cannot see, in an environment the comment
+cannot name, at a time the comment does not record. So it cannot be verified from the file it sits in,
+cannot be tested, and decays silently into a confident falsehood that reads as ratified fact. An
+invariant — *"null is a supported resolution; degrade to the platform default"* — is checkable against
+the code beside it and stays true after any seeding, migration, or tenant change.
+
+**This is a recurring failure mode, not a lapse.** Four of the five were written by different fixes at
+different times, and each author verified the claim before writing it; each was **correct on the day it
+was written** (F10). The defect is the *category of sentence*, which has a shelf life that nothing in
+the process tracks — no review step, no test, and no tooling knows that a prose sentence took a
+dependency on production data. Framing it as carelessness would predict that more care prevents a
+sixth. It would not. Only not writing the sentence does.
+
+**This rule applies to every comment and spec sentence written by this change**, including the new ones
+in **D3**, **D4** and **D6** — D6's migration docblock in particular, which must say *"all
+organizations, by design"* (a property of the query) and must **not** say how many rows carry the key.
+
+#### Can anything cheap prevent a sixth?
+
+**A test cannot pin these claims, and that is precisely why they survived four rounds of verification.**
+The assertion is about **production data**, and every test in this repository runs against a fresh or
+demo-seeded database. A test asserting "no organization has an active template" would assert a fact
+about its own fixture, not about production — and `ProjectCompetenciesTest.php:75-76` already asserts
+the **opposite** in the seeded test database while all five comments stood unchallenged. The claim is
+**unfalsifiable in CI by construction**. That is the finding, and it disqualifies the obvious remedies:
+
+| Candidate mechanism | View |
+|---|---|
+| Assert the census in a test | **Impossible.** Nothing in CI can observe production tenants. |
+| Pin it in the F5/D4 fallback test | **Misreads what that test does.** `HeygenProviderTest.php:271-275` and D4's new Tavus case pin the *invariant* — the platform default supplies a language when the template does not. They already fail loudly if that guarantee breaks. They say nothing about how many templates exist, and should not be made to. |
+| An arch/lint test grepping comments for census phrasing | **Rejected for this change.** Technically buildable on the pinned stack (`api/tests/Arch/` exists), but it is a regex over English prose with a phrase list that expires the same way the comments do — a comment that counts rows, relocated to a test file. It also expands deliverables beyond correcting the five, which the scope does not justify on one occurrence of the pattern. Reconsider as its own change if a sixth appears. |
+| A runtime check or production assertion | **Out of scope and wrong shape.** The census is not a property the product needs to enforce; it is a fact the product should never have written down. |
+
+**The cheap prevention that IS in scope, and is adopted:** each of the five replacements must state a
+guarantee that an **existing named test already pins**, and cite that test. Sites 1 and 4 are held by
+`HeygenProviderTest.php:249-276` (platform default supplies the language, `$ctx` or config); site 2 by
+D4's new Tavus null-`$ctx` case; site 3 by every provider test that runs with no active template. A
+comment whose claim has a test beside it fails loudly when it stops being true, because the test goes
+red. This costs nothing — it is a writing constraint on corrections already in scope — and it converts
+the five from unverifiable prose into documentation of behaviour CI defends.
 
 Archived artifacts under `openspec/changes/archive/**` carry the same phrasing and are **not** edited
 — they are the historical record of what was believed when they were written.
@@ -464,16 +539,17 @@ Plus the intra-tenant case the proposal makes the headline: **two projects of th
 | `api/app/Services/Provider/HeygenProvider.php` `:59` | Modify | Allowlist entry removed; comment marks it as intent, not guard (**D1**) |
 | `api/app/Services/Provider/HeygenProvider.php` `:180-183` | Modify | Census comment → invariant (**D8**) |
 | `api/app/Services/Provider/HeygenProvider.php` `:251-279` | **Unchanged** | Platform default already correct — the reason HeyGen needs no new source |
-| `api/app/Support/AvatarTemplates/ActiveTemplateResolver.php` `:12-18` | Modify | Fourth census comment → invariant (**D8**, F10) |
+| `api/app/Support/AvatarTemplates/ActiveTemplateResolver.php` `:12-18` | Modify | Census comment site 3 → invariant (**D8**, F10) |
 | `api/app/Support/AvatarTemplates/ProviderFieldSpecs.php` `:61`, `:84`, then `:36` | Modify | `FieldSpec` dropped from both providers; `LANGUAGES` retired last (**D5**) |
 | `api/app/Support/AvatarTemplates/ConfigValidator.php` | **Unchanged** | Spec-driven — inherits the removal (**D5**) |
 | `api/app/Http/Controllers/AvatarTemplatePortabilityController.php` | **Unchanged** | Same validator; pre-change exports now reject by design (**D6**, F11) |
 | `api/app/Support/Demo/DemoWriter.php` `:152`, `:165-166`, `:172` | Modify | `language` dropped from both configs; `tavus-en` renamed and redescribed (**D5**) |
 | `api/app/Support/Demo/DemoDataset.php` `:708`, `:712-724` | Modify | `heygen.language` leaves the identity shape and the `@return` (F7) |
-| `api/config/interview.php` `:196` | Modify | `interview.demo.heygen.language` removed (F7) |
-| `api/config/interview.php` `:83` | **Unchanged** | `interview.heygen.language` is the null-`$ctx` fallback — MUST survive (F7) |
+| `api/config/interview.php` `:196` | **Delete this line** | `interview.demo.heygen.language` — the **demo** key. Byte-identical to `:83`; check the surrounding block header (`Demo Avatar Identity (beai:demo-seed)`, `:180-191`) before deleting (F7) |
+| `api/config/interview.php` `:83` | **UNCHANGED — DO NOT DELETE** | `interview.heygen.language` — the **provider** key. HeyGen's null-`$ctx` fallback (`HeygenProvider.php:272`), ratified at `interview-session/spec.md:1258-1262`. Deleting this one instead reintroduces the 0.22.1 outage class (F7) |
+| `api/config/interview.php` `:57-72` | Modify | Census comment site 4 → invariant, **both** statements (`:61-62` and `:72`); the separation rationale at `:64-72`/`:74-79` is kept verbatim (**D8**, F10) |
 | `api/config/interview.php` — `tavus` block | Modify | **Add** `'language' => env('TAVUS_LANGUAGE', 'it')` (**D4**) |
-| `api/.env.example`, `docs/dev-setup.md` | Modify | `TAVUS_LANGUAGE` documented; `HEYGEN_LANGUAGE`'s demo role dropped, provider role kept |
+| `api/.env.example`, `docs/dev-setup.md` | Modify | `TAVUS_LANGUAGE` documented. `HEYGEN_LANGUAGE` / `LIVEAVATAR_LANGUAGE` are **kept** — only their demo consumer goes; `:83` still reads them (F7) |
 | `api/database/migrations/…_strip_language_from_avatar_templates_config.php` | **Create** | Unscoped JSONB key-strip; `down()` a documented no-op (**D6**) |
 | `api/app/Http/Controllers/Candidate/InterviewController.php` `:583`, `:652` | Modify | `$participant->language` → `$ctx->language` (**D7**) |
 | `api/app/Http/Controllers/Candidate/InterviewController.php` `:744`, `:750`, `:791`, `:799` | Modify | Docblocks corrected — "participant's language" → project language (**D7**) |
@@ -508,6 +584,8 @@ that pin the **old** behaviour are the RED step — they invert, they are not de
 | Cross-tenant | Org A (`it`, active template setting `en`) and Org B (`en`, no template) → each `/start` carries its own project's language; A never influences B | `config.yaml rules.specs` requires a dedicated isolation scenario. |
 | Cross-project | Two projects of the **same** org, `it` and `en`, one active template → two different avatar languages | The headline success criterion. |
 | Backoffice unit | The template form renders no language control for either provider, and no raw i18n key appears | `tests/unit/components/organisms/AvatarTemplateForm.spec.ts` with a spec fixture lacking `language`. |
+| Config regression | `config('interview.heygen.language')` still resolves after the demo key is removed | Guards F7's near-twin deletion. The existing null-`$ctx` case `HeygenProviderTest.php:271-275` **already fails red** if `:83` is deleted by mistake — no new test required, but the PR description must name it as the guard. |
+| Comment corrections (**D8**) | **No new test.** The five census claims are unfalsifiable in CI by construction | Each replacement instead states a guarantee an existing named test already pins, and cites it (**D8**, *Can anything cheap prevent a sixth?*). Review checks the citation, not a new assertion. |
 
 **Coverage.** `api` holds the 85% gate. The provider merge path is not a "correctness-critical zone"
 by the CLAUDE.md list, but the migration touches every tenant's stored configuration and is written to
