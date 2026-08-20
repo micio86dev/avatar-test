@@ -11,8 +11,8 @@ review budget. Deploy order is a hard constraint: **`api` before `frontend`, and
 
 | PR | Scope | Ships alone? |
 |---|---|---|
-| 1 | Completion-tally repair (D5) | Yes — fixes stranded participants already in production |
-| 2 | Bounded re-offer: migration, reset action, `resolveNextCompetency` branch (D1–D4, D8–D10) | Yes |
+| 1 | `error_count` migration + completion CAS with all three call sites (D1 migration, D5) | Yes |
+| 2 | Bounded re-offer: reset action, `resolveNextCompetency` branch, `retry` greeting (D2–D4, D8–D10) | Yes |
 | 3 | `/start` + `/end` contract additions (D6, D7) | Yes — additive, verified |
 | 4 | Frontend continuous flow (D11–D13) | Requires PR 3 deployed |
 
@@ -21,25 +21,56 @@ Test commands: api `php artisan test --parallel`; frontend `bun run test:unit`,
 
 ---
 
-## PR 1 — Completion tally counts exhausted errors (D5)
+## PR 1 — `error_count` + the completion CAS (D1 migration, D5)
 
-Ships first and alone. Independent of every other slice: it repairs participants who are stranded
-in production **today**, before any new behaviour is introduced.
+> **Re-scoped after the first breakdown was wrong.** The original slice was "amend `/end`'s tally",
+> shipping before the migration. Two things make that impossible:
+>
+> 1. D5's call site 2 predicates on `$session->error_count >= MAX_ERROR_ATTEMPTS`, so the column
+>    must exist in the same PR.
+> 2. Amending `/end` alone would not fix the bug anyway. A session reaches `error` inside
+>    `/start`'s `handleProviderFailure()`; **`/end` is never called for that competency**. Sites 2
+>    and 3 are the fix — the tally amendment alone is the part that does nothing.
+>
+> **Also corrected**: this PR does NOT retroactively settle participants already stranded in
+> production. The backfill sets `error_count = 1` against a maximum of 2, so an existing errored
+> competency is *re-offered*, not closed. Such a participant is settled only if they return (site 3
+> self-heals on their next `/start`). Settling those who never return is a separate remediation —
+> see 1.8.
 
-- [ ] **1.1 RED** — Feature test: a participant whose last competency ends in a terminal `error`
-      reaches `in_valutazione` and dispatches `FinalizeInterview` (`Queue::fake`). Fails today —
-      the tally counts only `completed|timeout|skipped`, so the CAS never fires.
-- [ ] **1.2 RED** — Feature test: an `Upstream` failure does **NOT** dispatch scoring; the
-      participant goes to `errore`. Pins the CAS guard so 1.3 cannot over-fire.
-- [ ] **1.3 GREEN** — Extract `settleCompletionIfFinished()` from `InterviewController::end()` and
-      amend the tally to include competencies that have exhausted their re-offers. Wire the two new
-      call sites (D5).
-- [ ] **1.4 REFACTOR** — Confirm the extraction has one behaviour and one owner; no call site
-      duplicates the CAS.
-- [ ] **1.5** — Full api suite + coverage gate. Candidate state machine ≥ ~95% (CLAUDE.md).
+- [ ] **1.1** — Migration: `unsignedTinyInteger('error_count')->default(0)` on `interview_sessions`,
+      **with the backfill** `SET error_count = 1 WHERE status = 'error'`. Without it every row
+      already at `error` gets three attempts instead of two.
+      Docblock MUST state that `down()` is not to be run on a code revert: dropping the column while
+      a re-offered session sits at `pending` erases the only record of the bound, and on re-deploy
+      that row reads 0 and is granted a second re-offer.
+- [ ] **1.2 GREEN** — `InterviewSession`: `MAX_ERROR_ATTEMPTS = 2`, `@property int $error_count`.
+      Correct the create-migration docblock (`:12`) — one row per competency, *n* attempts (D8).
+- [ ] **1.3 GREEN** — Increment `error_count` in `markSessionError()` only. Verify it is the sole
+      writer of `status = 'error'` before relying on that.
+- [ ] **1.4 RED** — Feature test: a participant whose last competency reaches a **terminal** error
+      (`error_count` at max) reaches `in_valutazione` and dispatches `FinalizeInterview`
+      (`Queue::fake`). Fails today — the tally counts only `completed|timeout|skipped`.
+- [ ] **1.5 RED** — Feature test: an `Upstream` failure does **NOT** dispatch scoring; the
+      participant goes to `errore`. Pins the CAS guard so 1.7 cannot over-fire.
+      > This is why site 2 sits *after* the classification switch, not inside `markSessionError()`.
+      > Settling first would flip `in_corso → in_valutazione`, dispatch scoring, and then let
+      > `markParticipantFailed()` overwrite it to `errore` — a scored, webhooked participant sitting
+      > at `errore`. After the switch, the existing `where('status','in_corso')` predicate is
+      > already the right guard and matches zero rows.
+- [ ] **1.6 RED** — Feature test for site 3: a returning participant whose competencies are all
+      terminal gets settled on `/start` before the `422 no_competency_remaining`. Idempotent.
+- [ ] **1.7 GREEN** — Extract `settleCompletionIfFinished(int $participantId, int $projectId): void`
+      from `/end` steps (7)+(8); amend the tally to count `error` at `error_count >= MAX`; wire all
+      three call sites (D5).
+- [ ] **1.8** — **Decide and record**: whether to settle participants already stranded in production
+      who never return. Needs a one-off console command and a product call on scoring partial data
+      without a re-offer. Out of the mechanism; do not silently skip it.
+- [ ] **1.9 REFACTOR** — One behaviour, one owner; no call site duplicates the CAS.
+- [ ] **1.10** — Full api suite + coverage gate. Candidate state machine ≥ ~95% (CLAUDE.md).
 
-> **Rollback**: PR 1 reverts to a *worse* state than neutral — the old tally re-strands
-> participants. Roll forward, never back.
+> **Rollback**: reverts to a *worse* state than neutral — the old tally re-strands participants.
+> Roll forward, never back. The migration must survive a code revert.
 
 ---
 
@@ -53,14 +84,8 @@ in production **today**, before any new behaviour is introduced.
       verbatim from `RecoverFailedParticipant` (D3).
 - [ ] **2.3 GREEN** — Point `RecoverFailedParticipant`'s loop body at the shared action. Correct
       its two false docblocks (D3, D8).
-- [ ] **2.4** — Migration: `unsignedTinyInteger('error_count')->default(0)` on
-      `interview_sessions`, **with the backfill** `SET error_count = 1 WHERE status = 'error'`.
-      Without the backfill every stranded production row gets three attempts instead of two.
-      The docblock MUST state that `down()` is not to be run on a code revert: dropping the column
-      while a re-offered session sits at `pending` erases the only record of the bound.
-- [ ] **2.5 GREEN** — `InterviewSession`: `MAX_ERROR_ATTEMPTS = 2`, `@property int $error_count`,
-      status docblock. Correct the create-migration docblock (`:12`) — one row per competency,
-      *n* attempts, not one attempt (D8).
+      *(The migration, `MAX_ERROR_ATTEMPTS` and the `error_count` increment moved to PR 1 — D5's
+      call site 2 predicates on them, so they cannot ship later than the CAS.)*
 - [ ] **2.6 RED** — Feature test: a competency ending in `error` is re-offered exactly once; the
       second `error` is terminal and never offered a third time (`Http::fake` forcing
       `ClientError`).
