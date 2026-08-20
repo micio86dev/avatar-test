@@ -153,7 +153,7 @@ CI fails on a seed step, not an assertion.
 
 ## Close-out
 
-- [ ] **4.1** — `sdd-verify` against spec, design and this checklist.
+- [x] **4.1** — `sdd-verify` against spec, design and this checklist.
 - [ ] **4.2** — **Pre-deploy check, carried from the open questions**: determine whether any real
       tenant has an active avatar template with a language set. Not answerable from the repo — it
       needs a production query. If any exist, their avatars change spoken language on deploy, and
