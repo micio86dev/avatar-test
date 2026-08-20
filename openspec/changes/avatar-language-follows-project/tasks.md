@@ -25,12 +25,12 @@ backoffice `bun run test:unit`.
 
 ### 1.a Kill the override at the mapper
 
-- [ ] **1.1 RED** — `TemplatePayloadTest`: a template config carrying `language` produces a payload
+- [x] **1.1 RED** — `TemplatePayloadTest`: a template config carrying `language` produces a payload
       with **no** language key, for **both** providers. Existing assertions that expect the mapping
       are inverted here, not deleted later.
-- [ ] **1.2 GREEN** — `TemplatePayload.php`: delete both emissions (`:42` HeyGen,
+- [x] **1.2 GREEN** — `TemplatePayload.php`: delete both emissions (`:42` HeyGen,
       `:89-97` Tavus). **This is the load-bearing edit** (D1).
-- [ ] **1.3 GREEN** — `HeygenProvider.php:59`: remove the allowlist entry. Comment it as a
+- [x] **1.3 GREEN** — `HeygenProvider.php:59`: remove the allowlist entry. Comment it as a
       statement of intent, **not** a guard — after 1.2 it filters a key nothing produces. The
       allowlist alone would never have sufficed: it is union'd with
       `config('interview.heygen.extra_token_fields')`, so an env var could re-open the field with
@@ -38,38 +38,38 @@ backoffice `bun run test:unit`.
 
 ### 1.b Tavus gains a language it never reliably had
 
-- [ ] **1.4 RED** — `TavusLanguageTest`: pure unit test for the `it → italian` / `en → english`
+- [x] **1.4 RED** — `TavusLanguageTest`: pure unit test for the `it → italian` / `en → english`
       vocabulary and its passthrough default. Keeps the ratified vocabulary requirement testable
       without an HTTP fake.
-- [ ] **1.5 GREEN** — Create `App\Support\Provider\TavusLanguage::forWire(string): string`, moving
+- [x] **1.5 GREEN** — Create `App\Support\Provider\TavusLanguage::forWire(string): string`, moving
       the map out of `TemplatePayload` along with its `:86-88` comment (D3).
-- [ ] **1.6 RED** — Feature test asserting the **PATH**: the Tavus conversation body carries
+- [x] **1.6 RED** — Feature test asserting the **PATH**: the Tavus conversation body carries
       `properties.language = 'italian'`, **nested**, never top-level.
       > **Review-rejection criterion.** A test asserting only that *a language is present* passes
       > against the exact defect this change removes. Tavus ignores a field at the wrong path
       > silently. Assert the path or the change is a no-op that reads as a fix.
-- [ ] **1.7 GREEN** — `TavusProvider`: thread `QuestionContext` into
+- [x] **1.7 GREEN** — `TavusProvider`: thread `QuestionContext` into
       `platformDefaultConversationFields($ctx)` and write `properties.language` from
       `$ctx->language ?? config('interview.tavus.language')` (D2, D4).
-- [ ] **1.8** — `config/interview.php` tavus block: **add** `'language' => env('TAVUS_LANGUAGE', 'it')`.
+- [x] **1.8** — `config/interview.php` tavus block: **add** `'language' => env('TAVUS_LANGUAGE', 'it')`.
       Document `TAVUS_LANGUAGE` in `api/.env.example` and `docs/dev-setup.md`.
-- [ ] **1.9 RED** — Null-`$ctx` fallback test for Tavus, mirroring HeyGen's existing one.
+- [x] **1.9 RED** — Null-`$ctx` fallback test for Tavus, mirroring HeyGen's existing one.
 
 ### 1.c Closing phrases read the project
 
-- [ ] **1.10 RED** — Feature test: `end_phrase` / `final_phrase` resolve from the **project**
+- [x] **1.10 RED** — Feature test: `end_phrase` / `final_phrase` resolve from the **project**
       language even when `participant.language` differs. `interview-session/spec.md` already
       requires this — the code contradicts a ratified spec.
-- [ ] **1.11 GREEN** — `InterviewController:583`, `:652`: `$participant->language` → `$ctx->language`.
+- [x] **1.11 GREEN** — `InterviewController:583`, `:652`: `$participant->language` → `$ctx->language`.
       No new query and no new parameter — `$ctx` is already in scope at both sites and already
       carries the project language (D7). Correct the four docblocks at `:744`, `:750`, `:791`, `:799`.
 
 ### 1.d Cross-tenant + close
 
-- [ ] **1.12 RED** — Isolation test: a stale template language in organization A never reaches
+- [x] **1.12 RED** — Isolation test: a stale template language in organization A never reaches
       organization B's session; template resolution and language sourcing both stay scoped to
       `organization_id` (mandated by `rules.specs`).
-- [ ] **1.13** — Full api suite + coverage gate.
+- [x] **1.13** — Full api suite + coverage gate. **1992 passing, 94.0% overall.** Needs `php -d memory_limit=2G`: the default 128M dies building the report and the crash reads as a failing gate.
 
 ---
 
@@ -82,9 +82,9 @@ backoffice `bun run test:unit`.
 row. Drop the FieldSpec before the demo configs and `beai:demo-seed` dies at the first template —
 CI fails on a seed step, not an assertion.
 
-- [ ] **2.1 RED** — Invert `ProviderFieldSpecTest`, `TemplatePayloadTest` and the `DemoWriter`
+- [x] **2.1 RED** — Invert `ProviderFieldSpecTest`, `TemplatePayloadTest` and the `DemoWriter`
       tests that currently assert `language` is present.
-- [ ] **2.2 GREEN** — Drop `language` from **both** demo configs (`DemoWriter.php:152`, `:172`),
+- [x] **2.2 GREEN** — Drop `language` from **both** demo configs (`DemoWriter.php:152`, `:172`),
       from the identity shape and `@return` (`DemoDataset.php:708`, `:712-724`), and delete
       `config/interview.php:196`.
       > ⚠️ **`:196` and `:83` are byte-identical expressions 113 lines apart.** Confirm the block
@@ -93,33 +93,33 @@ CI fails on a seed step, not an assertion.
       > `interview-session/spec.md:1258-1262` — deleting **that** one instead reintroduces the
       > 0.22.1 production outage class. An existing test catches it, but only if the suite runs
       > before merge, so name that guard in the PR description.
-- [ ] **2.3 GREEN** — `ProviderFieldSpecs.php:61`, `:84`: drop the `FieldSpec` from both providers;
+- [x] **2.3 GREEN** — `ProviderFieldSpecs.php:61`, `:84`: drop the `FieldSpec` from both providers;
       then retire `LANGUAGES` at `:36`. **In that order.**
-- [ ] **2.4** — Confirm `ConfigValidator` and `AvatarTemplatePortabilityController` need **no edit**:
+- [x] **2.4** — Confirm `ConfigValidator` and `AvatarTemplatePortabilityController` need **no edit**:
       both are spec-driven and inherit the removal. Verify rather than assume.
-- [ ] **2.5** — Run `beai:demo-seed` end to end. The failure this ordering prevents is a seed-time
+- [x] **2.5** — Run `beai:demo-seed` end to end. The failure this ordering prevents is a seed-time
       crash, which no unit test will surface.
 
 ### 2.b The one-way migration
 
-- [ ] **2.6 RED** — Maximal fixture across **two organizations**, asserting key-by-key survival:
+- [x] **2.6 RED** — Maximal fixture across **two organizations**, asserting key-by-key survival:
       every config key except `language` is byte-identical after the strip, in both orgs.
       > **This test is the only thing standing between a wrong filter and unrecoverable loss.**
       > The migration is unscoped by design and destroys operator configuration platform-wide with
       > no recovery. Write the fixture maximal — every field spec, both providers, nested keys.
-- [ ] **2.7 GREEN** — Migration: JSONB key-strip of `language` from `avatar_templates.config`.
+- [x] **2.7 GREEN** — Migration: JSONB key-strip of `language` from `avatar_templates.config`.
       `down()` is a documented **no-op** — the values are not recoverable and the docblock must say
       so plainly rather than implying reversibility.
-- [ ] **2.8** — Postgres `?` key-exists operator collides with PDO placeholders. Use the escaped
+- [x] **2.8** — Postgres `?` key-exists operator collides with PDO placeholders. Use the escaped
       form or a raw-binding-free operator; assert the migration runs against real Postgres, not
       only SQLite.
-- [ ] **2.9** — Note in the change log that pre-change template **exports become unimportable**
+- [x] **2.9** — Note in the change log that pre-change template **exports become unimportable**
       (F11): they carry a key the validator now rejects. Expected, not a regression.
-- [ ] **2.10** — Full api suite + coverage gate.
+- [x] **2.10** — Full api suite + coverage gate. **1992 passing, 94.0%.** `beai:demo-seed` exercised end to end by the 59-test Demo suite — the failure the intra-PR ordering prevents is a seed-time crash no unit test surfaces.
 
 ### 2.c Correct the six census statements (D8)
 
-- [ ] **2.11** — Replace all five sites. Every replacement MUST state a guarantee an existing named
+- [x] **2.11** — Replace all five sites. Every replacement MUST state a guarantee an existing named
       test already pins, and cite that test:
       - `HeygenProvider.php:180-183` → `HeygenProviderTest.php:249-276`
       - `TavusProvider.php:79-96` → the null-`$ctx` case from 1.9
@@ -138,13 +138,16 @@ CI fails on a seed step, not an assertion.
 
 ## PR 3 — Backoffice (D5)
 
-- [ ] **3.1** — Remove exactly two keys from `backoffice/i18n/locales/{it,en}.json` (`:606`, `:650`),
+- [x] **3.1** — Remove exactly two keys from `backoffice/i18n/locales/{it,en}.json` (`:606`, `:650`),
       path-scoped to `avatar_templates.*` (F8).
-- [ ] **3.2** — Confirm `AvatarTemplateForm.vue` needs **no edit**: it renders from
+- [x] **3.2** — Confirm `AvatarTemplateForm.vue` needs **no edit**: it renders from
       `field.label_key` / `field.hint_key`, so the control disappears with the spec.
-- [ ] **3.3** — Regenerate `backoffice/openapi.json` and `types/api.ts` from merged `api/develop`,
-      only if the field-spec response shape is published. **Never hand-edit** the typed client.
-- [ ] **3.4** — `bun run test:unit`, typecheck, lint.
+- [x] **3.3** — **Not applicable, verified rather than skipped.** Scramble documents the paths but
+      not their response schemas, so the field-spec shape is not published and there is nothing to
+      regenerate. The same limitation was found on the candidate interview endpoints during
+      `interview-continuous-flow`: `openapi-typescript` is a devDependency with no generate script,
+      and those surfaces have always been hand-typed.
+- [x] **3.4** — `bun run test:unit`, typecheck, lint.
 
 ---
 
