@@ -69,7 +69,7 @@ Test commands: api `php artisan test --parallel`; frontend `bun run test:unit`,
       who never returns ends without an evaluation, which is the same outcome as any mid-interview
       abandonment, a case the product already handles. No console command; no partial-data close.
 - [x] **1.9 REFACTOR** — One behaviour, one owner; no call site duplicates the CAS.
-- [ ] **1.10** — Full api suite + coverage gate. Candidate state machine ≥ ~95% (CLAUDE.md).
+- [x] **1.10** — Full api suite + coverage gate. **94.0% overall**; `ResetSessionForRetry` and `InterviewSession` at 100%, `InterviewController` at 90.7%. Note: the coverage run needs `php -d memory_limit=2G` — the default 128M dies building the report, which reads as a failing gate and is not one.
 
 > **Rollback**: reverts to a *worse* state than neutral — the old tally re-strands participants.
 > Roll forward, never back. The migration must survive a code revert.
@@ -91,7 +91,7 @@ Test commands: api `php artisan test --parallel`; frontend `bun run test:unit`,
 >
 > Remaining PR 2 items below are genuinely outstanding, not bookkeeping.
 
-- [ ] **2.1 RED** — Unit test for `ResetSessionForRetry`: five writes (`status='pending'`,
+- [x] **2.1 RED** — Unit test for `ResetSessionForRetry`: five writes (`status='pending'`,
       `provider_session_ref`/`ended_reason`/`ended_at` cleared, utterances deleted) and
       `error_count` **unchanged**. The unchanged assertion is the bound — a reset that clears its
       own counter grants unlimited re-offers.
@@ -104,10 +104,10 @@ Test commands: api `php artisan test --parallel`; frontend `bun run test:unit`,
 - [x] **2.6 RED** — Feature test: a competency ending in `error` is re-offered exactly once; the
       second `error` is terminal and never offered a third time (`Http::fake` forcing
       `ClientError`).
-- [ ] **2.7 RED** — Feature test: the re-offer **deletes attempt 1's utterances**, asserted at
+- [x] **2.7 RED** — Feature test: the re-offer **deletes attempt 1's utterances**, asserted at
       `/start` *before* `issue()` (F3). This is the ratified destructive step — assert it directly,
       never infer it from a later transcript read.
-- [ ] **2.8 RED** — Regression test: the ratified `participant-sso` "Resume, not restart" scenario
+- [x] **2.8 RED** — Regression test: the ratified `participant-sso` "Resume, not restart" scenario
       still holds verbatim (D8). `error_count` is only incremented in `markSessionError()`, so a
       reset session is `pending`, never `error`, and the operator path is unaffected.
 - [x] **2.9 GREEN** — Add the re-offer branch to `resolveNextCompetency()`, ordered **between** the
@@ -115,7 +115,7 @@ Test commands: api `php artisan test --parallel`; frontend `bun run test:unit`,
       ⚠️ **PARTIAL** — shipped as an added `reoffer` key on the existing array return.
       `App\Services\Interview\NextCompetency` was NOT created; the readonly result object is
       still owed and belongs with PR 3, which changes that return shape anyway.
-- [ ] **2.10** — Confirm the operator recovery path stays **unbounded** (D4) and that a test pins
+- [x] **2.10** — Confirm the operator recovery path stays **unbounded** (D4) and that a test pins
       that asymmetry deliberately, so a future reader does not "fix" it.
 - [ ] **2.11 RED/GREEN** — `OpeningTextComposer` `'retry'` variant (D10): it/en, `:competency`
       interpolation, locale fallback. Add `opening.retry` to `api/lang/{it,en}/interview.php`.
