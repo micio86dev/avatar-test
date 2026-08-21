@@ -210,6 +210,97 @@ Chain strategy: pending
 
 ---
 
+## 11. Four-lens review remediation (post-apply)
+
+A four-lens review of the applied diff found five BLOCKER/CRITICAL findings that were one root
+cause wearing five faces (`B1`–`B4`, `C1`), plus `C2`/`C3`/`M1` and five "also fix" items. Fixed
+by restructuring the handover lifecycle to be TOTAL — see `useInterviewSession.ts`'s own updated
+module docblock for the restructuring rationale. Every fix below has a RED test that failed for
+the right reason before the fix landed (verbatim RED evidence in the apply report).
+
+- [x] 11.1 **Root-cause restructuring.** `handoverActive` (armed by `beginHandover()`, before
+      `/end`, before the incoming exists) replaces `incomingSession.value !== null` as the guard
+      condition everywhere. `endHandover()` is now the ONLY place the bound/promote/
+      connecting-ceiling timers and `handoverActive` are cleared. `clearIncomingProvider()` is now
+      the ONLY place the incoming slot is stopped and nulled. `transitionTo()` itself calls both
+      unconditionally on `done`/`error`/`terminal`, so every exit — including ones this
+      restructuring did not name — tears down an in-flight handover for free.
+- [x] 11.2 **B1** — the incoming's microphone was never muted. Fixed in `AvatarPlayer.client.vue`:
+      `provider.setMicMuted(props.muted)` fires once, right after `provider.start()` resolves
+      (the earliest point muting is even possible — `setMicMuted` is a guaranteed no-op before
+      the session exists). Unmuted explicitly, exactly once, by `promote()` — never by the
+      `muted` prop reacting (would reopen a smaller B1 for the crossfade window). Tests:
+      `avatar-player.spec.ts` "B1 — …" (4 tests).
+- [x] 11.3 **B2** — `endQuestion()`/`pause()` guarded on `incomingSession.value !== null`, missing
+      the window between `beginHandover()` and the incoming actually being populated. Fixed by
+      guarding on `handoverActive` instead. Tests: `use-interview-session.spec.ts` "B2: guards
+      close the WHOLE handover window" (2 tests).
+- [x] 11.4 **B3/B4/C3** — nothing bounded the incoming once the bound fired (unbounded wait if it
+      never painted; unrecoverable dead end if its retries exhausted post-bound). Fixed with a new
+      `connectingCeilingTimer` (`CONNECTING_CEILING_MS`, NOT pinned by the spec — flagged as an
+      open decision needing the same product sign-off `HANDOVER_BOUND_MS` has), armed by
+      `releaseOutgoing()`, giving up to the existing retryable `error` screen. One mechanism
+      covers both B3 and B4 by design — see the constant's own comment for why a second, more
+      specific guard was judged unnecessary. Tests: `use-interview-session.spec.ts`
+      "B3/B4/C3: the connecting-ceiling bounds the post-bound wait" (3 tests).
+- [x] 11.5 **C1** — the outgoing dying inside the ~200ms crossfade window stranded an
+      already-painted incoming. Fixed: the outgoing-error handler now calls `promote()`
+      immediately when `incomingEntering.value` is true, instead of falling to
+      `releaseOutgoing('dead')`. Test: `use-interview-session.spec.ts` "C1: outgoing dies
+      mid-crossfade …".
+- [x] 11.6 **C2** — `stop()`'s "exactly once" guarantee depended on call-ordering, not a real
+      mechanism (`stopActiveSession()` was dead code in all 3 call sites — `transitionTo()` had
+      already nulled `activeSession` before it ran). Fixed with `withIdempotentStop()`, wrapping
+      `handle.provider.stop()` in place (same object identity, no test-suite `.toBe()` breakage)
+      at creation in `startSession()`. Docblock corrected to match reality. Tests:
+      `interview-handover.spec.ts` "C2 — …" (2 tests, driving the explicit `teardown()` call AND
+      the structural `AvatarPlayer` unmount against the SAME session).
+- [x] 11.7 **M1** — `confirmDevices()`/`retry()` only abandoned a leftover handover
+      `if (incomingSession.value)`, missing the same pre-incomingSession window as B2: a stale
+      bound timer could fire 10s later and null out a freshly-started session. Fixed:
+      unconditional `endHandover()` + `clearIncomingProvider()`. Test:
+      `use-interview-session.spec.ts` "M1: confirmDevices()/retry() abandon the bound timer …".
+- [x] 11.8 **Found while restructuring, not one of the five named findings** — a bound timer
+      armed before a 401/malformed `/start` sent the machine `terminal` used to keep ticking and
+      could resurrect a terminal session back to `connecting` ten seconds later. Closed by 11.1's
+      `transitionTo()` blanket cleanup (same mechanism, no separate guard needed).
+- [x] 11.9 **"Also fix" — noop (409) test.** `use-interview-session.spec.ts`: advances timers past
+      10s after a 409 and proves the bound never fires and state/session are untouched.
+- [x] 11.10 **"Also fix" — the five `target === 'incoming'` failure branches.** All five
+      (malformed response, 401, 403, 429-exhausted, 502/generic) now have a dedicated test in
+      `use-interview-session.spec.ts` "the five target==='incoming' /start failure branches".
+- [x] 11.11 **"Also fix" — `requestVideoFrameCallback`.** The PRIMARY paint detector was never
+      exercised by any test (jsdom lacks it; the E2E mock only dispatches `loadeddata`). New test
+      in `avatar-player.spec.ts` stubs `HTMLVideoElement.prototype.requestVideoFrameCallback` and
+      proves `wirePaintedDetection()` wires and fires it, with no DOM event needed.
+- [x] 11.12 **"Also fix" — stale citation.** `session.vue`'s comment citing
+      `useInterviewSession.ts:130-158` (already stale after this diff) replaced with a symbolic
+      reference (`attachResizeListener()`'s `resizeListener` closure) instead of a line range.
+- [x] 11.13 **"Also fix" — observability.** New `logHandoverEvent()` breadcrumb
+      (`console.info('[handover] <event>', detail)`) on every degrade path: bound fired
+      (`outgoing-released`), incoming abandoned (`incoming-attempt-abandoned`), incoming released
+      (`incoming-released`), connecting-ceiling exceeded (`connecting-ceiling-exceeded`), and a
+      promote raced by C1 (`promote-raced-outgoing-death`). Tests assert by CONTENT
+      (event name + detail shape), never by incidental call count.
+
+**Verification (this remediation only):**
+
+- `bun run test:unit`: 46 files, **817 tests**, all green (792 baseline + 25 new).
+- `bun run typecheck`: exit 0.
+- `bun run lint`: 0 errors, 10 pre-existing warnings (unrelated shadcn-vue prop defaults).
+- `bunx playwright test --project=chromium`: **62 passed, 1 skipped** — identical to the
+  pre-remediation branch baseline (no new/changed E2E specs; the fix is fully covered at the
+  unit/component level with real timers/DOM where it mattered — `interview-handover.spec.ts`
+  mounts the REAL `AvatarPlayer` and REAL composable together).
+- `bunx playwright test --project=webkit`: **63 passed** — identical to baseline.
+
+**Left unfixed, with reason:** nothing from the review's BLOCKER/CRITICAL/"also fix" list.
+`CONNECTING_CEILING_MS = 20_000` is a NEW judgment call (not spec-pinned) flagged for the same
+product sign-off `HANDOVER_BOUND_MS` already has — an engineering decision made to close a
+genuine gap, not a deferred fix.
+
+---
+
 ## Close-out
 
 - [ ] 10.1 `sdd-verify` against spec, design, and this checklist.
