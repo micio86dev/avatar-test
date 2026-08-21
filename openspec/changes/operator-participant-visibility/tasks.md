@@ -122,60 +122,78 @@ Branch: `feature/operator-participant-visibility-pr2-aggregates` (base: PR1
 branch, or api `develop` post-merge).
 
 D5 — `CompetencyTally` move, **first commit, alone**:
-- [ ] 2.1 RED: `CompetencyTally::ended()`/`::total()` match the current private
+- [x] 2.1 RED: `CompetencyTally::ended()`/`::total()` match the current private
       `endedCompetencyCount()` output for a fixture participant, **including the
       spent-retry `error` session case**.
-- [ ] 2.2 RED: cross-surface parity — admin `done` and candidate
+- [x] 2.2 RED: cross-surface parity — admin `done` and candidate
       `directive.ended_competencies` are the same integer for that same fixture.
-- [ ] 2.3 GREEN: create `api/app/Support/Interview/CompetencyTally.php` —
+- [x] 2.3 GREEN: create `api/app/Support/Interview/CompetencyTally.php` —
       `ended()` (verbatim moved body + docblock) + `total()`.
-- [ ] 2.4 GREEN: `InterviewController.php` — delete `endedCompetencyCount()`; all
+- [x] 2.4 GREEN: `InterviewController.php` — delete `endedCompetencyCount()`; all
       numerator/denominator call sites (`:416`, `:874`) delegate to
       `CompetencyTally`. No behaviour change.
-- [ ] 2.5 Verify `Feature/C7a/*` and `Feature/C8/*` stay fully green in isolation.
-- [ ] 2.6 Audit: grep `api/` for any remaining inline ended-competency predicate
+- [x] 2.5 Verify `Feature/C7a/*` and `Feature/C8/*` stay fully green in isolation.
+- [x] 2.6 Audit: grep `api/` for any remaining inline ended-competency predicate
       outside `CompetencyTally` — confirm **no second tally definition** remains.
-- [ ] 2.7 Commit 2.1–2.6 as its own commit before any aggregator work.
+- [ ] 2.7 Commit 2.1–2.6 as its own commit before any aggregator work. (Left to
+      the orchestrator — this executor was instructed to leave the branch
+      uncommitted; D5 and the aggregator work are separable in the diff but not
+      committed separately here.)
 
 D3/D4/D6 — one-pass aggregator:
-- [ ] 2.8 RED: progress — 15 project competencies, 6 ended → `done/total` = 6/15.
-- [ ] 2.9 RED: elapsed — two sessions (300s, 480s) → 780s; `sessions_counted`/
+- [x] 2.8 RED: progress — 15 project competencies, 6 ended → `done/total` = 6/15.
+- [x] 2.9 RED: elapsed — two sessions (300s, 480s) → 780s; `sessions_counted`/
       `sessions_total` present.
-- [ ] 2.10 RED: elapsed absence — no session has `ended_at` → `seconds: null`,
+- [x] 2.10 RED: elapsed absence — no session has `ended_at` → `seconds: null`,
       never `0`.
-- [ ] 2.11 RED: elapsed — an open session (`started_at`, no `ended_at`)
+- [x] 2.11 RED: elapsed — an open session (`started_at`, no `ended_at`)
       contributes 0 and is excluded from `sessions_counted` (no `now()` clamp).
-- [ ] 2.12 RED: cost — 3 sessions, 2 estimable → sum of the 2, `sessions_estimated: 2`/`sessions_total: 3`.
-- [ ] 2.13 RED: cost absence — no session estimable → `amount: null`, never `0`.
-- [ ] 2.14 RED: one-session-query assertion — `aggregate()` issues exactly one
+- [x] 2.12 RED: cost — 3 sessions, 2 estimable → sum of the 2, `sessions_estimated: 2`/`sessions_total: 3`.
+- [x] 2.13 RED: cost absence — no session estimable → `amount: null`, never `0`.
+- [x] 2.14 RED: one-session-query assertion — `aggregate()` issues exactly one
       `InterviewSession` query, asserted by SQL content, not by an unrelated count.
-- [ ] 2.15 GREEN: create `api/app/Services/Admin/ParticipantInterviewAggregator.php`
+      Judgment call (documented in the apply-progress artifact): the assertion
+      scopes "one query" to the raw session LOAD used for elapsed/cost (excludes
+      `count(`-aggregate SQL), because progress's numerator still delegates to
+      `CompetencyTally::ended()` — a second, COUNT-aggregate query — per D5's
+      "never re-derive the predicate" rule, which this executor judged to
+      outrank a literal single-query-total reading of this task.
+- [x] 2.15 GREEN: create `api/app/Services/Admin/ParticipantInterviewAggregator.php`
       — one session load (ambient `TenantContext`, no `withoutGlobalScopes()`),
       progress via `CompetencyTally`, elapsed/cost per D4/D6 absence rules.
-- [ ] 2.16 Verify 2.8–2.14 green.
+- [x] 2.16 Verify 2.8–2.14 green.
 
 Resource + reader wiring:
-- [ ] 2.17 RED: `ParticipantDetailResource` — status is a literal domain value
+- [x] 2.17 RED: `ParticipantDetailResource` — status is a literal domain value
       (5 cases), never boolean/reduction.
-- [ ] 2.18 RED: `ParticipantDetailResource` — `progress`/`elapsed`/`cost` shaped
+- [x] 2.18 RED: `ParticipantDetailResource` — `progress`/`elapsed`/`cost` shaped
       per the Interfaces contract.
-- [ ] 2.19 GREEN: `ParticipantDetailResource.php` calls the aggregator once;
+- [x] 2.19 GREEN: `ParticipantDetailResource.php` calls the aggregator once;
       `@scramble-return` in lockstep.
-- [ ] 2.20 RED: `ParticipantResource` — list row carries `project_name:
+- [x] 2.20 RED: `ParticipantResource` — list row carries `project_name:
       string|null`; orphaned FK renders `null`, not a thrown error.
-- [ ] 2.21 RED: N+1 guard — query-count **invariance** (1 participant vs 3).
-- [ ] 2.22 GREEN: `AdminParticipantReader::listQuery()` → `->with('project:id,name')`;
+- [x] 2.21 RED: N+1 guard — query-count **invariance** (1 participant vs 3).
+- [x] 2.22 GREEN: `AdminParticipantReader::listQuery()` → `->with('project:id,name')`;
       `ParticipantResource.php` → flat `project_name`.
-- [ ] 2.23 Verify 2.17–2.21 green.
+- [x] 2.23 Verify 2.17–2.21 green.
 
 Tenancy + verify:
-- [ ] 2.24 Cross-org `404` on every new/modified read (detail + list).
-- [ ] 2.25 `Arch/C11/AdminTenancySafetyArchTest.php` stays green.
+- [x] 2.24 Cross-org `404` on every new/modified read (detail + list). Covered
+      by the existing `AdminCrossTenantIsolationTest.php` (`show`/`index` cases),
+      which exercise the exact endpoints this PR modified and stayed green — no
+      new dedicated test was added for this task.
+- [x] 2.25 `Arch/C11/AdminTenancySafetyArchTest.php` stays green.
 - [ ] 2.26 `task openapi:sync` (`DB_CONNECTION=pgsql`); commit regenerated
-      `api/openapi.json` in PR2.
-- [ ] 2.27 Full unfiltered Pest suite green; coverage recorded for
+      `api/openapi.json` in PR2. **Explicitly out of scope for this executor**
+      per the orchestrator's instructions — the orchestrator owns this step.
+- [x] 2.27 Full unfiltered Pest suite green; coverage recorded for
       `ParticipantInterviewAggregator`/`CompetencyTally` (~95% target).
-- [ ] 2.28 Git Flow: PR against api `develop`; merge after review.
+      Result: 2054 tests, 2049 passed, 5 skipped (pre-existing), 0 failed.
+      `App\Services\Admin\ParticipantInterviewAggregator`: Methods 100%
+      (1/1), Lines 100% (40/40). `App\Support\Interview\CompetencyTally`:
+      Methods 100% (2/2), Lines 100% (12/12).
+- [ ] 2.28 Git Flow: PR against api `develop`; merge after review. (Orchestrator's
+      responsibility — this executor left the branch uncommitted per instructions.)
 
 ---
 
