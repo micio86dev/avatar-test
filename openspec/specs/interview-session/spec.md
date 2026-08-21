@@ -28,14 +28,22 @@ explicitly out of scope.
 
 The system MUST persist one `InterviewSession` row per competency attempt,
 belonging to exactly one `Participant` and one `Organization`. The row MUST
-carry: `question_index` (0-based ordinal, = `position - 1`), `competency_code`,
-`framework_version_id` (copied from `project.framework_version_id` at creation time —
-NEVER re-derived at read time), `status` ∈ `{pending, in_corso, completed, timeout, skipped, error}`
-(default `pending`; `in_corso` after provider success), `provider` (string),
-`provider_session_ref` (nullable), `ended_reason` (nullable) ∈ `{completed, timeout, skipped, error}`,
+carry: `question_index` (0-based ordinal; MUST equal `project_competencies.position`
+of that session's competency within the session's project — never `position - 1`),
+`competency_code`, `framework_version_id` (copied from `project.framework_version_id`
+at creation time — NEVER re-derived at read time), `status` ∈
+`{pending, in_corso, completed, timeout, skipped, error}` (default `pending`;
+`in_corso` after provider success), `provider` (string), `provider_session_ref`
+(nullable), `ended_reason` (nullable) ∈ `{completed, timeout, skipped, error}`,
 `started_at` / `ended_at` (timestampTz, nullable). The primary composite index
 MUST lead with `organization_id`. The table MUST carry a UNIQUE constraint on
 `(participant_id, competency_code)`.
+
+The first competency of a project (`position = 0`) MUST therefore persist
+`question_index = 0`, never a negative value.
+(Previously: `question_index` was defined as `position - 1` against a `position`
+column described as 1-based. `position` has always been 0-based at every writer,
+so the subtraction produced `-1` for the first competency of every project.)
 
 **WARNING-8 — UNIQUE constraint domain:** each `Participant` row belongs to exactly ONE project
 (a human candidate participating in multiple projects gets a distinct `participant_id` per project,
@@ -69,16 +77,26 @@ a project is blocked at the application layer.
 `status = 'error'` row whose single re-offer bound (Decisions 4 & 5 — see "Bounded single
 re-offer of an `error` competency") is exhausted. A first-occurrence `error` — one still
 eligible for re-offer — is NOT counted as ended; it does not yet consume a competency slot.
-(Previously: `error` was never counted as ended under any condition, which made completion
-permanently unreachable for a participant whose only failure was never resolved.)
 
 `errore` is a TERMINAL participant state: `$allowedTransitions['errore'] = []`.
 
 #### Scenario: Row created on /start
 
-- GIVEN a valid candidate JWT for org O and a project with competency PRS at position 1
+- GIVEN a valid candidate JWT for org O and a project with competency PRS at
+  `position = 0` (the project's first competency)
 - WHEN `POST /api/candidate/interview/start` is called
-- THEN an `InterviewSession` row is persisted with `competency_code = 'PRS'`, `question_index = 0` (= position 1 - 1), `status = 'pending'` initially then `'in_corso'` after provider success, `organization_id = O`, `framework_version_id` copied from the project record, and a non-null `participant.started_at` (set via direct property assignment, NOT mass-assign)
+- THEN an `InterviewSession` row is persisted with `competency_code = 'PRS'`,
+  `question_index = 0` (equal to `position`, not negative), `status = 'pending'`
+  initially then `'in_corso'` after provider success, `organization_id = O`,
+  `framework_version_id` copied from the project record, and a non-null
+  `participant.started_at` (set via direct property assignment, NOT mass-assign)
+
+#### Scenario: First competency's question_index is never negative
+
+- GIVEN a project whose first competency (PRS) is at `position = 0` and has no
+  prior session for this participant
+- WHEN `POST /start` resolves and persists that competency's session
+- THEN `question_index` is persisted as `0`, never `-1`
 
 #### Scenario: Tenant isolation at query level
 
@@ -363,8 +381,12 @@ endpoint that is reasonable to allow even after completion).
    the second INSERT will raise `Illuminate\Database\UniqueConstraintViolationException`
    (SQLSTATE 23505). The implementation MUST catch this exception and recover by
    re-querying the existing session (→ RESUME path), NOT surface it as a 500.
-2. INSERT `InterviewSession(status='pending', question_index = position - 1,
+2. INSERT `InterviewSession(status='pending', question_index = position,
    framework_version_id copied from project, ...)` in a SHORT DB transaction.
+   `question_index` MUST equal `project_competencies.position` for that competency —
+   never `position - 1`.
+   (Previously: `question_index = position - 1`, which produced `-1` for a project's
+   first competency because `position` is 0-based, not 1-based.)
 3. Call the configured provider (HeyGen or Tavus) REST API server-side using secret
    keys stored only in environment/config — NEVER returned to the client.
    **The provider HTTP call (`ProviderSessionService.issue()`) MUST be outside any DB
@@ -372,7 +394,7 @@ endpoint that is reasonable to allow even after completion).
    starvation and deadlock.
 4. On provider SUCCESS: wrap BOTH of the following writes in ONE short DB transaction (FIX-8):
    - UPDATE session `status='in_corso'`, `provider_session_ref`.
-   - On the **first** competency (position = 1, i.e. `participant.status = 'in_attesa'`):
+   - On the **first** competency (`position = 0`, i.e. `participant.status = 'in_attesa'`):
      set `participant.started_at` via **direct property assignment** (NOT mass-assign,
      because `started_at` is NOT in `$fillable`): `$p->started_at = now(); $p->status = 'in_corso'; $p->save();`
    **FIX-8 rationale:** without a surrounding transaction, a failure between the two writes leaves
@@ -488,6 +510,81 @@ failure for manual cleanup. Do NOT suppress the original DB error.
 - GIVEN all competencies for the project have sessions with status ∈ {completed, timeout, skipped}
 - WHEN `POST /start` is called
 - THEN the response is HTTP 422 (no next competency available)
+
+---
+
+### Requirement: Competency sessions created in project_competencies.position order
+
+`POST /start` MUST select the lowest `position` value among project competencies
+that do not yet have a finalized `InterviewSession` for this participant. The order
+is fixed and deterministic. Selection order MUST NOT be affected by the `question_index`
+correction — `question_index` is a label persisted on the selected row, not an input
+to selection.
+
+#### Scenario: Third /start creates third-position competency
+
+- GIVEN a project with competencies [PRS@0, STG@1, INN@2]; sessions for positions 0
+  and 1 are finalized
+- WHEN `POST /start` is called
+- THEN the new session has `competency_code = 'INN'` and `question_index = 2`
+  (equal to `position`)
+  (Previously: described as `= position 3 - 1` against a 1-based `position` that
+  never existed.)
+
+#### Scenario: Delivery and read order is unchanged by the question_index correction
+
+- GIVEN a participant with 3 finalized sessions, ordered by `question_index` today
+- WHEN the same sessions are read after the corrected `question_index` values are
+  in place
+- THEN they are returned in the identical relative order — the correction is a
+  monotonic relabeling, not a reordering
+
+---
+
+### Requirement: question_index backfill recomputes from position and never shifts
+
+Any migration or maintenance process that corrects a persisted `question_index` MUST
+recompute the value from that session's competency's current
+`project_competencies.position` — joined by project and competency — and MUST NOT
+apply a uniform arithmetic shift (e.g. `+1`) to the existing column. A row whose
+`question_index` already equals its competency's `position` MUST be left
+byte-identical: no column on that row changes value, including timestamps. Running
+the process a second time MUST change nothing.
+
+#### Scenario: An already-correct row is left untouched
+
+- GIVEN an `InterviewSession` row whose `question_index` already equals its
+  competency's `project_competencies.position`
+- WHEN the backfill process runs
+- THEN every column on that row, including `updated_at`, is unchanged
+
+#### Scenario: An incorrect row is corrected to the current position
+
+- GIVEN an `InterviewSession` row whose `question_index` is `-1` for a competency
+  now at `position = 0`
+- WHEN the backfill process runs
+- THEN the row's `question_index` becomes `0`
+
+#### Scenario: Running the backfill twice changes nothing on the second run
+
+- GIVEN the backfill process has already run once against the full dataset
+- WHEN it is run again
+- THEN no row's `question_index` changes on the second run
+
+---
+
+### Requirement: Downstream question numbering derived from question_index starts at 1
+
+Any consumer that renders a 1-based question number from `question_index` (e.g. a
+transcript download) MUST render `1` for the first competency of a project, because
+`question_index = 0` for that competency after the correction. This is a consequence
+of the corrected value, not a new consumer-side rule.
+
+#### Scenario: Transcript download numbers the first competency as 1
+
+- GIVEN a participant whose first competency's session has `question_index = 0`
+- WHEN the transcript download renders that competency's question number
+- THEN it prints question `1`, never `0`
 
 ---
 
