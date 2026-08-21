@@ -34,11 +34,11 @@ Chain strategy: feature-branch-chain
 
 ## Testing discipline (repo gotchas — apply to every task below)
 
-- [ ] Every RED task must be **observed failing for the right reason** (assertion
+- [x] Every RED task must be **observed failing for the right reason** (assertion
       mismatch, not a thrown error from a missing symbol/route) before its GREEN.
-- [ ] No incidental count assertions (e.g. "exactly one alert rendered"). Assert
+- [x] No incidental count assertions (e.g. "exactly one alert rendered"). Assert
       by **content**: which alert, which key, which value — not how many.
-- [ ] Query-count guards assert **invariance** (1-row count == 3-row count), never
+- [x] Query-count guards assert **invariance** (1-row count == 3-row count), never
       an absolute literal.
 
 ---
@@ -94,24 +94,24 @@ OpenAPI + verify:
 - [x] 1.17 Full unfiltered Pest suite green; `Arch/C11/AdminTenancySafetyArchTest.php`
       and `Arch/C11/CandidateCannotReadProctoringArchTest.php` stay green,
       unmodified.
-- [ ] 1.18 Run `php artisan test --coverage --min=85`; record the actual
+- [x] 1.18 Run `php artisan test --coverage --min=85`; record the actual
       percentage for `LifecycleReadGate`/`AdminTranscriptSerializer`/
       `TranscriptResource` (~95% correctness-critical target) — do not close
       this task without the number.
 - [x] 1.19 Confirm `is_partial`, the `.txt` header, `error: "lifecycle_not_ready"`,
       `required_status` are not passed through any i18n/`__()` wrapper.
-- [ ] 1.20 Git Flow: PR against api `develop`; merge after review.
+- [x] 1.20 Git Flow: PR against api `develop`; merge after review.
 
 ---
 
 ## Cross-submodule sync-cycle 1 (after PR1 merges — unblocks PR4)
 
-- [ ] S1.1 `task openapi:sync` (`DB_CONNECTION=pgsql`) from the wrapper root.
-- [ ] S1.2 Commit regenerated `openapi.json`/`types/api.ts` to `backoffice`; commit
+- [x] S1.1 `task openapi:sync` (`DB_CONNECTION=pgsql`) from the wrapper root.
+- [x] S1.2 Commit regenerated `openapi.json`/`types/api.ts` to `backoffice`; commit
       the generated-snapshot-only `openapi.json` to `frontend` (no feature work).
-- [ ] S1.3 ONE wrapper commit advancing `api`, `frontend`, `backoffice` pointers
+- [x] S1.3 ONE wrapper commit advancing `api`, `frontend`, `backoffice` pointers
       together.
-- [ ] S1.4 Git Flow for the frontend snapshot: branch, PR, merge on frontend's
+- [x] S1.4 Git Flow for the frontend snapshot: branch, PR, merge on frontend's
       own `develop`.
 
 ---
@@ -135,7 +135,7 @@ D5 — `CompetencyTally` move, **first commit, alone**:
 - [x] 2.5 Verify `Feature/C7a/*` and `Feature/C8/*` stay fully green in isolation.
 - [x] 2.6 Audit: grep `api/` for any remaining inline ended-competency predicate
       outside `CompetencyTally` — confirm **no second tally definition** remains.
-- [ ] 2.7 Commit 2.1–2.6 as its own commit before any aggregator work. (Left to
+- [x] 2.7 Commit 2.1–2.6 as its own commit before any aggregator work. (Left to
       the orchestrator — this executor was instructed to leave the branch
       uncommitted; D5 and the aggregator work are separable in the diff but not
       committed separately here.)
@@ -183,7 +183,7 @@ Tenancy + verify:
       which exercise the exact endpoints this PR modified and stayed green — no
       new dedicated test was added for this task.
 - [x] 2.25 `Arch/C11/AdminTenancySafetyArchTest.php` stays green.
-- [ ] 2.26 `task openapi:sync` (`DB_CONNECTION=pgsql`); commit regenerated
+- [x] 2.26 `task openapi:sync` (`DB_CONNECTION=pgsql`); commit regenerated
       `api/openapi.json` in PR2. **Explicitly out of scope for this executor**
       per the orchestrator's instructions — the orchestrator owns this step.
 - [x] 2.27 Full unfiltered Pest suite green; coverage recorded for
@@ -192,18 +192,18 @@ Tenancy + verify:
       `App\Services\Admin\ParticipantInterviewAggregator`: Methods 100%
       (1/1), Lines 100% (40/40). `App\Support\Interview\CompetencyTally`:
       Methods 100% (2/2), Lines 100% (12/12).
-- [ ] 2.28 Git Flow: PR against api `develop`; merge after review. (Orchestrator's
+- [x] 2.28 Git Flow: PR against api `develop`; merge after review. (Orchestrator's
       responsibility — this executor left the branch uncommitted per instructions.)
 
 ---
 
 ## Cross-submodule sync-cycle 2 (after PR2 merges — unblocks PR3)
 
-- [ ] S2.1 `task openapi:sync` (`DB_CONNECTION=pgsql`) from the wrapper root.
-- [ ] S2.2 Commit regenerated `openapi.json`/`types/api.ts` to `backoffice`;
+- [x] S2.1 `task openapi:sync` (`DB_CONNECTION=pgsql`) from the wrapper root.
+- [x] S2.2 Commit regenerated `openapi.json`/`types/api.ts` to `backoffice`;
       generated-snapshot commit to `frontend`.
-- [ ] S2.3 ONE wrapper commit advancing all three pointers together.
-- [ ] S2.4 Git Flow for the frontend snapshot: branch, PR, merge.
+- [x] S2.3 ONE wrapper commit advancing all three pointers together.
+- [x] S2.4 Git Flow for the frontend snapshot: branch, PR, merge.
 
 ---
 
@@ -257,7 +257,7 @@ Verify:
       98 files/755 tests). Overall coverage 94.67% stmts / 88.91% branch /
       86.2% funcs. `app/utils/format.ts`: 100/100/100/100. `[id].vue`
       (participants): 98.1% stmts.
-- [ ] 3.20 Git Flow: PR against backoffice `develop`; merge after review.
+- [x] 3.20 Git Flow: PR against backoffice `develop`; merge after review.
       (Left to the orchestrator — this executor was instructed to leave the
       branch uncommitted.)
 
@@ -360,7 +360,7 @@ E2E + verify:
       passed, 5 failed — the same 4 plus one pre-existing, unrelated
       `session-cookie.spec.ts` webkit-only failure, independently confirmed
       pre-existing via the same stash technique.
-- [ ] 4.24 Git Flow: PR against backoffice `develop`; merge after review. No
+- [x] 4.24 Git Flow: PR against backoffice `develop`; merge after review. No
       dependency on PR3's branch state. (Left to the orchestrator — this
       executor was instructed to leave the branch uncommitted.)
 
@@ -368,10 +368,10 @@ E2E + verify:
 
 ## Final wrapper reconciliation
 
-- [ ] W.1 Confirm the wrapper's Cross-Stack Consistency job
+- [x] W.1 Confirm the wrapper's Cross-Stack Consistency job
       (`Taskfile.yml:161-166`) still finds `openapi.json` byte-identical across
       `api/`, `frontend/`, `backoffice/` after PR3/PR4 land; re-sync if needed.
-- [ ] W.2 Final wrapper commit(s) advancing the `backoffice` submodule pointer(s)
+- [x] W.2 Final wrapper commit(s) advancing the `backoffice` submodule pointer(s)
       for PR3/PR4.
 
 ## Deferred (not a task in this change)
@@ -379,3 +379,29 @@ E2E + verify:
 - Extra confirmation step on the transcript **download** button when a partial
   transcript is ruled strictly diagnostic (Open Question 1). Gated on a
   product/compliance answer; small additive follow-up if it lands.
+
+
+## Recorded evidence (orchestrator)
+
+- Coverage (task 1.18), observed: **94.05% lines overall** (6349/6751), gate 85%
+  cleared. Correctness-critical zone at **100%** line coverage —
+  `LifecycleReadGate`, `AdminTranscript`, `AdminTranscriptSerializer`,
+  `AdminParticipantReader`, `SessionCostEstimator`,
+  `ParticipantInterviewAggregator`, `CompetencyTally`.
+- Suites, observed: api **2054 tests / 2049 passed / 5 skipped / 0 failed**;
+  backoffice **789 Vitest passed**, typecheck exit 0, lint 0 errors, locales
+  594/594 parity; E2E chromium **66 passed / 4 failed**, the four being
+  pre-existing local-environment failures measured identically on `develop`
+  under the same environment.
+- Mutation checks that turned the suites RED, so the assertions are known to be
+  capable of failing: reverting the server gate threshold; removing `errore`
+  from the server allow-list; ranking `errore` on `ORDERED_STATUSES`; returning
+  `0` instead of `null` for elapsed; the threshold and disjointness mutations
+  repeated against the client mirror.
+- Sync cycles S1 and S2 both ran `task openapi:sync` under `DB_CONNECTION=pgsql`
+  against a real Postgres. The three snapshots are byte-identical, verified by
+  `diff` after each cycle.
+- One E2E regression was introduced by PR3 and fixed inside PR3: an assertion
+  pinning the raw session count, which that PR deliberately replaced. It now
+  pins `5 / 5` — strictly stronger. It was found by running Playwright, which
+  the slice's own report had skipped.
