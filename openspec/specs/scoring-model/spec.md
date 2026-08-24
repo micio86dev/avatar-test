@@ -260,6 +260,6 @@ The following are OUT OF SCOPE for this change and MUST NOT be addressed here:
 ## Implementation Note (C9 — Delivered)
 
 C9 (scoring-engine, first-pass PRs 1–3) has implemented validation that rejects any
-indicator score outside **{1, 3, 5} ∪ {-1 sentinel}**, the R-A reliability formula, the
+indicator score outside **{1, 2, 3, 4, 5} ∪ {-1 sentinel}**, the R-A reliability formula, the
 V-A validity predicate, and the 90% completion gate. Correctness-critical zones are held to
 ~95% test coverage. See `openspec/specs/scoring-engine/spec.md` for the full engine spec.

@@ -642,7 +642,7 @@ The evaluation report is the most complex view:
 │  ───────────────────────────────────────────────────────   │
 │  COL (Collaboration) │ 3.67  │ 100%        │ [5] [3] [3]   │
 │  COM (Communication) │ 5.00  │ 100%        │ [5] [5] [5]   │
-│  STG (Strategy)      │ 2.33  │ 83%         │ [3] [3] [1]   │
+│  STG (Strategy)      │ 2.67  │ 83%         │ [4] [3] [1]   │
 │  INN (Innovation)    │ 3.00  │ 67%         │ [3] [–] [3]   │
 │  ...                 │  ...  │  ...        │ ...            │
 ├────────────────────────────────────────────────────────────┤
@@ -651,10 +651,26 @@ The evaluation report is the most complex view:
 └────────────────────────────────────────────────────────────┘
 ```
 
-- **Indicator scores are the discrete set `{1, 3, 5}` — never 2, never 4, never a
-  decimal.** The LLM matches an answer against the BARS anchors `{5, 3, 1}` and picks the
-  single closest one. A chip rendering `2` or `4` is a bug, not a styling choice.
-  Colored chips map one-to-one: `1 = error`, `3 = warning`, `5 = success`.
+- **Indicator scores are one integer from `{1, 2, 3, 4, 5}` ∪ `{-1}` — no decimals.** The
+  catalog authors only three anchors (`anchor_5`, `anchor_3`, `anchor_1`); `4` and `2` are
+  **residual levels** selected only when the evidence matches neither bounding anchor — see
+  `openspec/specs/scoring-model/spec.md` ("Relational Rubric for Residual Score Levels") for
+  the binding rubric and anchor-primacy tie-break; this document does not restate it.
+  Indicator chips render **seven** states:
+
+  | Score | State | Border | Display |
+  |---|---|---|---|
+  | `5` | `success` | solid | `5` |
+  | `4` | `above-mid` (residual) | dashed | `4` |
+  | `3` | `warning` | solid | `3` |
+  | `2` | `below-mid` (residual) | dashed | `2` |
+  | `1` | `error` | solid | `1` |
+  | `-1` / `null` | `unassessable` | solid | `–` |
+  | any other value | `invalid` | solid | the raw value |
+
+  An out-of-domain value (e.g. `0`, `6`, a decimal) **MUST render as the loud `invalid`
+  chip showing the raw value — it MUST NOT be laundered into the neutral `unassessable`
+  chip**, which would silently hide a data-integrity defect from the operator.
 - **`-1` means UNASSESSABLE** (no assessable evidence in the transcript). It is NOT a score.
   Render it as a neutral/muted chip showing `–` (en dash) with an accessible label such as
   "not assessable", never as the number `-1` and never on the error/warning/success scale.
@@ -696,6 +712,7 @@ All text against its background MUST achieve:
 | white | `--color-error` (`#ef4444`) | 3.8:1 | ✗ (use `#b91c1c` for text on white) |
 | `--color-success-dark` (`#166534`) | white | 7.1:1 | ✓ AA (verified for BARS `ScoreChip`/`CompetencyMean` text+icon, C11 PR B3) |
 | `--color-warning-dark` (`#92400e`) | white | 7.1:1 | ✓ AA (verified for BARS `ScoreChip`/`CompetencyMean` text+icon, C11 PR B3) |
+| `--destructive` (`#b91c1c`) | `--color-error-light` (`#fee2e2`) | ≈5.30:1 | ✓ AA (invalid `ScoreChip`, C11-follow BARS 1–5 widening) |
 
 > ⚠️ Do NOT use `--color-accent` (`#e45526`) for small text on white — it fails the 4.5:1 AA threshold for normal text (3.7:1). Use `--color-accent-dark` (`#b8431e`, 5.4:1) for text-sized accent elements.
 
