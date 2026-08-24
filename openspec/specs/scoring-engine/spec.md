@@ -748,7 +748,7 @@ is exhausted and MUST NOT be re-offered.
 ## Coverage Note
 
 The following correctness-critical paths MUST be held to ~95% test coverage: indicator
-domain validation (`{1,3,5}∪{-1}`); server-side competency mean (denominator = assessed
+domain validation (`{1,2,3,4,5}∪{-1}`); server-side competency mean (denominator = assessed
 count); `MeanCalculator` returns null (not NaN/throw) when assessed set is empty;
 `ReliabilityStrategy` returns 0.0 for empty assessed set; reliability R-A formula;
 reliability % rounding (standard half-up: 2/3 → 67%); **reliability rendering round-before-cast
