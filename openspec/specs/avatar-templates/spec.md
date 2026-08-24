@@ -182,6 +182,14 @@ Absence of a `required` field MUST be reported as `required`.
 - WHEN another template named "Taken" is created for organization O
 - THEN the response is 422, not an unhandled database exception
 
+#### Scenario: A `language` key in submitted config is unknown for either provider
+
+- GIVEN a HeyGen or a Tavus template payload whose `config` includes a
+  `language` key
+- WHEN `POST /api/avatar-templates` (or `PATCH`) is called
+- THEN the response is 422 carrying `config.language` coded `unknown` — the
+  field spec no longer defines `language` for either provider
+
 ### Requirement: Activation swaps the organization's active template atomically and re-validates
 
 `POST /api/avatar-templates/{id}/activate` MUST deactivate the organization's
@@ -311,10 +319,18 @@ time — a config written before the cap existed, or written directly to the
 database, must not reach HeyGen as a value HeyGen itself would reject in front
 of a candidate.
 
-Tavus's `language` value MUST be translated from the platform's two-letter
-codes (`it`, `en`) into Tavus's own vocabulary (`italian`, `english`) — sending
-the platform's code unmodified is accepted by Tavus and silently ignored,
-producing an avatar that answers in the wrong language.
+Neither `TemplatePayload::heygen()` nor `TemplatePayload::tavus()` MUST ever
+emit a language field, for any config, under any circumstance — including a
+config whose stored value still carries a `language` key (e.g., a row written
+before this invariant existed). The avatar's spoken language MUST be sourced
+exclusively from the project, at the platform-default layer (see
+`interview-session`, "Platform-Default Avatar Identity When No Template
+Exists"), never from a template. This invariant lives in the MAPPER itself,
+not in a merge-time filter such as HeyGen's field allowlist — a filter alone
+is insufficient, because it can be widened independently (e.g. by
+configuration) without the mapper's owner noticing.
+(Previously: Tavus's `language` value was translated from the platform's
+two-letter code into Tavus's own vocabulary and mapped through.)
 
 #### Scenario: The avatar and voice an operator chose reach the HeyGen body
 
@@ -336,11 +352,14 @@ producing an avatar that answers in the wrong language.
 - WHEN the HeyGen payload is built
 - THEN `max_session_duration` equals `1200`, HeyGen's real ceiling
 
-#### Scenario: Tavus language is translated into its own vocabulary
+#### Scenario: Neither mapper ever emits a language field
 
-- GIVEN a Tavus config with `language = 'it'`
-- WHEN the Tavus payload is built
-- THEN the payload's `language` field equals `'italian'`, not `'it'`
+- GIVEN a HeyGen or a Tavus template config whose stored value still carries
+  `language` (e.g. `'it'` or `'italian'`), a row written before this change
+- WHEN the provider payload is built
+- THEN the resulting fragment carries no `language` key for HeyGen and no
+  `language` key at any path (top-level or `properties.language`) for Tavus —
+  the stored value is dropped silently, never mapped
 
 ### Requirement: Tavus persona-level knobs are synced to the PAL, never blocking a save, never naming the provider in a failure
 

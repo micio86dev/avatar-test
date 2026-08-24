@@ -35,7 +35,7 @@
 
 ## Note
 
-- I punteggi per indicatore usano l'insieme discreto {1,3,5} (ancora più vicina, mai valori intermedi); -1 = non valutabile (escluso dalla media);
+- I punteggi per indicatore usano l'insieme {1,2,3,4,5} (4 e 2 sono livelli residuali, selezionati solo quando l'evidenza non corrisponde a nessuna delle due ancore adiacenti); -1 = non valutabile (escluso dalla media);
 - `reliability` indica quanto le risposte hanno fornito evidenza sufficiente;
 - i valori di `reliability` nell'esempio sono illustrativi e non normativi (in attesa della decisione aperta #1);
 - `excerpts` devono essere citazioni fedeli dalla trascrizione (non inventate).
