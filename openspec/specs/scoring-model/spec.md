@@ -14,35 +14,52 @@ written here.
 ### Requirement: Indicator Score Domain
 
 Each BARS indicator score MUST be exactly one value from the discrete set
-**{1, 3, 5}**. The LLM MUST select the single closest anchor and assign
-that anchor's value. Interpolated values (2, 4, or any non-anchor integer
-or decimal) are PROHIBITED as indicator scores.
+**{1, 2, 3, 4, 5, -1}**. The catalog authors only three anchors per indicator
+(`anchor_5`, `anchor_3`, `anchor_1`); scores 4 and 2 are **residual levels**
+governed by the explicit relational rubric (see Requirement: Relational
+Rubric for Residual Score Levels below) — never free LLM discretion. Values
+outside this set (0, 6, any other integer, any decimal) are PROHIBITED.
+(Previously: domain was {1, 3, 5}; 2 and 4 were PROHIBITED as "interpolated"
+values with no anchor rule.)
 
-#### Scenario: Answer closest to the "5" anchor scores 5
+#### Scenario: Answer matching the "5" anchor scores 5
 
 - GIVEN a competency indicator with reference anchors {5, 3, 1}
-- WHEN the LLM evaluates a strong answer that is closest to the "5" anchor
+- WHEN the LLM evaluates an answer matching the "5" anchor description
 - THEN the indicator score is 5
-- AND the score is NOT 4 or any interpolated value
 
-#### Scenario: Answer closest to the "3" anchor scores 3
+#### Scenario: Answer clearly exceeding anchor-3 but not fully matching anchor-5 scores 4
 
 - GIVEN a competency indicator with reference anchors {5, 3, 1}
-- WHEN the LLM evaluates a moderate answer that is closest to the "3" anchor
+- WHEN the LLM evaluates an answer that clearly exceeds the anchor-3
+  description but does not fully match the anchor-5 description
+- THEN the indicator score is 4
+
+#### Scenario: Answer matching the "3" anchor scores 3
+
+- GIVEN a competency indicator with reference anchors {5, 3, 1}
+- WHEN the LLM evaluates an answer matching the "3" anchor description
 - THEN the indicator score is 3
 
-#### Scenario: Answer equidistant between "3" and "5" anchors resolves to one anchor, never 4
+#### Scenario: Answer clearly below anchor-3 but not as weak as anchor-1 scores 2
 
 - GIVEN a competency indicator with reference anchors {5, 3, 1}
-- WHEN the LLM evaluates an answer that lies between the "3" and "5" anchors
-- THEN the indicator score is either 3 or 5 (whichever is judged closest)
-- AND the score is NEVER 4
+- WHEN the LLM evaluates an answer clearly below the anchor-3 description but
+  not as weak as the anchor-1 description
+- THEN the indicator score is 2
 
-#### Scenario: Answer closest to the "1" anchor scores 1
+#### Scenario: Answer matching the "1" anchor scores 1
 
 - GIVEN a competency indicator with reference anchors {5, 3, 1}
-- WHEN the LLM evaluates a weak answer clearly closest to the "1" anchor
+- WHEN the LLM evaluates an answer matching the "1" anchor description
 - THEN the indicator score is 1
+
+#### Scenario: A genuine tie resolves to the authored anchor, never the residual level
+
+- GIVEN evidence equally consistent with the anchor-3 description and the
+  "exceeds anchor-3" residual rule
+- WHEN the LLM scores that indicator
+- THEN the indicator score is 3 (the authored anchor), never 4
 
 ---
 
@@ -50,8 +67,9 @@ or decimal) are PROHIBITED as indicator scores.
 
 An indicator that cannot be assessed (e.g. not addressed in the transcript)
 MUST carry the sentinel value **-1** (or null). The sentinel value MUST be
-exempt from the {1, 3, 5} constraint and MUST be excluded from the
+exempt from the {1, 2, 3, 4, 5} constraint and MUST be excluded from the
 competency mean calculation.
+(Previously: exempt from {1, 3, 5}.)
 
 #### Scenario: Unassessable indicator carries -1 and is excluded from mean
 
@@ -62,35 +80,38 @@ competency mean calculation.
 
 #### Scenario: All indicators assessed — no sentinel present
 
-- GIVEN a competency with three indicators all assessed (e.g. [5, 3, 5])
+- GIVEN a competency with three indicators all assessed (e.g. [4, 3, 5])
 - WHEN the competency score is computed
-- THEN all three indicators contribute to the mean: (5 + 3 + 5) / 3 ≈ 4.33
+- THEN all three indicators contribute to the mean: (4 + 3 + 5) / 3 = 4.0
 
 ---
 
 ### Requirement: Competency Score Arithmetic
 
 The `competency.score` MUST equal the simple arithmetic mean of the
-**assessed** indicator scores (i.e. those with values in {1, 3, 5}).
-The result MAY be fractional.
+**assessed** indicator scores (i.e. those with values in {1, 2, 3, 4, 5}).
+The result MAY be fractional and MAY now land exactly on a mean-chip boundary
+(2.5 or 3.5) — see `admin-backoffice`'s BARS Report Viewer requirement.
+(Previously: assessed set was {1, 3, 5}, which could never produce a mean of
+exactly 2.5 or 3.5.)
 
-#### Scenario: Three assessed indicators — [5, 3, 5] → 4.33
+#### Scenario: Three assessed indicators — [5, 4, 5] → 4.67
 
-- GIVEN a competency with assessed indicator scores [5, 3, 5]
+- GIVEN a competency with assessed indicator scores [5, 4, 5]
 - WHEN the competency score is computed
-- THEN `competency.score` = (5 + 3 + 5) / 3 ≈ 4.33
+- THEN `competency.score` = (5 + 4 + 5) / 3 ≈ 4.67
 
-#### Scenario: Three assessed indicators — [5, 3, 3] → 3.67
+#### Scenario: Three assessed indicators — [2, 3, 3] → 2.67
 
-- GIVEN a competency with assessed indicator scores [5, 3, 3]
+- GIVEN a competency with assessed indicator scores [2, 3, 3]
 - WHEN the competency score is computed
-- THEN `competency.score` = (5 + 3 + 3) / 3 ≈ 3.67
+- THEN `competency.score` = (2 + 3 + 3) / 3 ≈ 2.67
 
-#### Scenario: Three assessed indicators — [1, 1, 3] → 1.67
+#### Scenario: Four assessed indicators reach the 3.5 boundary exactly
 
-- GIVEN a competency with assessed indicator scores [1, 1, 3]
+- GIVEN a competency with assessed indicator scores [2, 3, 4, 5]
 - WHEN the competency score is computed
-- THEN `competency.score` = (1 + 1 + 3) / 3 ≈ 1.67
+- THEN `competency.score` = (2 + 3 + 4 + 5) / 4 = 3.5
 
 #### Scenario: Two of three indicators assessed — partial mean
 
@@ -106,23 +127,14 @@ The result MAY be fractional.
 Each competency result MUST carry a `reliability` value as a **separate field**, distinct
 from `competency.score`. `reliability` MUST be computed as the **assessable fraction**
 (R-A): `assessed_count / total_indicator_count`, where assessed indicators are those with
-scores in `{1, 3, 5}` and `-1` sentinels are excluded from the numerator. A competency is
+scores in `{1, 2, 3, 4, 5}` and `-1` sentinels are excluded from the numerator. A competency is
 VALID iff `reliability >= T`, where T defaults to **0.50 (50%)** and MUST be injectable via
 environment config without code change (V-A predicate). Reliability MUST be stored
 numerically (`[0..1]`, column type `numeric(5,4)`) and rendered as a percentage integer at
-the API/webhook serialization boundary using standard half-up rounding:
-`(int) round($reliabilityDbValue * 100, 0, PHP_ROUND_HALF_UP)` (e.g. stored 0.6667 → 67%,
-not 66%). The `round()` MUST be applied BEFORE the `(int)` cast — `(int)($value * 100)`
-truncates toward zero and is incorrect. Equivalently, the boundary value may be computed
-from raw counts as `(int) round($assessed / $total * 100, 0, PHP_ROUND_HALF_UP)`. When the
-assessed set is empty, `ReliabilityStrategy` returns `0.0` (never NaN or throws).
+the API/webhook serialization boundary using standard half-up rounding.
 `competency.score` MUST be stored as `numeric(5,2)`, rounded to 2 decimal places using
-standard half-up: e.g. 3.666… → 3.67.
-
-(Previously: "Reliability Is a Separate Value — Formula Out of Scope" — the requirement
-stated the formula was NOT decided and prohibited hard-coding. C9 closes this with R-A
-assessable-fraction + V-A T=50% default behind an injectable `ReliabilityStrategy` +
-`ValidityPredicate`.)
+standard half-up.
+(Previously: assessed indicators were those with scores in `{1, 3, 5}`.)
 
 #### Scenario: Evaluation output carries both score and reliability as separate fields
 
@@ -133,25 +145,15 @@ assessable-fraction + V-A T=50% default behind an injectable `ReliabilityStrateg
 
 #### Scenario: SLF reliability computed as assessable fraction — 67%
 
-- GIVEN competency SLF has 3 indicators with scores [5, 3, -1]
+- GIVEN competency SLF has 3 indicators with scores [4, 2, -1]
 - WHEN reliability is computed
 - THEN `assessed_count` = 2, `total_indicator_count` = 3, `reliability` = 2/3 ≈ 0.667
-- AND the serialized value at the API boundary = "67%" (using `(int) round(2/3 * 100)` = 67)
-
-#### Scenario: COL reliability 100% — all indicators assessed
-
-- GIVEN competency COL has 3 indicators all assessed: [5, 3, 3]
-- WHEN reliability is computed
-- THEN `reliability` = 3/3 = 1.0 and the serialized boundary value = "100%"
 
 #### Scenario: All indicators -1 → reliability 0.0, score NULL (CC2)
 
-- GIVEN a competency where all N indicators return score -1 (`assessed_count = 0`)
+- GIVEN a competency where all N indicators return score -1
 - WHEN reliability and mean are computed
-- THEN `reliability` = 0.0 (returned by `ReliabilityStrategy` for empty assessed set)
-- AND `competency.score` = NULL (returned by `MeanCalculator` for empty assessed set)
-- AND neither operation throws or returns NaN
-- AND the competency is INVALID (reliability 0.0 < T)
+- THEN `reliability` = 0.0 and `competency.score` = NULL, and the competency is INVALID
 
 #### Scenario: Competency valid at default T=50%
 
@@ -205,39 +207,129 @@ cited in the evaluation MUST be verbatim substrings of the transcript
 
 ### Requirement: Binding Document Correctness (This Change's Deliverable)
 
-The following source-of-truth documents MUST be updated so they state
-the discrete {1, 3, 5} scoring invariant. Any wording implying a 1–5
-continuous scale or interpolation is PROHIBITED after this change.
+The following source-of-truth documents MUST be updated so they state the
+**{1, 2, 3, 4, 5, -1}** scoring domain and summarize the AD-1 relational
+rubric (residual levels 4/2, anchor-primacy tie-break). Any wording asserting
+"score is never 4/2" or a discrete-only {1,3,5} invariant is PROHIBITED after
+this change.
 
-Files in scope:
-- `CLAUDE.md` (lines 137–144)
-- `openspec/ROADMAP.md` (C9 row)
-- `docs/app_description/02-domain/02-valutazione.md`
-- `docs/app_description/03-ux-reference/02-output-valutazione.md`
-- `docs/app_description/03-ux-reference/esempio-report-valutazione.json`
+Files in scope: `CLAUDE.md`, `openspec/ROADMAP.md` (C9 row),
+`docs/app_description/02-domain/02-valutazione.md`,
+`docs/app_description/03-ux-reference/02-output-valutazione.md`, and the 4×
+`AGENTS.md` files.
+(Previously: required these documents to state the discrete {1,3,5} domain
+and prohibit any 1–5 continuous/interpolated wording.)
 
-#### Scenario: CLAUDE.md states discrete {1,3,5} with no interpolation language
+#### Scenario: CLAUDE.md states the widened domain and the rubric summary
 
 - GIVEN CLAUDE.md after this change is applied
-- WHEN lines 137–144 are read
-- THEN the text states indicator scores are exactly one of {1, 3, 5} (closest anchor)
-- AND the example uses only discrete values (e.g. "COL 3.67 from 5,3,3", not "4,3,4")
-- AND the -1 / null unassessable sentinel rule is documented
-- AND no text says "interpolation allowed" or implies a continuous 1–5 range
+- WHEN the binding domain constraints section is read
+- THEN it states indicator scores are one of {1, 2, 3, 4, 5} plus -1
+- AND it summarizes the AD-1 rubric and anchor-primacy tie-break
+- AND no text claims a score is "never 4" or "never 2"
 
-#### Scenario: ROADMAP.md C9 row references discrete {1,3,5}
+#### Scenario: ROADMAP.md C9 row references the widened domain
 
 - GIVEN openspec/ROADMAP.md after this change
 - WHEN the C9 row is read
-- THEN it references "discrete {1,3,5}" (not "indicators 1–5")
+- THEN it references "indicators {1,2,3,4,5}" (not "discrete {1,3,5}")
 
-#### Scenario: esempio-report-valutazione.json contains only legal indicator scores
+#### Scenario: esempio-report-valutazione.json values remain legal, unchanged is acceptable
 
-- GIVEN docs/app_description/03-ux-reference/esempio-report-valutazione.json after regeneration
+- GIVEN `esempio-report-valutazione.json` after this change
 - WHEN every per-indicator score field is read
-- THEN each value is a member of {1, 3, 5} ∪ {-1}
-- AND the SLF competency retains its -1 sentinel on the unassessable indicator
-- AND each competency.score equals the arithmetic mean of that competency's assessed indicators
+- THEN each value is a member of {1, 2, 3, 4, 5, -1}
+- AND leaving the existing {1,3,5,-1} values unchanged (a subset) satisfies this
+  scenario — diversifying to include 2/4 is optional documentation value only
+
+---
+
+### Requirement: Relational Rubric for Residual Score Levels (AD-1)
+
+`PromptBuilder` MUST inject an explicit, versioned rubric mapping evidence to
+each of the five levels, per AD-1: `5` = matches anchor-5; `4` = clearly
+exceeds anchor-3 but does not fully match anchor-5; `3` = matches anchor-3;
+`2` = clearly below anchor-3 but not as weak as anchor-1; `1` = matches
+anchor-1; `-1` = no assessable evidence. This rubric is prompt logic: any
+future edit to its wording MUST bump `prompt_version`. The BARS catalog
+(`framework_bars_indicators`) is NOT modified by this rubric — no `anchor_4`/
+`anchor_2` column is introduced.
+
+#### Scenario: The rubric is injected verbatim into every scoring prompt
+
+- GIVEN the engine composes a scoring prompt for any competency
+- WHEN the prompt is inspected
+- THEN it contains the five-level rubric text verbatim, keyed to the current
+  `prompt_version`
+
+#### Scenario: Editing the rubric wording requires a prompt_version bump
+
+- GIVEN a future change edits the rubric's wording
+- WHEN that change is reviewed
+- THEN `prompt_version` is bumped; leaving it unchanged is a defect
+
+---
+
+### Requirement: No Cross-Version Score Comparability
+
+Evaluations already scored under an earlier `prompt_version` (e.g. `1.0.0`,
+domain {1,3,5}) MUST keep their original scores untouched. This change MUST
+NOT trigger a backfill or re-scoring of any existing `Evaluation`. The product
+makes no claim that scores from different `prompt_version` regimes are
+comparable.
+
+#### Scenario: A prompt_version 1.0.0 evaluation is never rewritten
+
+- GIVEN an `Evaluation` scored under `prompt_version 1.0.0`
+- WHEN `prompt_version 2.0.0` ships
+- THEN that Evaluation's stored indicator scores and competency means are
+  unchanged
+- AND no job re-scores it
+
+---
+
+### Requirement: Validation-Failure Reason Is Excluded From Every Scoring Formula
+
+An indicator whose `-1` score originates from a validation failure (excerpt
+unverifiable, or an illegal LLM-returned score — see `scoring-engine`'s Indicator
+Validation-Failure Reason Vocabulary) MUST be treated by every scoring formula
+IDENTICALLY to an indicator the model genuinely declared unassessable. The
+`unassessable_reason` field is metadata for operator/integrator display ONLY.
+`MeanCalculator`, `AssessableFractionReliability`, and `CompletionGate` MUST NOT
+branch on, read, or in any way depend on `IndicatorScore.unassessable_reason` —
+their inputs remain exactly `score` and
+the total indicator count, unchanged by this change. Ratified product decision #1
+(`reliability = assessed / total`, `-1` excluded from the numerator) is preserved
+byte-for-byte; a validation-failure `-1` counts against reliability exactly like a
+model-declared `-1`.
+
+#### Scenario: A validation-failure -1 and a model-declared -1 affect reliability identically
+
+- GIVEN two otherwise-identical competencies, each with 3 indicators and reliability
+  computed on 2 assessed of 3; competency A's unassessed indicator has
+  `unassessable_reason = 'model_declared'`, competency B's has
+  `unassessable_reason = 'excerpt_unverifiable'`
+- WHEN reliability is computed for both
+- THEN both yield `reliability = 2/3 ≈ 0.667` — no difference attributable to
+  `unassessable_reason`
+
+#### Scenario: MeanCalculator, AssessableFractionReliability, and CompletionGate stay diff-free
+
+- GIVEN the source of `MeanCalculator`, `AssessableFractionReliability`, and
+  `CompletionGate` before and after this change
+- WHEN their implementations are compared
+- THEN none of the three reads, branches on, or otherwise references
+  `IndicatorScore.unassessable_reason` — a test asserts this by construction (e.g. a
+  reflection/static check or an equivalence test using -1 scores with varying
+  reasons and identical outcomes)
+
+#### Scenario: A reason-aware formula would be a regression against ratified decision #1
+
+- GIVEN a hypothetical formula that weights `unassessable_reason = 'excerpt_unverifiable'`
+  differently from `unassessable_reason = 'model_declared'` in the reliability denominator
+- WHEN evaluated against this requirement
+- THEN it is a violation — any future change wanting this behavior MUST explicitly
+  argue against ratified product decision #1, not silently reinterpret "total"
 
 ---
 
