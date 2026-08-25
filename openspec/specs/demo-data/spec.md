@@ -287,12 +287,18 @@ snapshot row MUST be created with a dangling key.
 
 ### Requirement: Seeded Evaluation Data Is BARS-Valid
 
-Indicator scores MUST be drawn only from {1, 3, 5} or -1. A -1 score MUST be
+Indicator scores MUST be drawn only from {1, 2, 3, 4, 5} or -1. A -1 score MUST be
 excluded from a competency's mean. A competency whose indicators are ALL -1
 MUST store a NULL `competency_results.score`. `reliability` MUST equal
 assessed/total indicators for the competency. The validity threshold MUST be
 T=0.5, and the ≥90%-valid completion gate MUST resolve participant status
 consistently with the seeded indicator mix.
+
+(Previously: the assessed set was {1, 3, 5}. Widened by
+`2026-08-25-bars-full-scale-1-5`. The already-seeded fixtures needed no change,
+since the old values stay legal — but the word "only" made this a LIVE
+constraint, not a subset observation, and it would have rejected a future demo
+fixture using 2 or 4 for no reason while the scoring model accepts them.)
 
 #### Scenario: Mean excludes -1 scores
 
