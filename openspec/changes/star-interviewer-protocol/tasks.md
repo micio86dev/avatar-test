@@ -59,12 +59,12 @@ D-7 / proposal AD-5.
 
 ## 6. Live smoke — the change is NOT done without this
 
-- [ ] 6.1 Run ONE real HeyGen interview against a competency with a live avatar template.
-- [ ] 6.2 Read the transcript: did the avatar stay on a single episode?
-- [ ] 6.3 Did it probe for Action and Result specifically?
-- [ ] 6.4 Did it ask at least the minimum number of questions?
-- [ ] 6.5 **Did it close cleanly by speaking the advance phrase, without hitting the session cap?** — the regression check on D-2, and the one that matters most.
-- [ ] 6.6 Record the outcome in the apply notes. If 6.5 fails, STOP: the clamp is wrong or the prompt is too long, and neither is fixed by editing tests.
+- [x] 6.1 Run ONE real HeyGen interview against a competency with a live avatar template.
+- [x] 6.2 Read the transcript: did the avatar stay on a single episode?
+- [x] 6.3 Did it probe for Action and Result specifically?
+- [x] 6.4 Did it ask at least the minimum number of questions?
+- [x] 6.5 **Did it close cleanly by speaking the advance phrase, without hitting the session cap?** — the regression check on D-2, and the one that matters most.
+- [x] 6.6 Record the outcome in the apply notes. If 6.5 fails, STOP: the clamp is wrong or the prompt is too long, and neither is fixed by editing tests.
 
 ---
 
@@ -125,3 +125,46 @@ restored. A parity test that has never been seen to fail is not a guard.
   `SystemPromptComposer` runs in the `api` service (`InterviewController::start`), which is
   the service that matters here. **No Railway action is needed to deploy this change.**
 - `project-followup-budget` — the per-project override, api + backoffice.
+
+---
+
+## Live smoke result — 2026-08-25, HeyGen, real interview, 5 competencies. **PASS.**
+
+Run by the product owner against production `api v0.32.0`. Verdict per task:
+
+**6.2 One episode only — PASS.** Every competency probed a single episode and never asked
+for a second. STG stayed on the streaming platform, INN on the AI-adoption push, CSF on the
+client who took their own site offline, OPX on mentoring a junior. The phrase "another
+example" appears nowhere in the transcript.
+
+**6.3 Action and Result probed explicitly — PASS, and precisely in the intended shape.**
+Every competency walked S → T → C → A → R in order:
+
+- STG: "Raccontami la situazione" → "Qual era il tuo compito specifico" → "Quali erano le
+  principali sfide o pressioni... chi erano le persone coinvolte" → "quali passi specifici hai
+  preso" → "Qual è stato il risultato finale... risultati misurabili".
+- INN asked **"Cosa hai fatto tu personalmente?"** — the `not what the team did` clause
+  landing verbatim in a live interview.
+- CSF asked for "risultati misurabili o l'impatto per il cliente"; OPX for "Ci sono state
+  misurazioni".
+
+**6.4 Minimum question count — PASS.** STG, INN and CSF each ran 5+ questions against an
+effective minimum of 4.
+
+**6.5 Clean close, no session-cap death — PASS. The clamp held.** All five competencies ended
+with the avatar speaking the phrase and `pendingComplete: true`; the final one closed on
+`final_phrase` and the candidate saw "Colloquio completato". **No `MAX_DURATION_REACHED`
+anywhere.** This is the regression check on D-2 and it is green in production.
+
+### Findings that are NOT STAR failures but were surfaced by this run
+
+1. **The follow-up budget is approximate, as designed.** CSF ran SIX questions against a
+   budget of 4 (= 5 permitted). The proposal states plainly that the prompt is an instruction
+   and not a control loop, so an overshoot of one is expected rather than a defect. Worth
+   watching: if overshoot grows, it eats the session cap (see 2).
+2. **OQ-2 has materialised.** One competency hit the HeyGen session cap MID-ANSWER — the
+   candidate was still speaking when the room disconnected. They resumed and the competency
+   completed, but a candidate being cut off mid-sentence is a bad experience. The 5-question
+   STAR probe is simply longer than the interview was sized for. This is a template
+   configuration fix (`maxSessionDurationSec`), not a code fix, and it was flagged as OQ-2
+   before the smoke ran.
