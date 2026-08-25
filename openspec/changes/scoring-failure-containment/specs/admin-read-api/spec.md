@@ -39,21 +39,24 @@ machine-facing-values convention; localization of its label happens in
 ### Requirement: Evaluation Read Surface Exposes Per-Indicator Validation-Failure Reason
 
 `AdminEvaluationSerializer`'s per-indicator `behaviors` entries MUST expose the
-indicator's `reason` (`model_declared`, `excerpt_unverifiable`, `score_illegal`, or
-null) alongside the existing `score`/`explanation`/`excerpts` fields, whenever
-`score == -1`. This is a machine-facing value, unlocalized, per the same convention
-as `unscorable_reason`.
+indicator's `unassessable_reason` (`model_declared`, `excerpt_unverifiable`,
+`score_illegal`, or null) alongside the existing `score`/`explanation`/`excerpts`
+fields, whenever `score == -1`. This is a machine-facing value, unlocalized, per the
+same convention as `unscorable_reason`. `unassessable_reason` is deliberately named
+as the indicator-grain sibling of `unscorable_reason` (competency grain) and
+`failure_reason` (`ai_requests` call grain) — three different names for three
+different grains, not the same name reused.
 
 #### Scenario: A per-indicator reason accompanies a -1 score
 
-- GIVEN a competency with one indicator persisted `score = -1, reason =
+- GIVEN a competency with one indicator persisted `score = -1, unassessable_reason =
   'excerpt_unverifiable'` and two indicators with legal scores
 - WHEN the evaluation is serialized
-- THEN that indicator's `behaviors` entry includes `reason: "excerpt_unverifiable"`
-- AND the other two indicators' entries carry `reason: null`
+- THEN that indicator's `behaviors` entry includes `unassessable_reason: "excerpt_unverifiable"`
+- AND the other two indicators' entries carry `unassessable_reason: null`
 
 #### Scenario: A legally scored indicator's reason is null
 
 - GIVEN an indicator with a legal score in `{1,2,3,4,5}`
 - WHEN it is serialized
-- THEN its `reason` field is `null`
+- THEN its `unassessable_reason` field is `null`

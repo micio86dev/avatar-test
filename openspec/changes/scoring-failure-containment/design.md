@@ -49,7 +49,7 @@ else — exactly as `competency_results.unscorable_reason` is
 
 **Consequences, all in the change's favour:**
 
-- Adding `AiRequestFailureReason::ResponseTruncated` is a **one-case enum edit**. No migration,
+- Adding `AiRequestFailureReason::Truncated` is a **one-case enum edit**. No migration,
   no deploy-ordering contract, no blocking dependency for anything.
 - The rollback data precondition described in the proposal (`Rollback Plan`, A1) **does not
   exist**. There is no constraint to narrow, so there are no rows to migrate first.
@@ -91,17 +91,27 @@ D11 adds the drift guard that this arrangement has been missing.
 |---|---|---|---|
 | `AiRequestFailureReason` (exists) | `ai_requests.failure_reason` | **one provider call** | engineering / cost dashboard |
 | `UnscorableReason` (**new type**, existing values) | `competency_results.unscorable_reason` | **one competency, after all attempts** | operator **and** integrator |
-| `IndicatorFailureReason` (**new**, Increment B) | `indicator_scores.failure_reason` | **one indicator** | operator |
+| `IndicatorFailureReason` (**new**, Increment B) | `indicator_scores.unassessable_reason` | **one indicator** | operator |
+
+> **Naming note (Phase 0 correction, product owner decision).** This section originally named
+> the truncation values `response_truncated`/`llm_response_truncated` and the indicator-grain
+> field `failure_reason`. The **approved spec deltas win**: the persisted truncation values are
+> `truncated` (`ai_requests.failure_reason`) and `llm_truncated`
+> (`competency_results.unscorable_reason`), and the indicator-grain field is named
+> `unassessable_reason` — at the DB column, `IndicatorScoreDTO` property, API field, and i18n
+> key base — never `reason` (too vague) nor `failure_reason` (misleading: one of its three
+> values, `model_declared`, is the model answering honestly, not a failure). All three names
+> below are corrected accordingly.
 
 **Choice.** Three distinct types. `AiRequestFailureReason` gains
-`ResponseTruncated = 'response_truncated'`. `UnscorableReason` is introduced as a backed enum
-holding the three shipped values plus `LlmResponseTruncated = 'llm_response_truncated'`.
+`Truncated = 'truncated'`. `UnscorableReason` is introduced as a backed enum
+holding the three shipped values plus `LlmTruncated = 'llm_truncated'`.
 
 **Alternatives considered.** (a) One shared enum across both columns. (b) Map truncation back
 onto `llm_parse_error` at the competency level, keeping the operator-facing set at three.
 
 **Rationale.** (a) is wrong because the grains differ: under D8 a single truncated competency
-produces **two** `ai_requests` rows (`response_truncated`, then whatever the retry yields) and
+produces **two** `ai_requests` rows (`truncated`, then whatever the retry yields) and
 **one** `CompetencyResult`. A shared type invites a join that means nothing. (b) is the failure
 this change exists to remove — telling the operator "could not be read" when the system knows
 "was cut off" is the same class of under-reporting as the incident itself.
@@ -201,8 +211,8 @@ parsing:
 $llmResponse = $llmProvider->complete($fullPrompt, $options);      // attempt 1
 if ($llmResponse->truncated) → ScoringFailure::ResponseTruncated
       ├─ RetryWithLargerBudget → D8
-      └─ Terminal → recordAiRequest(success:false, ResponseTruncated)
-                    persistUnscorable(UnscorableReason::LlmResponseTruncated)
+      └─ Terminal → recordAiRequest(success:false, AiRequestFailureReason::Truncated)
+                    persistUnscorable(UnscorableReason::LlmTruncated)
                     return
 ```
 
@@ -356,7 +366,7 @@ assert(count($validated) === count($dtos));   // and asserted in Pest, not only 
 
 `IndicatorScoreDTO::asUnassessable()` returns a new readonly instance with `score: -1`
 (AD-1 — the arithmetic is untouched), `excerpts: []`, `explanation` preserved, and
-`failureReason` set. **Excerpts are dropped deliberately**: persisting a non-verbatim excerpt
+`unassessableReason` set. **Excerpts are dropped deliberately**: persisting a non-verbatim excerpt
 would store model-invented text in the field whose entire contract is "verbatim from the
 transcript". Dropping them also lands the DTO on exactly the `-1` + empty-excerpts shape
 `ExcerptValidator` already skips (CC2), so no re-validation branch is needed. The explanation is
@@ -411,7 +421,7 @@ already honours that key, so nothing in the provider changes.
 
 **Cost accounting — the non-negotiable part.** Each attempt calls `recordAiRequest()`
 **separately**, before its outcome is known to be terminal. Two calls means two rows: the first
-carries `success: false, failure_reason: response_truncated` with its own `input_tokens`,
+carries `success: false, failure_reason: truncated` with its own `input_tokens`,
 `output_tokens` and `estimated_cost_usd`; the second carries whatever it earns. This satisfies
 `observability/spec.md:385` ("exactly one `ai_requests` row per provider call, whether or not
 the result is usable") and keeps the doubled spend visible in the org cost dashboard as two line
@@ -420,7 +430,7 @@ hides it at the exact moment something is already wrong.**
 
 **When the enlarged budget also truncates:** `attemptsAlreadyMade` now equals `max_attempts`,
 `classify()` returns `Terminal`, a second `ai_requests` row is written with
-`failure_reason: response_truncated`, and `persistUnscorable(LlmResponseTruncated)` runs. **No
+`failure_reason: truncated`, and `persistUnscorable(UnscorableReason::LlmTruncated)` runs. **No
 third call, ever.** A test asserts `CassetteLLMProvider::callCount() === 2` for that scenario.
 
 **Alternatives considered.** (a) A hardcoded `private const MAX_ATTEMPTS = 1`, not
@@ -476,10 +486,10 @@ arithmetic — and survives refactoring.
 
 **Choice.** `webhooks.payload.version` stays `1.0`. `EvaluationPayloadAssembler` is unchanged in
 Increment A. In Increment B it gains one additive key inside each `behaviors[]` entry,
-`failure_reason`, present only when the indicator is unassessable.
+`unassessable_reason`, present only when the indicator is unassessable.
 
 **Alternatives considered.** (a) Bump to `1.1` for the widened `unscorable_reason` value set.
-(b) Bump to `1.1` when Increment B adds `behaviors[].failure_reason`. (c) Bump to `2.0`.
+(b) Bump to `1.1` when Increment B adds `behaviors[].unassessable_reason`. (c) Bump to `2.0`.
 
 **Rationale — three reasons, the second of which is decisive.**
 
@@ -517,7 +527,7 @@ actively misleading for `progress`*.
 **API.** `AdminEvaluationSerializer::serializeCompetencyResult()` returns
 `{score, reliability, behaviors, unscorable_reason}` — the machine key, unlocalized per
 CLAUDE.md, `null` for scored competencies. In Increment B each `behaviors[]` entry gains
-`failure_reason: string|null`. The docblock array shapes on `serialize()`,
+`unassessable_reason: string|null`. The docblock array shapes on `serialize()`,
 `serializeCompetencyResult()` and `EvaluationResource::__construct()` update in the same commit.
 `openapi.json` is regenerated — for the published contract, not for the backoffice (C-C).
 
@@ -549,7 +559,7 @@ and hiding a true value to make room for the explanation would be a second lie.
     "role_no_bars":                "Not scored — no BARS indicators are defined for this competency in the pinned framework version.",
     "anchor_translation_missing":  "Not scored — the BARS anchors are not available in this project's language.",
     "llm_parse_error":             "Not scored — the evaluator's response could not be read.",
-    "llm_response_truncated":      "Not scored — the evaluator's response was cut off before it was complete.",
+    "llm_truncated":               "Not scored — the evaluator's response was cut off before it was complete.",
     "unknown":                     "Not scored — unrecognised reason ({reason})."
   },
   "indicatorReason": {                                        // Increment B
@@ -567,7 +577,7 @@ this surface has no standing to recommend one. `llm_parse_error` deliberately do
 
 **Per-indicator placement (B).** The indicator chip strip is dense and a fourth column is not
 worth a rare case, so the reason becomes the `unassessable` `ScoreChip`'s screen-reader label and
-`title`, replacing the generic `report.chip.unassessable` when a `failure_reason` is present.
+`title`, replacing the generic `report.chip.unassessable` when an `unassessable_reason` is present.
 The chip's visual density is unchanged; the reason is available to both the SR user and on hover.
 
 ### D12 — Unknown keys render loudly, never blankly
@@ -576,7 +586,7 @@ The chip's visual density is unchanged; the reason is available to both the SR u
 
 ```ts
 const KNOWN_UNSCORABLE = ['role_no_bars', 'anchor_translation_missing',
-                          'llm_parse_error', 'llm_response_truncated'] as const
+                          'llm_parse_error', 'llm_truncated'] as const
 
 export function unscorableReasonKey(reason: string | null): string | null {
   if (reason === null) return null
@@ -602,14 +612,14 @@ targets its predecessor.
 
 | # | Slice | Repo | Contents | Est. Δ |
 |---|---|---|---|---|
-| A1 | truncation detection | `api` | `LLMResponse.truncated` · Anthropic mapping · `ScoringFailure`/`ScoringDisposition`/`ScoringFailureClassifier` + case-loop test · `AiRequestFailureReason::ResponseTruncated` · `UnscorableReason` enum (D2) · job short-circuit · `CassetteLLMProvider` per-call responses · truncated cassette | ~330 |
+| A1 | truncation detection | `api` | `LLMResponse.truncated` · Anthropic mapping · `ScoringFailure`/`ScoringDisposition`/`ScoringFailureClassifier` + case-loop test · `AiRequestFailureReason::Truncated` · `UnscorableReason` enum (D2) · job short-circuit · `CassetteLLMProvider` per-call responses · truncated cassette | ~330 |
 | A2 | parse tolerance | `api` | `ResponseEnvelopeStripper` + `UnwrappedResponse` · `EvaluationParser` wiring · fenced cassette · negative cassettes | ~190 |
 | A3 | fingerprint | `api` | migration (columns + sha256 format CHECK) · `ResponseFingerprint` · `recordAiRequest()` wiring · no-leak-across-all-columns test | ~210 |
 | A4 | read surface | `api` | serializer `unscorable_reason` · docblock shapes · key-set drift guard (D11) · `openapi.json` regen | ~100 |
 | A5 | operator UI | `backoffice` | hand-typed interfaces · `unscorableReasonKey()` · `CompetencyRow` render · `en`+`it` · Vitest | ~230 |
 | B1 | truncation retry | `api` | `config/scoring.php` block · config-invariant test · second-call path · second `ai_requests` row · cap + ceiling + also-truncated tests | ~250 |
-| B2 | per-indicator isolation | `api` | `indicator_scores.failure_reason` migration + backfill + equivalence CHECK · `IndicatorFailureReason` · DTO `failureReason` + `asUnassessable()` · parser totality · two-phase `scoreCompetency()` · arch test (D9) · count post-condition test | ~380 |
-| B3 | indicator surfacing | `api` + `backoffice` | serializer + `EvaluationPayloadAssembler` `behaviors[].failure_reason` · `ScoreChip` SR label · i18n · tests | ~180 |
+| B2 | per-indicator isolation | `api` | `indicator_scores.unassessable_reason` migration + backfill + equivalence CHECK · `IndicatorFailureReason` · DTO `unassessableReason` + `asUnassessable()` · parser totality · two-phase `scoreCompetency()` · arch test (D9) · count post-condition test | ~380 |
+| B3 | indicator surfacing | `api` + `backoffice` | serializer + `EvaluationPayloadAssembler` `behaviors[].unassessable_reason` · `ScoreChip` SR label · i18n · tests | ~180 |
 
 **Ordering constraints, and only these:**
 
@@ -631,7 +641,7 @@ is what makes the split safe.
 
 **B2 migration rollback has no data precondition.** `down()` drops the equivalence CHECK and then
 the column; dropping a column cannot violate a constraint. The backfill
-(`UPDATE indicator_scores SET failure_reason = 'model_declared' WHERE score = -1`) is a statement
+(`UPDATE indicator_scores SET unassessable_reason = 'model_declared' WHERE score = -1`) is a statement
 of fact, not a guess, in the same sense as `2026_07_31_000001:44-50`: before this change, a
 validation failure discarded the whole competency and wrote **zero** `IndicatorScore` rows, so
 every existing `-1` row is model-declared by construction.
@@ -655,8 +665,8 @@ every existing `-1` row is model-declared by construction.
             │              ├─ RetryWithLargerBudget ──► complete({max_tokens: min(2N, ceiling)})
             │              │        (D8)                     └──► its OWN ai_requests row
             │              │
-            │              └─ Terminal ──► ai_requests(success:false, response_truncated)
-            │                              persistUnscorable(LlmResponseTruncated)
+            │              └─ Terminal ──► ai_requests(success:false, truncated)
+            │                              persistUnscorable(LlmTruncated)
             no
             │
             ▼
@@ -681,7 +691,7 @@ every existing `-1` row is model-declared by construction.
             │
             ▼
    CompetencyResult{score, reliability, valid, unscorable_reason}
-   IndicatorScore{score:-1, failure_reason}      ← reason is metadata, never arithmetic (AD-1)
+   IndicatorScore{score:-1, unassessable_reason} ← reason is metadata, never arithmetic (AD-1)
             │
             ├──► EvaluationPayloadAssembler ──► webhook, version "1.0", additive   (D10)
             │
@@ -726,7 +736,7 @@ boundary (`ScoreEvaluationJob.php:183`); no new query is introduced outside it, 
 | `backoffice/app/components/molecules/CompetencyRow.vue` | Modify | D11 — reason in the Indicators cell |
 | `backoffice/app/composables/useEvaluationReport.ts` | Modify | C-C/D11 — hand-typed, by hand |
 | `api/database/migrations/*_add_response_fingerprint_to_ai_requests.php` | Create | D6 |
-| `api/database/migrations/*_add_failure_reason_to_indicator_scores.php` | Create | D7 — additive, backfilled, equivalence CHECK |
+| `api/database/migrations/*_add_unassessable_reason_to_indicator_scores.php` | Create | D7 — additive, backfilled, equivalence CHECK |
 | **NOT changed** | — | `MeanCalculator`, `AssessableFractionReliability`, `CompletionGate`, `IndicatorValidator`, `data-retention/spec.md`, `PromptBuilder`, `prompt_version`, `webhooks.payload.version` |
 
 ---
@@ -742,7 +752,7 @@ boundary (`ScoreEvaluationJob.php:183`); no new query is introduced outside it, 
 | Unit, api | Shipped config defaults: `max_attempts === 1`, `budget_multiplier === 2.0` | Pest, `QueueRuntimeConfigTest` precedent |
 | Arch, api | Formula classes do not depend on the reason types (D9) | Pest arch |
 | Arch, api | Serializer key set equals the literal expected list (D11) | Pest |
-| Integration, api ~95% | Truncated cassette → `response_truncated` in `ai_requests` **and** `llm_response_truncated` on the `CompetencyResult`, never `llm_parse_error` | Pest + extended `CassetteLLMProvider` |
+| Integration, api ~95% | Truncated cassette → `truncated` in `ai_requests` **and** `llm_truncated` on the `CompetencyResult`, never `llm_parse_error` | Pest + extended `CassetteLLMProvider` |
 | Integration, api ~95% | Fenced cassette parses green; malformed negative cassettes still hard-fail | Pest, new fixtures — none exist today |
 | Integration, api ~95% | 3 indicators, 3 different failures → **3** `IndicatorScore` rows, all `-1`, reliability `0.0` | Pest |
 | Integration, api ~95% | 1 unverifiable of 3 → 2 assessed, reliability `2/3`, `valid: true` at T=0.5 | Pest |
@@ -764,8 +774,8 @@ Two migrations, both additive, both with clean `down()`:
   the constraint by construction.
 - **`indicator_scores`** (B2): one nullable column, backfilled
   `WHERE score = -1 → 'model_declared'`, then the equivalence CHECK
-  `(score = -1) = (failure_reason IS NOT NULL)`. `down()` drops constraint then column. **No data
-  precondition** — dropping a column cannot violate anything.
+  `(score = -1) = (unassessable_reason IS NOT NULL)`. `down()` drops constraint then column. **No
+  data precondition** — dropping a column cannot violate anything.
 
 **No enum-value CHECK is added or narrowed anywhere** (C-A, D2), so the change carries no
 rollback step with a data precondition at all. Reverse ship order on rollback:
@@ -794,4 +804,4 @@ No backfill of historical evaluations, no re-scoring of `evaluation_id` 6.
       `webhooks-integration` must publish the `unscorable_reason` **value set** and `behaviors[]`
       keys as OPEN and EXTENSIBLE, extending the rule it already states for `files` (`:253-255`),
       since D10 declines a version bump on the strength of that rule; and `observability` must
-      record the three fingerprint columns and the new `response_truncated` failure reason.
+      record the three fingerprint columns and the new `truncated` failure reason.
