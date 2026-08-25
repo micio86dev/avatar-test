@@ -636,8 +636,21 @@ targets its predecessor.
 **B2 is the only slice at budget.** If the RED-phase test count pushes it past 400, split at the
 natural seam: **B2a** = schema + `IndicatorFailureReason` + DTO + parser totality (the parser can
 emit `ScoreIllegal` DTOs while the job still validates them in one `try` — behaviour unchanged,
-fully testable); **B2b** = the job's two-phase restructure + arch test. B2a is inert alone, which
-is what makes the split safe.
+fully testable); **B2b** = the job's two-phase restructure + arch test.
+
+> **Correction, recorded rather than silently fixed (per `sdd-verify`'s empirical
+> reproduction).** The line above originally read "B2a is inert alone, which is what makes the
+> split safe." That is FALSE and was disproved by breaking and restoring the job's write path:
+> B2a's own migration adds the equivalence CHECK `(score = -1) = (unassessable_reason IS NOT
+> NULL)` on `indicator_scores`, which requires **every** `-1` insert — including the
+> pre-existing model-declared case, not only the new illegal-type case — to carry a reason.
+> Applying B2a's schema/enum/parser changes with the job's write path unmodified breaks
+> `GoldenCassetteTest` and `IntermediateScaleCassetteTest` with `SQLSTATE[23514]: Check
+> violation`. B2a is separately **reviewable** (its own tests pass without B2b's restructure),
+> but it is **not separately deployable**: the migration is only safe once the job's write path
+> passes `unassessable_reason` on every `-1`, which `apply` completed within B2a's own scope
+> (Deviation #7). **Ship-order footnote: B2a and B2b MUST reach production in the SAME
+> release, not merely be separately reviewable or separately revertable in isolation.**
 
 **B2 migration rollback has no data precondition.** `down()` drops the equivalence CHECK and then
 the column; dropping a column cannot violate a constraint. The backfill
