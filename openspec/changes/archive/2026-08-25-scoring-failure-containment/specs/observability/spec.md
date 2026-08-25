@@ -4,17 +4,20 @@
 
 ### Requirement: AiRequestFailureReason Gains a Truncation Case
 
-`AiRequestFailureReason` (the closed set backing `ai_requests.failure_reason`,
-enforced by the `ai_requests_failure_reason_check` Postgres CHECK constraint) MUST
+`AiRequestFailureReason` (the closed set backing `ai_requests.failure_reason`) MUST
 gain a seventh case, `truncated`, identifying a provider response truncated at the
 configured `max_tokens` budget (distinct from the existing `ParseError`,
 `IndicatorCountMismatch`, `InvalidIndicatorScore`, `ExcerptNotVerbatim`,
 `ProviderError`, and `Timeout` cases, and distinct from `scoring-engine`'s
 competency-level `llm_truncated` `unscorable_reason` — the two are different columns
-on different models, deliberately given related but non-identical names).
-Adding this case REQUIRES a migration widening the CHECK constraint; the migration
-MUST ship before any code path writes the new value, or every write of it fails
-at the database layer.
+on different models, deliberately given related but non-identical names). The only
+Postgres constraint on this column is `ai_requests_failure_reason_check`, and it is
+presence-based — `CHECK ((success = false) = (failure_reason IS NOT NULL))` — not a
+value-enumerating CHECK. The closed set of legal values is enforced in PHP, at the
+single writer (`ScoreEvaluationJob::recordAiRequest()`), exactly as
+`competency_results.unscorable_reason`'s value set already is. Adding this case is
+therefore a ONE-CASE ENUM EDIT: no migration widens any constraint, and the new
+case ships together with its writer in the same PR, with no deploy-order gate.
 
 #### Scenario: A truncated call is logged with the truncation failure reason
 
@@ -22,12 +25,13 @@ at the database layer.
 - WHEN the `ai_requests` row for that call is written
 - THEN `failure_reason = 'truncated'`, distinct from `llm_parse_error`
 
-#### Scenario: The CHECK constraint accepts the new value only after migration
+#### Scenario: The presence-based CHECK constraint is unaffected by the new value
 
-- GIVEN the CHECK-constraint migration has run
-- WHEN a row is inserted with the new truncation `failure_reason` value
-- THEN the insert succeeds
-- AND inserting the same value against the PRE-migration constraint would have been rejected — the migration MUST precede any writer (deploy-order contract)
+- GIVEN the `truncated` case has been added to `AiRequestFailureReason` (no migration)
+- WHEN a row is inserted with `success = false` and `failure_reason = 'truncated'`
+- THEN the insert succeeds, because `ai_requests_failure_reason_check` only asserts
+  `(success = false) = (failure_reason IS NOT NULL)` — it never enumerates legal
+  values, so no widening was ever required
 
 ---
 

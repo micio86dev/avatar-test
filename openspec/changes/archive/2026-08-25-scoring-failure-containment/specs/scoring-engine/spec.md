@@ -8,8 +8,9 @@ Each indicator score returned by the LLM MUST be validated server-side as exactl
 value from `{1, 2, 3, 4, 5} ∪ {-1}`. Scores of 0, 6, any decimal, any other negative
 value, or any value outside this set MUST be rejected. An illegal score MUST NOT
 discard the whole competency: validation happens per-indicator, and a rejected
-indicator is persisted with `IndicatorScore.score = -1` and `IndicatorScore.reason =
-'score_illegal'` (see Requirement: Per-Indicator Validation-Failure Isolation).
+indicator is persisted with `IndicatorScore.score = -1` and
+`IndicatorScore.unassessable_reason = 'score_illegal'` (see Requirement: Per-Indicator
+Validation-Failure Isolation).
 Sibling indicators in the same competency that validated cleanly MUST retain their
 own scores unaffected.
 (Previously: legal domain was `{1, 3, 5} ∪ {-1}`, and an illegal score threw
@@ -41,7 +42,7 @@ discarding every already-validated sibling indicator.)
 
 - GIVEN the LLM returns score -1 for indicator I (no assessable evidence)
 - WHEN the validator processes the response
-- THEN an `IndicatorScore` row is persisted with `score = -1` and `reason = 'model_declared'`
+- THEN an `IndicatorScore` row is persisted with `score = -1` and `unassessable_reason = 'model_declared'`
 
 #### Scenario: Score 5 accepted
 
@@ -53,7 +54,7 @@ discarding every already-validated sibling indicator.)
 
 - GIVEN competency COL has 3 indicators and the LLM returns scores `[3, 6, 5]` (indicator 2 is illegal)
 - WHEN the validator processes the response
-- THEN indicator 2 is persisted with `score = -1`, `reason = 'score_illegal'`
+- THEN indicator 2 is persisted with `score = -1`, `unassessable_reason = 'score_illegal'`
 - AND indicators 1 and 3 are persisted with their own scores `3` and `5`, unaffected
 - AND no `InvalidIndicatorScoreException` propagates past the single indicator
 
@@ -61,14 +62,14 @@ discarding every already-validated sibling indicator.)
 
 - GIVEN the LLM returns an indicator score of 3.5 for one indicator among several valid ones
 - WHEN the validator processes the response
-- THEN only that indicator is persisted with `score = -1`, `reason = 'score_illegal'`
+- THEN only that indicator is persisted with `score = -1`, `unassessable_reason = 'score_illegal'`
 - AND the competency's other indicators are unaffected
 
 #### Scenario: Illegal negative score other than -1 is contained the same way
 
 - GIVEN the LLM returns an indicator score of -2 for one indicator among several valid ones
 - WHEN the validator processes the response
-- THEN only that indicator is persisted with `score = -1`, `reason = 'score_illegal'`
+- THEN only that indicator is persisted with `score = -1`, `unassessable_reason = 'score_illegal'`
 - AND the competency's other indicators are unaffected
 
 ---
@@ -78,7 +79,7 @@ discarding every already-validated sibling indicator.)
 Every excerpt in an `IndicatorScore` result MUST be a verbatim substring of the assembled
 session transcript (whitespace-normalized for the check only). The system MUST validate
 this by substring search. A non-matching excerpt MUST NOT discard the whole competency:
-that single indicator is persisted with `score = -1` and `reason = 'excerpt_unverifiable'`
+that single indicator is persisted with `score = -1` and `unassessable_reason = 'excerpt_unverifiable'`
 (see Requirement: Per-Indicator Validation-Failure Isolation); sibling indicators that
 validated cleanly retain their own scores. The system MUST NOT accept paraphrased,
 summarized, or invented text for any indicator.
@@ -102,7 +103,7 @@ single competency-wide `try`/catch, discarding every already-validated sibling i
 
 - GIVEN competency COL has 3 indicators and indicator 2's excerpt "candidate showed collaboration" is not a substring of transcript T
 - WHEN the excerpt is validated
-- THEN indicator 2 is persisted with `score = -1`, `reason = 'excerpt_unverifiable'`
+- THEN indicator 2 is persisted with `score = -1`, `unassessable_reason = 'excerpt_unverifiable'`
 - AND indicators 1 and 3, which validated cleanly, retain their own scores
 - AND the competency is NOT discarded — it survives with a lower reliability
 
@@ -253,8 +254,8 @@ Work Unit) — RT-B re-interviews the candidate and is untouched by this require
 `ScoreEvaluationJob`'s per-competency validation MUST catch validation failures at the
 INDICATOR level, not with a single `try`/catch spanning every indicator DTO in the
 competency. An indicator that fails validation (illegal score, or non-verbatim excerpt)
-MUST be persisted as `IndicatorScore.score = -1` with a reason (see Requirement: Indicator
-Validation-Failure Reason Vocabulary), while sibling indicators that validated cleanly
+MUST be persisted as `IndicatorScore.score = -1` with an `unassessable_reason` (see
+Requirement: Indicator Validation-Failure Reason Vocabulary), while sibling indicators that validated cleanly
 in the SAME competency, whether validated before or after the failing one in processing
 order, MUST retain their own scores. The competency's mean and reliability are then
 computed over whatever the isolated set produces — no formula changes (see
@@ -267,7 +268,7 @@ isolate when the envelope itself did not parse.
 
 - GIVEN competency COL has 3 indicators; indicators 1 and 3 validate cleanly with scores 5 and 3; indicator 2's excerpt is not verbatim
 - WHEN `scoreCompetency()` runs
-- THEN indicator 2 persists as `score = -1`, `reason = 'excerpt_unverifiable'`
+- THEN indicator 2 persists as `score = -1`, `unassessable_reason = 'excerpt_unverifiable'`
 - AND indicators 1 and 3 persist their own scores
 - AND COL's `reliability` = 2/3 ≈ 0.667, NOT 0 — COL is not discarded
 
@@ -275,32 +276,32 @@ isolate when the envelope itself did not parse.
 
 - GIVEN competency DRV has 3 indicators; indicator 1 has an illegal score; indicators 2 and 3 have not yet been processed
 - WHEN `scoreCompetency()` processes indicators in order
-- THEN indicator 1 persists as `score = -1, reason = 'score_illegal'`
+- THEN indicator 1 persists as `score = -1, unassessable_reason = 'score_illegal'`
 - AND indicators 2 and 3 are still evaluated and persist normally if they validate
 
 ### Requirement: Indicator Validation-Failure Reason Vocabulary
 
-Every `IndicatorScore` MUST carry a nullable `reason` attribute distinguishing WHY a
-`-1` score exists, from exactly three values: `model_declared` (the LLM itself
-returned `-1` — no assessable evidence), `excerpt_unverifiable` (the LLM claimed
-evidence that failed the verbatim-substring check), and `score_illegal` (the LLM
-returned a value outside `{1,2,3,4,5,-1}`). The column is nullable (null when
+Every `IndicatorScore` MUST carry a nullable `unassessable_reason` attribute
+distinguishing WHY a `-1` score exists, from exactly three values: `model_declared`
+(the LLM itself returned `-1` — no assessable evidence), `excerpt_unverifiable` (the
+LLM claimed evidence that failed the verbatim-substring check), and `score_illegal`
+(the LLM returned a value outside `{1,2,3,4,5,-1}`). The column is nullable (null when
 `score != -1` is not applicable, or for pre-migration rows) and UNCONSTRAINED — no
 Postgres CHECK constraint — so the vocabulary MAY extend later without a migration.
-`reason` is METADATA ONLY: no scoring formula (`MeanCalculator`,
+`unassessable_reason` is METADATA ONLY: no scoring formula (`MeanCalculator`,
 `AssessableFractionReliability`, `CompletionGate`) MAY read it (see `scoring-model`).
 
 #### Scenario: The three reasons are each independently producible
 
 - GIVEN three indicators in one competency: one the LLM declares `-1`, one with an unverifiable excerpt, one with an illegal score
 - WHEN validation runs
-- THEN the three `IndicatorScore` rows carry `reason` values `model_declared`, `excerpt_unverifiable`, and `score_illegal` respectively, all with `score = -1`
+- THEN the three `IndicatorScore` rows carry `unassessable_reason` values `model_declared`, `excerpt_unverifiable`, and `score_illegal` respectively, all with `score = -1`
 
 #### Scenario: A cleanly-assessed indicator carries a null reason
 
 - GIVEN an indicator that validates with a legal score in `{1,2,3,4,5}`
 - WHEN it is persisted
-- THEN `IndicatorScore.reason` is `null`
+- THEN `IndicatorScore.unassessable_reason` is `null`
 
 ### Requirement: Unscorable Reason Enum Widens Beyond Three Values
 

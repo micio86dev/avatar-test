@@ -39,23 +39,23 @@ fallback explanation, never a blank area and never a raw machine key.
 
 For an indicator rendering the neutral "not assessable" `–` chip (per the existing
 BARS Report Viewer Rendering Correctness requirement), `EvaluationReport.vue` MUST
-additionally surface the indicator's `reason` (`model_declared`,
+additionally surface the indicator's `unassessable_reason` (`model_declared`,
 `excerpt_unverifiable`, `score_illegal`) as an i18n-keyed tooltip or inline label
 distinguishing "the candidate gave no evidence" from "we could not verify/parse the
-model's answer." An indicator with `reason = null` renders exactly as today (no
-change to the existing chip contract).
+model's answer." An indicator with `unassessable_reason = null` renders exactly as
+today (no change to the existing chip contract).
 
 #### Scenario: An excerpt-unverifiable indicator is distinguishable from a model-declared one
 
-- GIVEN two indicators both rendering the `–` chip, one with `reason =
-  'model_declared'` and one with `reason = 'excerpt_unverifiable'`
+- GIVEN two indicators both rendering the `–` chip, one with `unassessable_reason =
+  'model_declared'` and one with `unassessable_reason = 'excerpt_unverifiable'`
 - WHEN both are rendered
 - THEN their tooltips/labels read differently, so an operator can tell "no evidence
   given" apart from "evidence claimed but not verifiable"
 
 #### Scenario: The existing chip contract is unchanged when reason is null
 
-- GIVEN an indicator with `score = -1` and `reason = null` (pre-migration data)
+- GIVEN an indicator with `score = -1` and `unassessable_reason = null` (pre-migration data)
 - WHEN rendered
 - THEN it shows the existing neutral `–` chip with its existing "not assessable"
   label, with no new reason-specific text
