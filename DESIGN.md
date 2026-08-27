@@ -638,6 +638,8 @@ The evaluation report is the most complex view:
 │  Candidate: Jane Doe — Role: MLL — Assessment: Standard    │
 │  Status: Completed — Score: 3.8 / 5.0                      │
 ├────────────────────────────────────────────────────────────┤
+│  Competency (?)  Indicator (?)  Reliability (?)  BARS (?)   │  ← glossary row
+├────────────────────────────────────────────────────────────┤
 │  Competency          │ Score │ Reliability │ Indicators     │
 │  ───────────────────────────────────────────────────────   │
 │  COL (Collaboration) │ 3.67  │ 100%        │ [5] [3] [3]   │
@@ -646,10 +648,37 @@ The evaluation report is the most complex view:
 │  INN (Innovation)    │ 3.00  │ 67%         │ [3] [–] [3]   │
 │  ...                 │  ...  │  ...        │ ...            │
 ├────────────────────────────────────────────────────────────┤
-│  Excerpts (verbatim from transcript)                        │
-│  "When I led the restructuring of the team, I..."          │
+│  Evidence                                    [Expand all]   │
+│  COL (Collaboration)                                        │
+│    ▸ [5]  Aligns the team around a shared goal             │
+│    ▾ [3]  Surfaces disagreement early                      │
+│         Rationale: partial evidence, one episode only.      │
+│         "When I led the restructuring of the team, I..."   │
+│    ▸ [3]  Shares credit for collective outcomes            │
 └────────────────────────────────────────────────────────────┘
 ```
+
+**The evidence section is a disclosure, not a second listing.** An earlier
+version of this view rendered the same evaluation twice: indicator text existed
+only under "Excerpts", score and reliability only in the grid, and nothing
+connected a chip to the excerpt that justified it. An operator looking at a chip
+reading `2` had no path to the sentence the candidate actually said.
+
+- Each accordion trigger carries **the same indicator chip the grid draws**, plus
+  the indicator text, **in the grid's chip order** — so chip *N* and item *N* are
+  the same indicator, and that correspondence is stated in copy, not left to be
+  inferred.
+- Expanding reveals the rationale and the verbatim excerpts. Collapsed by
+  default: the grid is the summary, this is the detail. An "Expand all" control
+  serves reading and printing the whole report.
+- The competency mean and reliability appear **only in the grid**, never repeated
+  in a group heading — a second occurrence of the same figure makes it ambiguous
+  which one is authoritative.
+- Terms whose meaning is not self-evident (competency, indicator, reliability,
+  BARS) carry a glossary trigger above the table. The trigger MUST be a real
+  focusable control with its definition also available to assistive tech without
+  opening it — hover-only content leaves keyboard, touch and screen-reader users
+  with the term and never its meaning.
 
 - **Indicator scores are one integer from `{1, 2, 3, 4, 5}` ∪ `{-1}` — no decimals.** The
   catalog authors only three anchors (`anchor_5`, `anchor_3`, `anchor_1`); `4` and `2` are
@@ -682,10 +711,11 @@ The evaluation report is the most complex view:
   neutral treatment, never `0`.
 - **Reliability: render the value the API returns, verbatim** (a percent string, e.g. `100%`).
   Do NOT map it to `High` / `Medium` / `Low` word bands — **no band thresholds exist**.
-  The `reliability` formula and the "valid competency" threshold are **open product
-  decision #1** (see `openspec/ROADMAP.md`), still unratified. Inventing bands here would
-  bake an unapproved business rule into the UI, where it would read as authoritative.
-  Once decision #1 is ratified, revisit this line before adding any banding.
+  Product decision #1 is **RATIFIED**: `reliability` = assessed / total indicators
+  (`-1` excluded from the numerator), validity threshold `T = 0.5`, and **no bands**.
+  The verbatim-percentage rule above is therefore settled, not provisional. Inventing
+  bands would bake an unapproved business rule into the UI, where it would read as
+  authoritative.
 - Excerpts: monospace font (`--font-mono`), verbatim from transcript (validated by substring match).
 
 ---
