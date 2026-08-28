@@ -282,10 +282,37 @@ production is therefore gated on proving delivery, on **both** the `api` and the
 service, which hold separate variable sets.
 
 `beai:mail-selftest` is that proof and MUST NOT report success on a transport that delivers
-nothing. It MUST exit non-zero when the mailer is `log` or `array`, when no recipient is
-given, and when the `from` address is unset or still the framework default; it MUST exit zero
-only after a real message passed through a real transport, and MUST state plainly that
-acceptance by a provider is not the same as arrival in an inbox.
+nothing. It MUST exit non-zero:
+
+- when the configured mailer **name** is `log` or `array`;
+- when the transport the mailer actually **resolves to** delivers nothing (`ArrayTransport`,
+  `LogTransport`, Symfony's `NullTransport`) — under **any** mailer name, and including when it
+  is reached through a composite (`failover` / `roundrobin`) chain at any depth. The refusal
+  MUST **name** the offending transport: an operator told "the chain reaches `log`" can act,
+  one told only "refused" cannot;
+- when the configured mailer cannot be resolved to a transport at all — an unknown mailer name,
+  an unsupported driver. "Cannot tell" is a no, not a pass;
+- when no recipient is given;
+- when the `from` address is unset or still the framework default.
+
+It MUST exit zero only after a real message passed through a real transport, and MUST state
+plainly that acceptance by a provider is not the same as arrival in an inbox.
+
+`failover` and `roundrobin` MUST NOT be refused by **name**. Both can genuinely deliver, and
+refusing them outright would trade a false pass for a false fail — a gate that cries wolf gets
+bypassed, which leaves the deployment worse off than the hole it closed.
+
+The refusals MUST run in this order: missing recipient → mailer name → resolved transport →
+`from` address. The failure that is silent in production is thereby always named before the one
+that is not.
+
+> **Corrected 2026-08-28.** As shipped, this gate matched the mailer NAME against
+> `['log', 'array']` and nothing else. `MAIL_MAILER=failover` — a **stock** mailer in
+> `config/mail.php:82-89` whose default members are `['smtp', 'log']` — passed it, and the
+> probe was demonstrated printing `Sent.` and exiting 0 on a chain that delivered nothing:
+> the exact lie it exists to prevent, reachable without editing any config. The requirement
+> above always described the broader behaviour; the code now matches it rather than the
+> wording being narrowed to match the code.
 
 #### Scenario: The probe refuses a non-delivering transport
 
@@ -293,15 +320,41 @@ acceptance by a provider is not the same as arrival in an inbox.
 - WHEN `beai:mail-selftest --to=<address>` runs
 - THEN it exits non-zero, having sent nothing, and names the transport as delivering nothing
 
+#### Scenario: A non-delivering transport is refused under any mailer name
+
+- GIVEN a mailer called anything at all — `notifications`, say — whose transport is `array`
+- WHEN the probe runs with a recipient and a usable `from`
+- THEN it exits non-zero, having sent nothing, and names `array`
+
+#### Scenario: A composite chain that falls through to a non-delivering member is refused
+
+- GIVEN `MAIL_MAILER` is `failover` with members `['smtp', 'log']`, or `roundrobin` with a
+  member whose transport is `array`, or a composite nested inside another composite
+- WHEN the probe runs
+- THEN it exits non-zero AND names the non-delivering member of the chain
+
+#### Scenario: A composite whose members all deliver is not refused
+
+- GIVEN a `failover` mailer whose every member resolves to a delivering transport
+- WHEN the probe runs
+- THEN it sends exactly one message and exits zero
+
+#### Scenario: A mailer that cannot be resolved is refused, not assumed to work
+
+- GIVEN `MAIL_MAILER` names no configured mailer, or names an unsupported driver
+- WHEN the probe runs
+- THEN it exits non-zero with a legible refusal, never an escaping stack trace
+
 #### Scenario: The probe refuses a default or unset sender before spending a send
 
-- GIVEN the `from` address is empty or the framework default
+- GIVEN a recipient and a delivering transport, and a `from` address that is empty or the
+  framework default
 - WHEN the probe runs
 - THEN it exits non-zero before attempting delivery
 
 #### Scenario: CI proves correctness without proving deliverability
 
-- GIVEN the test suite pins the `array` transport
-- WHEN the reset flow's tests run
-- THEN they assert the rendered message and never send
-- AND passing tests MUST NOT be read as evidence that production mail is deliverable
+- GIVEN `phpunit.xml` pins `MAIL_MAILER=array` for the whole suite
+- WHEN the probe is run against that un-overridden configuration
+- THEN it refuses, so a passing suite cannot be read as evidence that production mail delivers
+- AND the reset flow's own tests assert the rendered message and never send
