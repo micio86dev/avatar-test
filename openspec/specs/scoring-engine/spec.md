@@ -240,12 +240,11 @@ scenarios against the real, partially-translated catalogue.)
 
 For each `InterviewSession` belonging to the participant, the engine MUST:
 load BARS indicators and their anchors `{5, 3, 1}` at the PINNED `framework_version_id`
-(never the live C3 draft); assemble the session transcript by loading utterances with an
-explicit `->orderBy('ts')->orderBy('id')` (determinism-critical: `ts` is NOT guaranteed
-unique — HeyGen bulk-replace can produce timestamp ties; `id` is the stable secondary sort
-preserving insertion order within a tie) and serializing them as `"{speaker}: {text}"` per
-utterance joined by `\n` (the SAME assembled string is used in the prompt and in excerpt
-validation); assemble a prompt that injects those anchors verbatim, instructs the LLM to
+(never the live C3 draft); assemble the transcript corpora per **Requirement: Transcript
+Assembly for Scoring** — utterances loaded with an explicit `->orderBy('ts')->orderBy('id')`
+(determinism-critical: `ts` is NOT guaranteed unique — HeyGen bulk-replace can produce
+timestamp ties; `id` is the stable secondary sort preserving insertion order within a tie)
+and serialized as `"{speaker}: {text}"` per utterance joined by `\n`; assemble a prompt that injects those anchors verbatim, instructs the LLM to
 return indicators in the EXACT SAME ORDER they were injected (ordered by `position`), and
 requests ONLY per-indicator data from the LLM (no `score`/`reliability` roll-up in the
 requested schema); call `LLMProvider.complete(prompt, options)` with `temperature=0` and
@@ -267,7 +266,8 @@ competencies MUST NOT make an LLM call and MUST NOT produce an `ai_requests` row
 - GIVEN an `InterviewSession` with utterances having timestamps ts1 < ts2 < ts3
 - WHEN `PromptBuilder` assembles the transcript
 - THEN utterances are loaded via `->orderBy('ts')->orderBy('id')` and serialized in ascending ts order (id as tiebreaker)
-- AND the same serialized string is used in both the LLM prompt and the `ExcerptValidator`
+- AND the prompt corpus and the validation corpus are derived from that one ordered fetch, satisfying the subset invariant (see Requirement: Transcript Assembly for Scoring)
+- AND they are NOT the same string — the prompt corpus carries both speakers, the validation corpus carries the candidate only
 
 #### Scenario: Transcript order stable on timestamp tie (tiebreaker by id)
 
@@ -294,6 +294,113 @@ competencies MUST NOT make an LLM call and MUST NOT produce an `ai_requests` row
 - GIVEN the engine invokes `LLMProvider.complete(...)` for any competency
 - WHEN the options are inspected
 - THEN `temperature` equals 0 (no higher value is permitted)
+
+---
+
+### Requirement: Transcript Assembly for Scoring
+
+Transcript assembly MUST produce **two distinct corpora** from the same participant's
+utterances, serving two different roles.
+
+**The prompt corpus** MUST contain every utterance of every `InterviewSession` belonging to
+the participant, both speakers included (`candidate` and `avatar`), ordered
+`orderBy('ts')->orderBy('id')` — the dual sort remains determinism-critical, as `ts` alone is
+not unique under HeyGen bulk-replace. Sessions MUST be ordered deterministically among
+themselves. The segment belonging to the competency currently being scored MUST be
+**explicitly delimited** by a marker the prompt names, so the model can weight it while
+remaining free to cite corroborating evidence from elsewhere in the conversation.
+
+**The validation corpus** MUST contain **only** utterances whose `speaker` is `candidate`,
+drawn from the same participant-wide set, in the same order. The speaker comparison MUST be
+**case-insensitive**: a value differing only in letter case denotes the same speaker, and an
+exact comparison would silently drop such an utterance, failing every excerpt that cites it
+and scoring the participant `-1` across the board with no stated cause. A `speaker` that is
+genuinely neither value MUST be excluded from the validation corpus while remaining present
+in the prompt corpus.
+
+Markers MUST be emitted only around a target segment that contains at least one utterance.
+An empty pair of markers would announce a primary-evidence block that does not exist.
+
+The corpora MUST satisfy the **subset invariant**: every candidate utterance present in the
+validation corpus is also present in the prompt corpus. A change that breaks this invariant
+is a defect, because it would allow the model to be shown evidence it is then forbidden to
+cite.
+
+(Previously: `TranscriptAssembler::assemble(InterviewSession $session)` produced **one**
+string from **one** session — the competency currently being scored — and that single string
+was passed both to the LLM prompt and to `ExcerptValidator`. Evidence a candidate gave while
+answering a different competency's question was invisible to the evaluator, and the
+interviewer's own `avatar:` lines were a legal source of "evidence" about the candidate.)
+
+#### Scenario: Prompt corpus spans every competency of the participant
+
+- GIVEN a participant with three `InterviewSession` rows — COL, DRV, COM — each holding utterances
+- WHEN the prompt corpus is assembled while scoring COL
+- THEN it contains the utterances of all three sessions
+- AND the utterances of each session appear in `ts`, then `id` order
+- AND the session ordering is deterministic across repeated assembly of the same data
+
+#### Scenario: The target competency's segment is delimited
+
+- GIVEN the participant above and COL is the competency being scored
+- WHEN the prompt corpus is assembled
+- THEN the COL segment is enclosed between an explicit start marker and end marker
+- AND the DRV and COM segments are present but not enclosed by those markers
+- AND assembling the same data while scoring DRV instead moves the markers to the DRV segment, leaving the text otherwise identical
+
+#### Scenario: Validation corpus excludes the interviewer entirely
+
+- GIVEN a session containing `avatar: Tell me about a time you overruled your team` and `candidate: I overruled my team on the vendor choice`
+- WHEN the validation corpus is assembled
+- THEN it contains `I overruled my team on the vendor choice`
+- AND it does NOT contain `Tell me about a time you overruled your team`
+
+#### Scenario: Subset invariant holds
+
+- GIVEN any participant with any number of sessions and utterances
+- WHEN both corpora are assembled
+- THEN every candidate utterance text present in the validation corpus is also present in the prompt corpus
+
+#### Scenario: Participant with a single session behaves as before
+
+- GIVEN a participant with exactly one `InterviewSession`, for the competency being scored
+- WHEN the prompt corpus is assembled
+- THEN it contains that session's utterances, both speakers, in `ts`/`id` order
+- AND the whole corpus is the delimited target segment
+
+#### Scenario: Participant with no utterances yields empty corpora
+
+- GIVEN a participant whose sessions hold no utterances
+- WHEN both corpora are assembled
+- THEN both are empty strings
+- AND no exception is thrown
+
+#### Scenario: An empty target session among non-empty siblings emits no markers
+
+- GIVEN the target competency's session holds no utterances
+- AND another session holds candidate utterances
+- WHEN both corpora are assembled
+- THEN the prompt corpus contains the other session's utterances
+- AND it contains no marker text at all
+
+#### Scenario: A capitalized speaker is still recognized as the candidate
+
+- GIVEN an utterance whose `speaker` is `Candidate` rather than `candidate`
+- WHEN the validation corpus is assembled
+- THEN that utterance's text is present in it
+
+#### Scenario: An unknown speaker is excluded from validation but kept in the prompt
+
+- GIVEN an utterance whose `speaker` is neither `candidate` nor `avatar`
+- WHEN both corpora are assembled
+- THEN its text is absent from the validation corpus
+- AND its speaker-prefixed line is present in the prompt corpus
+
+#### Scenario: Another participant's utterances never leak in
+
+- GIVEN two participants each holding a session for the same competency
+- WHEN the corpora are assembled for the first participant
+- THEN neither corpus contains any of the second participant's utterances
 
 ---
 
@@ -413,17 +520,99 @@ scoring prompt, keyed to `prompt_version`. The prior instruction "Do NOT use
 scores 2, 4, or any other value" MUST be removed. `config('scoring.prompt_version')`
 MUST equal `2.0.0` for every Evaluation created after this change ships.
 
+> **The `2.0.0` pin above is SUPERSEDED by `evaluator-evidence-and-rigor`** (archived
+> 2026-08-28), which bumped `prompt_version` to `3.0.0` — see Requirement: Scoring Prompt
+> Construction. The rubric-injection and old-prohibition-removal clauses stand unchanged;
+> only the version literal moved. Evaluations produced before that change keep `2.0.0`
+> (no migration, no backfill).
+
 #### Scenario: The old prohibition is absent from the prompt
 
 - GIVEN any scoring prompt composed after this change
 - WHEN its text is inspected
 - THEN it contains no instruction prohibiting scores 2 or 4
 
-#### Scenario: New evaluations stamp prompt_version 2.0.0
+#### Scenario: New evaluations stamp the current prompt_version
 
 - GIVEN `ScoreEvaluationJob` runs after this change ships
 - WHEN the resulting `Evaluation` is persisted
-- THEN `prompt_version` = `2.0.0`
+- THEN `prompt_version` = the configured `config('scoring.prompt_version')` — `2.0.0` when
+  this requirement shipped, `3.0.0` from `evaluator-evidence-and-rigor` onward
+
+---
+
+### Requirement: Scoring Prompt Construction
+
+The scoring system prompt MUST carry an **EVALUATION STANDARDS** block establishing severity
+calibration, in addition to the existing IMPORTANT RULES, SCORING PROCEDURE, rubric and
+output-format sections. The block MUST establish that `3` is the baseline for adequate
+evidence, that `4` and `5` are rare and require **all three** of a specific situation,
+concrete actions and a measurable outcome, and that generic or hypothetical answers score
+`1` or `2`.
+
+The block MUST NOT contradict the SCORING PROCEDURE. Specifically, any instruction to
+resolve doubt downward MUST be scoped to the residual choice at step 5 of that procedure, and
+MUST NOT override the anchor-primacy tie-break: evidence equally consistent with an authored
+anchor and an intermediate level still resolves to the **authored anchor**.
+
+The block is written in **English** regardless of project locale, consistent with the
+SCORING PROCEDURE it sits beside. The indicator rubric remains localised to the project
+locale and continues to hard-fail via `AnchorTranslationMissingException` when any of
+`{text, anchor_5, anchor_3, anchor_1}` lacks a translation.
+
+The prompt MUST instruct the model that the transcript spans the whole interview, that the
+delimited segment is the target competency, and that evidence from outside that segment is
+admissible when it genuinely bears on the indicator.
+
+`config/scoring.php` `prompt_version` MUST be bumped to a new **major** version, because
+evaluations produced after this change are not comparable with evaluations produced before it.
+The value in force is `3.0.0`.
+
+> **Deployment note (verified 2026-08-25, still binding).** Both the Railway `api` AND
+> `worker` services pin `SCORING_PROMPT_VERSION` explicitly, so the `config/scoring.php`
+> default never reaches either. Scoring runs inside `ScoreEvaluationJob`, a QUEUED job — the
+> `worker` is the service that actually stamps provenance. Bumping only `api` leaves every
+> production evaluation stamped with the old version while being scored under the new
+> calibration, with no symptom anywhere. Any future `prompt_version` bump MUST update both.
+
+(Previously: the system prompt carried no severity guidance of any kind, and the transcript
+was presented as if it were the entire relevant evidence for the one competency being scored.)
+
+#### Scenario: Standards block present and consistent with the procedure
+
+- GIVEN a competency with indicators and a valid locale
+- WHEN the scoring prompt is built
+- THEN the system prompt contains an EVALUATION STANDARDS section
+- AND it states that 3 is the baseline and that 4 and 5 are rare
+- AND it names all three requirements for a high score: specific situation, concrete actions, measurable outcome
+- AND it does not instruct the model to prefer an intermediate level over a matching authored anchor
+
+#### Scenario: Standards block is English under a non-English locale
+
+- GIVEN a project locale of `it`
+- WHEN the scoring prompt is built
+- THEN the EVALUATION STANDARDS section is in English
+- AND the indicator rubric is in Italian
+
+#### Scenario: Prompt explains the delimited target segment
+
+- GIVEN a prompt corpus containing a delimited COL segment among other competencies
+- WHEN the scoring prompt is built for COL
+- THEN the system prompt names the delimiter
+- AND instructs the model to weight the delimited segment while admitting corroborating evidence from elsewhere
+
+#### Scenario: Missing anchor translation still hard-fails
+
+- GIVEN an indicator lacking an `anchor_3` translation for the project locale
+- WHEN the scoring prompt is built
+- THEN `AnchorTranslationMissingException` is thrown
+- AND no prompt is produced
+
+#### Scenario: prompt_version reflects the recalibration
+
+- GIVEN the scoring configuration after this change
+- WHEN a scoring call records its provenance
+- THEN `prompt_version` is a major version greater than the one recorded before this change
 
 ---
 
@@ -531,32 +720,109 @@ before go-live). When `false`, unscorables are excluded from both numerator and 
 
 ### Requirement: Excerpt Verbatim Validation
 
-Every excerpt in an `IndicatorScore` result MUST be a verbatim substring of the assembled
-session transcript (whitespace-normalized for the check only). The system MUST validate
-this by substring search. A non-matching excerpt MUST NOT discard the whole competency:
-that single indicator is persisted with `score = -1` and `unassessable_reason = 'excerpt_unverifiable'`
-(see Requirement: Per-Indicator Validation-Failure Isolation); sibling indicators that
-validated cleanly retain their own scores. The system MUST NOT accept paraphrased,
-summarized, or invented text for any indicator.
+Every excerpt on an `IndicatorScore` MUST be validated against the **validation corpus**
+(candidate utterances only — see Requirement: Transcript Assembly for Scoring) after
+whitespace normalisation — collapsing runs of `\s+` (all whitespace including `\n`, `\t`,
+multiple spaces) to a single U+0020 on both sides and trimming. The **original** excerpt
+text is persisted in `IndicatorScore.excerpts`, never the normalised form. The system MUST
+NOT accept paraphrased, summarized, or invented text for any indicator.
 
-Whitespace normalization: collapses runs of `\s+` (all whitespace including `\n`, `\t`,
-multiple spaces) to a single U+0020 on BOTH the excerpt AND the assembled transcript
-before the substring check. The ORIGINAL LLM excerpt text is persisted in
-`IndicatorScore.excerpts` (not the normalized form). Cross-utterance excerpts are
-PERMITTED: the transcript is one assembled string (speaker-prefixed utterances joined by
-`\n`); an excerpt may span across utterance boundaries within that assembled string.
-(Previously: a non-verbatim excerpt "flagged the competency result as invalid" via the
+An excerpt containing an **elision marker** — `...` (three ASCII periods) or `…` (U+2026) —
+MUST be accepted when its fragments appear in the validation corpus **in order, each strictly
+after the previous fragment ended**. Matching MUST be an anchored forward walk with no
+backtracking: it MUST NOT be implemented as a regex wildcard, and it MUST NOT accept a quote
+whose fragments appear in the corpus in a different order from the one the excerpt asserts.
+
+Empty fragments — produced when an excerpt opens or closes with an elision, or contains two
+adjacent markers — MUST be discarded before matching, so that a zero-length needle can never
+be the reason a quote is accepted.
+
+An excerpt that fails validation MUST NOT discard its sibling indicators: the affected
+indicator alone is persisted with `score = -1` and
+`unassessable_reason = 'excerpt_unverifiable'`, as already specified by
+Requirement: Per-Indicator Validation-Failure Isolation.
+
+A `score = -1` with an empty excerpts array MUST skip excerpt validation entirely.
+
+Cross-utterance excerpts remain PERMITTED **within the validation corpus**: an excerpt may
+span consecutive candidate utterances, because the corpus is one assembled string.
+
+(Previously: validation ran against the single assembled transcript, which included the
+interviewer's `avatar:` lines — so an excerpt quoting the interviewer's own question passed
+as evidence about the candidate. And matching was a bare `str_contains`, so any quotation
+containing an elision — the natural shape a real evaluator produces — was rejected outright.
+Earlier still, a non-verbatim excerpt "flagged the competency result as invalid" via the
 single competency-wide `try`/catch, discarding every already-validated sibling indicator.)
 
-#### Scenario: Verbatim excerpt accepted
+#### Scenario: Excerpt quoting the interviewer is rejected
 
-- GIVEN a transcript T containing the phrase "mi è capitato di lavorare"
-- WHEN an excerpt exactly matching that phrase is validated
-- THEN the excerpt is accepted and persisted
+- GIVEN the LLM returns the excerpt `Tell me about a time you overruled your team` for indicator I
+- AND that sentence was spoken by `avatar`, not by `candidate`
+- WHEN excerpt validation runs
+- THEN the excerpt is not verbatim in the validation corpus
+- AND indicator I alone is persisted with `score = -1` and `unassessable_reason = 'excerpt_unverifiable'`
+- AND every sibling indicator of the same competency retains its own score
+
+#### Scenario: Elided excerpt with ASCII ellipsis is accepted
+
+- GIVEN the candidate said `Nel giro di quattro mesi abbiamo rifatto la pipeline e il tempo medio è crollato a otto minuti`
+- AND the LLM returns the excerpt `Nel giro di quattro mesi... il tempo medio è crollato`
+- WHEN excerpt validation runs
+- THEN the excerpt is accepted
+- AND the excerpt is persisted with its original text, elision marker included
+
+#### Scenario: Elided excerpt with U+2026 is accepted
+
+- GIVEN the same candidate utterance
+- AND the LLM returns the excerpt `Nel giro di quattro mesi… il tempo medio è crollato`
+- WHEN excerpt validation runs
+- THEN the excerpt is accepted
+
+#### Scenario: Out-of-order fragments are rejected
+
+- GIVEN the candidate said `Nel giro di quattro mesi abbiamo rifatto la pipeline e il tempo medio è crollato`
+- AND the LLM returns the excerpt `il tempo medio è crollato... Nel giro di quattro mesi`
+- WHEN excerpt validation runs
+- THEN the excerpt is rejected, because the second fragment does not occur after the first one ended
+- AND indicator I is persisted with `score = -1` and `unassessable_reason = 'excerpt_unverifiable'`
+
+#### Scenario: Fragments must not overlap
+
+- GIVEN the candidate said `abbiamo rifatto la pipeline`
+- AND the LLM returns the excerpt `abbiamo rifatto la...rifatto la pipeline`
+- WHEN excerpt validation runs
+- THEN the excerpt is rejected, because the second fragment's match would have to start before the first fragment ended
+
+#### Scenario: Leading elision is discarded, not treated as an empty match
+
+- GIVEN the candidate said `il tempo medio è crollato a otto minuti`
+- AND the LLM returns the excerpt `...il tempo medio è crollato`
+- WHEN excerpt validation runs
+- THEN the leading empty fragment is discarded
+- AND the excerpt is accepted on the strength of its non-empty remainder alone
+
+#### Scenario: An elision does not license invented text
+
+- GIVEN the candidate said `abbiamo rifatto la pipeline`
+- AND the LLM returns the excerpt `abbiamo rifatto la pipeline... e ho licenziato il team`
+- WHEN excerpt validation runs
+- THEN the excerpt is rejected, because the second fragment appears nowhere in the validation corpus
+
+#### Scenario: Non-elided excerpts keep their existing behaviour
+
+- GIVEN the LLM returns an excerpt with no elision marker that is a verbatim substring of the validation corpus
+- WHEN excerpt validation runs
+- THEN the excerpt is accepted, exactly as before this change
+
+#### Scenario: Cross-utterance excerpt from the candidate still validates
+
+- GIVEN two consecutive `candidate` utterances whose texts, joined, contain the excerpt after whitespace normalisation
+- WHEN excerpt validation runs
+- THEN the excerpt is accepted
 
 #### Scenario: Non-verbatim excerpt is contained to its own indicator, siblings survive
 
-- GIVEN competency COL has 3 indicators and indicator 2's excerpt "candidate showed collaboration" is not a substring of transcript T
+- GIVEN competency COL has 3 indicators and indicator 2's excerpt "candidate showed collaboration" is absent from the validation corpus
 - WHEN the excerpt is validated
 - THEN indicator 2 is persisted with `score = -1`, `unassessable_reason = 'excerpt_unverifiable'`
 - AND indicators 1 and 3, which validated cleanly, retain their own scores
@@ -564,22 +830,15 @@ single competency-wide `try`/catch, discarding every already-validated sibling i
 
 #### Scenario: Whitespace normalization — multi-space collapsed
 
-- GIVEN an excerpt "foo  bar" and the assembled transcript containing "foo bar" (single space)
-- WHEN both are whitespace-normalized and the substring check runs
+- GIVEN an excerpt "foo  bar" and the validation corpus containing "foo bar" (single space)
+- WHEN both are whitespace-normalized and the match runs
 - THEN the excerpt is accepted
 
 #### Scenario: Whitespace normalization — newline and tab collapsed
 
-- GIVEN an excerpt "foo\nbar" and the assembled transcript containing "foo bar" (single space)
+- GIVEN an excerpt "foo\nbar" and the validation corpus containing "foo bar" (single space)
 - WHEN both are whitespace-normalized (all `\s+` → single space)
 - THEN the excerpt is accepted
-
-#### Scenario: Cross-utterance excerpt accepted
-
-- GIVEN the assembled transcript is "Interviewer: Tell me about collaboration.\nCandidate: I worked closely with a colleague."
-- WHEN an excerpt "collaboration.\nCandidate: I worked" is submitted
-- THEN after whitespace normalization the excerpt is a substring of the normalized transcript
-- AND the excerpt is accepted
 
 ---
 
@@ -994,9 +1253,17 @@ reliability % rounding (standard half-up: 2/3 → 67%); **reliability rendering 
 (3.666… → 3.67, `PHP_ROUND_HALF_UP`); validity predicate with injectable T; 90% gate
 (`completed`/`pending`); **gate invariant guard (`total_competencies == 0` → `errore`, no division)**;
 unscorable competencies counted in denominator (default policy);
-excerpt verbatim substring check (whitespace-normalized, cross-utterance); score -1 with
-empty excerpts passes validation; transcript assembled with `orderBy('ts')->orderBy('id')`
-(tiebreaker determinism); indicator count mismatch → `llm_parse_error` (no queue retry);
+excerpt verbatim substring check against the **validation corpus** (whitespace-normalized,
+cross-utterance, candidate-only); elision-tolerant matching as an anchored forward walk
+(in-order fragments accepted; out-of-order, overlapping, invented and zero-length fragments
+rejected); score -1 with
+empty excerpts passes validation; the two-corpora split and its subset invariant
+(`ScoringCorpora {prompt, validation}` from ONE ordered fetch); target-segment markers in the
+prompt corpus only, and never emitted around an empty segment; case-insensitive `speaker`
+match for the validation corpus; transcript assembled with `orderBy('ts')->orderBy('id')`
+(tiebreaker determinism); the EVALUATION STANDARDS block present, English under any locale,
+and not repealing the anchor-primacy tie-break (the step-5 scoping guard);
+indicator count mismatch → `llm_parse_error` (no queue retry);
 indicator mapping by array position (not string-match); L-2 hard-fail covers `{text, anchor_5,
 anchor_3, anchor_1}` (not anchors-only); tenant scoping (cross-org isolation);
 Evaluation versioning fields non-null; Evaluation created at job START; start-of-job guard
@@ -1045,6 +1312,36 @@ Known gaps documented at archive time (2026-07-22), to be addressed in a follow-
    and LifecycleResolutionTest; the exception class constructor line is never explicitly hit.
 4. **No standalone determinism run-twice test**: the golden cassette with CassetteLLMProvider
    at temperature=0 provides de-facto determinism evidence; a dedicated run-twice test is absent.
+
+Carried forward from `evaluator-evidence-and-rigor` verification (2026-08-28). These were
+WARNINGs, not blockers — the change archived as PASS WITH WARNINGS — but they are open and
+they belong here, not only in the archived folder.
+
+5. **A corpora swap in `ScoreEvaluationJob` would not fail any test.** `ScoreEvaluationJob`
+   line 597 sets `$validationCorpus = $corpora->validation` and line 771 passes it to
+   `ExcerptValidator::validate()` — correct today. But the subset invariant means the two
+   corpora are distinguishable ONLY by content unique to the prompt corpus: avatar-spoken
+   text or a segment marker. All 27 test files that exercise that job fixture
+   `'speaker' => 'Candidate'` utterances only, so rewriting line 771 to pass `$transcript`
+   (the prompt corpus) would leave the entire suite green — on precisely the defect this
+   change exists to fix. Consequently the scenario **"Excerpt quoting the interviewer is
+   rejected"** (Requirement: Excerpt Verbatim Validation) has **no single covering test**: it
+   is assembled from `TranscriptAssemblerTest` (corpus excludes avatar text) plus
+   `PerIndicatorIsolationTest` (unverifiable excerpt → `-1` + `excerpt_unverifiable`, no
+   sibling dropped). Status: PARTIAL, not untested. **Concrete fix**: one job-level test with
+   an `avatar` utterance whose text the cassette then cites as an excerpt, asserting the
+   indicator lands at `-1`. Until that exists, the wiring is held by review, not by CI.
+6. **`PerIndicatorIsolationTest` never demonstrates a surviving positive sibling.** It ends
+   with all three indicators at `-1` (a different reason each), so the clause "every sibling
+   indicator retains its own score" — present in this spec in three separate requirements — is
+   asserted nowhere with an actual surviving score. Minor, but the isolation guarantee is the
+   whole point of the requirement.
+7. **The drift gate has never run against `prompt_version` 3.0.0** — see the ci-pipeline
+   capability, Requirement: A Skipped `@ai` Guard Test MUST NOT Report Success. Nothing in CI
+   has verified that the recalibrated prompt still yields domain-legal, residual-reachable
+   scores from the live model, and 3.0.0 is in production. The static guards
+   (`PromptBuilderTest` anchor-primacy and step-5 scoping cases) prove the prompt TEXT is
+   intact and DO run; they say nothing about model behaviour.
 
 <!-- promoted from notifications-reminders (C12) -->
 

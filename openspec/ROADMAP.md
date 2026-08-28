@@ -86,6 +86,19 @@ must not be treated as legally validated.
    lines of brief between them, and FR-006 is marked "Optional". Removed from C13's scope
    entirely; they need a written requirement before any design work is meaningful.
 
+## Carried-forward risk
+
+Findings raised during verification of a change that was nonetheless archivable. They are
+NOT product decisions and they are NOT blocked on the product owner — they are open
+engineering debt with a named owner spec. Listed here so an archived change folder is never
+the only place a finding lives.
+
+| # | Finding | Recorded in | Raised by |
+|---|---|---|---|
+| R-1 | The `ai-integration` CI lane reports `success` over zero assertions — a sole-guard `@ai` test that `skip`s on a missing `ANTHROPIC_API_KEY` is indistinguishable from a pass, and the lane's `release/**` trigger has not fired since 0.33.0 because later release branches were never pushed. `scoring-engine`'s `prompt_version` 3.0.0 is live in production having never been observed by the drift gate. Repo-level CI defect. | `specs/ci-pipeline/spec.md` → Requirement: A Skipped `@ai` Guard Test MUST NOT Report Success (STATUS: OPEN) | `evaluator-evidence-and-rigor` verify, 2026-08-28 |
+| R-2 | A corpora swap in `ScoreEvaluationJob` (prompt corpus passed where the validation corpus belongs) would not fail any test — every fixture uses `speaker => 'Candidate'` only, so the two corpora are indistinguishable in the suite. The spec scenario "Excerpt quoting the interviewer is rejected" is PARTIAL. Fix: one job-level test citing an avatar utterance as an excerpt. | `specs/scoring-engine/spec.md` → Quality Debt item 5 | `evaluator-evidence-and-rigor` verify, 2026-08-28 |
+| R-3 | `PerIndicatorIsolationTest` ends with all three indicators at `-1`, so "every sibling indicator retains its own score" is never demonstrated with a surviving positive score. Minor. | `specs/scoring-engine/spec.md` → Quality Debt item 6 | `evaluator-evidence-and-rigor` verify, 2026-08-28 |
+
 ## Notes
 
 - **Topology:** this repo is the **wrapper superproject**; `api`, `frontend`, `backoffice`

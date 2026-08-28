@@ -131,7 +131,7 @@ corpus — PR 3 changes that. Independently revertible.*
 - [x] 14.2 Coverage on `app/Services/Scoring/` ≥ 95% (correctness-critical zone, CLAUDE.md).
 - [x] 14.3 PHPStan clean — it is the **first** CI step and it skips every later step when it fails (prior incident: 40 consecutive red runs hidden this way).
 - [x] 14.4 Pint clean.
-- [ ] 14.5 Verify CI green on the pushed branch — the pipeline, not the laptop. **NOT DONE: nothing is pushed.**
+- [x] 14.5 Verify CI green on the pushed branch — the pipeline, not the laptop. **DONE 2026-08-28:** the branch is merged to `develop` and shipped to `main`; `api` run on `main` (v0.36.2) is green on both jobs. Note the incident recorded in 14.3 recurred elsewhere the same day — the wrapper's cross-stack job had been red for days on an OpenAPI check that was *masking* a later Sanctum check, so fixing the first surfaced the second. A step that never runs and a step that passes look identical from the outside.
 
 ---
 
@@ -172,7 +172,8 @@ by `Feature/Demo/ExcerptVerbatimTest`, which invokes `beai:demo-seed` for real.
 
 **Deferred, deliberately, and NOT done:**
 
-- `14.5 Verify CI green on the pushed branch` — nothing is pushed yet.
+- ~~`14.5 Verify CI green on the pushed branch` — nothing is pushed yet.~~
+  Closed 2026-08-28: shipped to `main` and CI is green. Nothing remains deferred.
 - Railway's `SCORING_PROMPT_VERSION` must be bumped to `3.0.0` **at deploy time**, on
   **BOTH the `api` AND the `worker` services** — verified against the live project on
   2026-08-25: both pin it explicitly, so the config default never reaches either, and the

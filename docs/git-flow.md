@@ -56,6 +56,18 @@ git checkout develop
 git pull
 git checkout -b release/0.2.0
 
+# 1b. PUSH the release branch. For `api` this is not optional bookkeeping:
+#     .github/workflows/ai-integration.yml triggers on `push: branches:
+#     ['release/**']` and is the pre-release gate for the @ai group — the
+#     real-LLM tests, including RubricAdherenceDriftTest, which its own
+#     docblock calls the ONLY mechanism able to detect the model drawing the
+#     exceeds/meets line differently.
+#
+#     Releases 0.34.0 through 0.36.x cut the branch locally, merged, and
+#     deleted it without ever pushing, so that gate did not run for any of
+#     them. A gate wired to a branch nobody publishes is not a gate.
+git push -u origin release/0.2.0
+
 # 2. Bump the version SoT in this branch
 #    api:          echo "0.2.0" > VERSION
 #                  AND set composer.json "version": "0.2.0" — the api CI step

@@ -681,6 +681,62 @@ spend occurs on normal developer PR workflows.
 - THEN it passes solely on the basis of mock-based tests covering AI-path code
 - AND no AI API cost is incurred during coverage measurement
 
+---
+
+### Requirement: A Skipped `@ai` Guard Test MUST NOT Report Success
+
+> **STATUS: OPEN — specified, NOT yet implemented.** Carried forward from the
+> `evaluator-evidence-and-rigor` verification (2026-08-28), where it was raised as a WARNING
+> against a change that was otherwise archivable. This is a repo-level CI defect; it is not a
+> defect of that change. It is recorded here because the `ai-integration` lane is this
+> capability's, and an archived change folder is not a place a defect can be found again.
+
+An `@ai` test that is the **sole** mechanism guarding a behaviour MUST fail loudly when its
+precondition is absent, never `skip`. `->skip(fn () => empty(getenv('ANTHROPIC_API_KEY')))` is
+indistinguishable from a pass at the job-status level: GitHub Actions concludes `success` on
+`Tests: 2 skipped (0 assertions)`. The `ai-integration.yml` job MUST therefore fail when it
+runs with no `ANTHROPIC_API_KEY`, and MUST fail when the `@ai` selection produces zero
+executed assertions — a lane whose entire purpose is to spend money calling a real model has
+nothing to report if it called nothing.
+
+The lane's trigger MUST also reach the code it is meant to guard. Triggering only on push to
+`release/**` is not sufficient in a Git Flow where release branches may be merged locally and
+never pushed to origin: `ai-integration` last ran on `release/0.33.0`, and the 0.34.0–0.36.x
+branches were never pushed, so the lane has not executed since. The trigger MUST cover
+whatever branch actually carries code to production (`main` at minimum), or the schedule MUST
+guarantee a run per release.
+
+**Concrete open instance.** `api`'s `tests/Feature/Scoring/RubricAdherenceDriftTest` states in
+its own docblock that it is the ONLY mechanism in the suite that can detect the model drawing
+the exceeds/meets line differently. A severity recalibration is exactly that change, and
+`scoring-engine`'s `prompt_version` 3.0.0 recalibration is live in production having never
+been observed by this test: the only `ai-integration` run containing that code (run
+32878803967, `release/0.33.0`, sha b5167b0e) logged an empty `ANTHROPIC_API_KEY`, reported
+`2 skipped (0 assertions)`, and concluded `success`. This is the same masking class as the
+PHPStan incident that hid 40 consecutive red runs — a green badge over work that never ran.
+
+#### Scenario: The ai-integration job fails when its API key is missing
+
+- GIVEN the `ai-integration.yml` workflow is triggered with `ANTHROPIC_API_KEY` unset or empty
+- WHEN the job runs
+- THEN the job fails with an explicit "required secret missing" error
+- AND it does NOT conclude `success` on a skipped test
+
+#### Scenario: A run that executes zero assertions fails
+
+- GIVEN the `@ai` group selection matches tests but every one of them self-skips
+- WHEN the job evaluates the Pest result
+- THEN it fails, because a lane that asserted nothing has verified nothing
+
+#### Scenario: The lane reaches production code at least once per release
+
+- GIVEN a version shipped to `main` whose diff touches scoring prompts or the LLM contract
+- WHEN the release completes
+- THEN at least one `ai-integration` run exists that contains that commit and executed the
+  `@ai` group with assertions
+- AND a release branch that is merged locally without being pushed to origin does NOT silently
+  skip the lane
+
 ### Requirement: Framework Catalog Completeness Gate Asserts Both Role-Level And Competency-Level Coverage
 
 The wrapper catalog gate (`scripts/ci-guards.sh`, wired into
