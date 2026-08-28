@@ -63,6 +63,22 @@ git checkout -b release/0.2.0
 #                  two disagree, so bumping only the VERSION file turns main red
 #    Nuxt apps:    edit package.json "version": "0.2.0"
 #    wrapper:      edit package.json "version": "0.2.0"
+#
+#    THEN, for api, RE-EXPORT THE OPENAPI SPEC — in that order, never before.
+#    `openapi.json`'s `info.version` is GENERATED from VERSION, and the api CI
+#    step "Assert committed openapi.json matches a fresh export" regenerates
+#    and diffs. Bumping the version without re-exporting turns `main` red
+#    AFTER the release is tagged and deployed. That is how v0.36.0 shipped.
+#
+#    Export against POSTGRES, never the default `.env` (which is sqlite):
+#      task openapi:sync          # from the wrapper — see its own comment
+#    SQLite introspects JSON and integer columns differently and produces a
+#    WRONG spec, not a lesser one: numeric session ids typed `string`,
+#    nullability dropped. Both Nuxt apps generate their typed client from that
+#    file, so the error propagates into three repos. `api`'s
+#    tests/Feature/OpenApi/CommittedSpecIsNotASqliteExportTest.php fails on
+#    both mistakes, so run the api suite on the release branch before merging.
+#
 #    Commit the bump: git commit -m "chore: bump version to 0.2.0"
 
 # 3. Merge into main and tag
