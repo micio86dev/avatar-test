@@ -527,20 +527,33 @@ Content padding: `--spacing-section` horizontal, `--spacing-panel` vertical.
 
 ### 8.2.1 Settings — section rail (not a tab strip)
 
-`/settings` presents its four sections (Organization profile, API keys, Webhook
-defaults, Users & roles) as a **vertical section rail**, 16 rem wide and sticky,
-with the panel to its right. Each rail item carries an icon, the section label,
-and a one-line description; the same label and description repeat as the panel
-heading, so the nav and the content can never disagree.
+`/settings` presents its sections (Organization profile, API keys, Webhook
+defaults, Users & roles, Conversation LLM credentials) as a **vertical section
+rail**, 16 rem wide and sticky, with the panel to its right. Each rail item
+carries an icon, the section label, and a one-line description; the same label
+and description repeat as the panel heading, so the nav and the content can
+never disagree.
+
+**Conversation LLM credentials is admin-only, and is the only gated section
+here.** `/llm-credentials` is admin-only server-side (`LlmCredentialPolicy`),
+and what the panel manages is a decryptable vendor API key — so its client-side
+gate is *tighter* than the four ungated sections, never looser. It does not
+render for other roles at all, on the same reasoning as §8.2.6: a control that
+appears and then answers 403 teaches the operator that the product is broken
+rather than that they lack the right. The check is affordance only (the server
+enforces) and **fails closed** — a `/auth/me` that rejects yields four
+sections, never five.
 
 A horizontal tab strip is **not** used here, and must not be reintroduced:
 
 - The sections are distinct destinations with different shapes (form, table +
-  dialog, form, table), not peer views of one dataset — which is what a
-  segmented tab strip signals.
-- The labels run 11–28 characters in Italian, so a horizontal strip reflowed
+  dialog, form, table, table + drawer), not peer views of one dataset — which
+  is what a segmented tab strip signals.
+- The labels run 11–33 characters in Italian, so a horizontal strip reflowed
   unpredictably between 1 280 px and 1 920 px.
-- A rail scales to further sections (C12/C13) without reflowing.
+- A rail scales to further sections (C12/C13) without reflowing — the fifth
+  section landed without touching the layout, which is the property being
+  claimed here.
 
 Implementation stays on the reka-ui `Tabs` primitive with
 `orientation="vertical"`, preserving `role="tab"` / `role="tabpanel"`, roving
@@ -593,7 +606,7 @@ candidate can read at their own pace. Five short lines, no more.
 Each interview session has a review page of its own, reached from the
 participant detail. It shows the session's timing and duration, the proctoring
 timeline with its weighted risk score and band, the timed snapshot strip, and
-the avatar cost estimate.
+the cost estimates.
 
 Not a panel on the participant detail: a participant has one session per
 competency, and folding N proctoring timelines into a page that already carries
@@ -608,6 +621,61 @@ Three rules this surface must keep:
 - **Cost is always labelled an estimate**, and shows a dash rather than zero
   when a session cannot be priced. No provider exposes a per-session billed
   amount; zero would claim the session was free.
+
+Cost is a **section of its own**, not a fourth metric card, because there is no
+single cost figure to put on a card. Four rules bind it, and every one of them
+also binds the per-template forecast in §8.2.7:
+
+1. **Two labelled lines, never one combined total.** Avatar minutes and
+   conversation-LLM tokens are billed by different vendors on different meters.
+   The refusal is already ratified server-side, verbatim, at
+   `api/app/Services/Proctoring/SessionCostEstimator.php:20-22`: *"the two are
+   different vendors on different meters. One total would be a number with no
+   owner."* Each line names its own meter.
+2. **Never a per-minute LLM rate.** Input tokens grow **quadratically** in turn
+   count, because the model is re-sent the whole conversation on every turn —
+   minute 20 costs several times minute 1. A per-minute figure is
+   arithmetically meaningless and, worse, invites an operator to multiply it by
+   a session length and be confidently wrong. Only totals, always paired with
+   the interview shape they are a total *for*.
+3. **"Actual" renders only when the API sends a non-null figure.** In managed
+   mode the avatar provider calls Google on its own account, so `actual_*` is
+   permanently NULL; an always-blank Actual row would be a knob that never
+   turns. The columns exist for a later change in which BEAI runs the model
+   itself.
+4. **Absent is not zero.** A session whose LLM binding resolved `unbound` or
+   `degraded` has **no usage row at all**, and the API sends `cost.llm: null`.
+   That renders as an explicit "this session did not run on a model BEAI
+   manages" — never `$0.00`. Zero is a price; absent is "we did not run this
+   model."
+
+Every USD figure in the product renders through one formatter
+(`utils/format.ts` → `formatUsdAmount`), which widens to significant digits
+**below a cent**. One interview's LLM spend is routinely a fraction of a cent,
+and two fixed decimals would round a real charge to `0.00` — reintroducing rule
+4's defect through the formatter.
+
+### 8.2.7 Per-template conversation-LLM forecast
+
+The avatar-templates list shows, per template, what one typical interview costs
+in conversation-LLM tokens — a **total for a named reference interview**
+("≈ $X for a typical 15-minute, 60-turn interview"), computed server-side by
+the same estimator the real session write uses. The reference shape travels
+with the number: a total means nothing without the interview it is a total for.
+
+Rules 2 and 4 above apply unchanged. A template with no usable model binding
+reads as *"cannot be forecast"*, never as a forecast of zero. Avatar minutes are
+not shown on this page at all, and are never folded into this figure.
+
+One glossary trigger (`HelpTip term="llmCost"`) serves the whole list rather
+than one per row: the term is identical on every row, and N focusable triggers
+would put N copies of one definition in the tab order.
+
+**No per-template spend rollup.** The API exposes no aggregate of what a
+template has actually cost across its sessions, and the backoffice does **not**
+synthesise one by fetching every session and summing client-side. That would be
+an N-request read whose total the server never agreed to, presented with the
+same authority as a figure the server computed.
 - **Backoffice only, forever.** The integrity taxonomy is the list of behaviours
   being counted and the thresholds at which they count, so it must never be
   reachable with a candidate token. Enforced by
@@ -638,6 +706,8 @@ The evaluation report is the most complex view:
 │  Candidate: Jane Doe — Role: MLL — Assessment: Standard    │
 │  Status: Completed — Score: 3.8 / 5.0                      │
 ├────────────────────────────────────────────────────────────┤
+│  Competency (?)  Indicator (?)  Reliability (?)  BARS (?)   │  ← glossary row
+├────────────────────────────────────────────────────────────┤
 │  Competency          │ Score │ Reliability │ Indicators     │
 │  ───────────────────────────────────────────────────────   │
 │  COL (Collaboration) │ 3.67  │ 100%        │ [5] [3] [3]   │
@@ -646,10 +716,37 @@ The evaluation report is the most complex view:
 │  INN (Innovation)    │ 3.00  │ 67%         │ [3] [–] [3]   │
 │  ...                 │  ...  │  ...        │ ...            │
 ├────────────────────────────────────────────────────────────┤
-│  Excerpts (verbatim from transcript)                        │
-│  "When I led the restructuring of the team, I..."          │
+│  Evidence                                    [Expand all]   │
+│  COL (Collaboration)                                        │
+│    ▸ [5]  Aligns the team around a shared goal             │
+│    ▾ [3]  Surfaces disagreement early                      │
+│         Rationale: partial evidence, one episode only.      │
+│         "When I led the restructuring of the team, I..."   │
+│    ▸ [3]  Shares credit for collective outcomes            │
 └────────────────────────────────────────────────────────────┘
 ```
+
+**The evidence section is a disclosure, not a second listing.** An earlier
+version of this view rendered the same evaluation twice: indicator text existed
+only under "Excerpts", score and reliability only in the grid, and nothing
+connected a chip to the excerpt that justified it. An operator looking at a chip
+reading `2` had no path to the sentence the candidate actually said.
+
+- Each accordion trigger carries **the same indicator chip the grid draws**, plus
+  the indicator text, **in the grid's chip order** — so chip *N* and item *N* are
+  the same indicator, and that correspondence is stated in copy, not left to be
+  inferred.
+- Expanding reveals the rationale and the verbatim excerpts. Collapsed by
+  default: the grid is the summary, this is the detail. An "Expand all" control
+  serves reading and printing the whole report.
+- The competency mean and reliability appear **only in the grid**, never repeated
+  in a group heading — a second occurrence of the same figure makes it ambiguous
+  which one is authoritative.
+- Terms whose meaning is not self-evident (competency, indicator, reliability,
+  BARS) carry a glossary trigger above the table. The trigger MUST be a real
+  focusable control with its definition also available to assistive tech without
+  opening it — hover-only content leaves keyboard, touch and screen-reader users
+  with the term and never its meaning.
 
 - **Indicator scores are one integer from `{1, 2, 3, 4, 5}` ∪ `{-1}` — no decimals.** The
   catalog authors only three anchors (`anchor_5`, `anchor_3`, `anchor_1`); `4` and `2` are
@@ -682,10 +779,11 @@ The evaluation report is the most complex view:
   neutral treatment, never `0`.
 - **Reliability: render the value the API returns, verbatim** (a percent string, e.g. `100%`).
   Do NOT map it to `High` / `Medium` / `Low` word bands — **no band thresholds exist**.
-  The `reliability` formula and the "valid competency" threshold are **open product
-  decision #1** (see `openspec/ROADMAP.md`), still unratified. Inventing bands here would
-  bake an unapproved business rule into the UI, where it would read as authoritative.
-  Once decision #1 is ratified, revisit this line before adding any banding.
+  Product decision #1 is **RATIFIED**: `reliability` = assessed / total indicators
+  (`-1` excluded from the numerator), validity threshold `T = 0.5`, and **no bands**.
+  The verbatim-percentage rule above is therefore settled, not provisional. Inventing
+  bands would bake an unapproved business rule into the UI, where it would read as
+  authoritative.
 - Excerpts: monospace font (`--font-mono`), verbatim from transcript (validated by substring match).
 
 ---

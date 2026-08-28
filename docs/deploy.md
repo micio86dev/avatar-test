@@ -21,6 +21,52 @@
 5. Railway's deploy trigger watches `main` and deploys automatically (once wired).
 6. Merge `main` back to `develop` to keep Git Flow in sync.
 
+## Release Steps on Deploy — `beai:deploy` (`api`)
+
+The `api` service's Railway **`preDeployCommand` MUST be exactly**:
+
+```
+php artisan beai:deploy
+```
+
+One command, no `&&`, no shell operators of any kind.
+
+**Why one command.** `preDeployCommand` is **not shell-evaluated**. A previous
+`php artisan migrate --force && php artisan beai:sync-llm-registry` handed
+everything after the `&&` to `migrate` as inert arguments; `migrate` ignored them
+and exited 0, so the deploy went green with the second step never invoked. The
+workaround moved the registry sync into `docker/entrypoint.sh` — but a bare
+`migrate --force` was never restored to the field, so **nothing migrated on
+deploy at all**. The schema stayed current only because a human ran migrations by
+hand over SSH; a deploy carrying a new migration would have gone green and then
+queried columns that did not exist.
+
+`beai:deploy` runs both steps with the failure semantics each one needs:
+
+| Step | Fatal? | Why |
+|---|---|---|
+| `migrate --force` | **Yes** — non-zero exit aborts the deploy | Booting code against a schema it does not have is the failure this exists to prevent |
+| `beai:sync-llm-registry` | **No** — warns, still exits 0 | Catalogue data, not schema. A transient DB hiccup over `llm_models` must not refuse a release; the worst case is a stale model picker |
+
+Every step prints a `[deploy]`-prefixed line. The defect above survived because
+the log was silent — a step that never ran and a step that ran cleanly look
+identical when neither prints anything. **After the next deploy, check the log
+actually contains `[deploy] migrations OK`.**
+
+Migrations deliberately do **not** live in `docker/entrypoint.sh`:
+`preDeployCommand` runs once per deploy in its own container, while an entrypoint
+runs once per **replica** and on every restart, so migrations there would race
+between replicas. The entrypoint is now a pass-through and no longer runs the
+registry sync — `beai:deploy` owns both steps, in the correct order, in the
+once-per-deploy slot.
+
+To run the same steps by hand:
+
+```
+railway ssh --service api -- php artisan beai:deploy
+railway ssh --service api -- php artisan beai:sync-llm-registry   # catalogue only
+```
+
 ## Railway Config
 
 Each submodule carries a committed `railway.json` selecting the Docker builder.
@@ -93,12 +139,15 @@ policy for general observability, but nothing requires it to be
 `noeviction` — a cache should normally run an eviction policy, not
 `noeviction`.
 
-**Deploy-risk note**: this is the change's first migration. Railway runs
-`php artisan migrate --force` as a pre-deploy command, so
-`2026_08_20_000001_create_refresh_tokens_table.php` WILL execute against the
-live database on the next deploy. It is purely additive (`CREATE TABLE`, one
-new foreign key to the existing `users` table, no column/table alterations),
-so it is safe to run against a live database with no downtime.
+**Deploy-risk note**: this is the change's first migration.
+`2026_08_20_000001_create_refresh_tokens_table.php` executes against the live
+database on the next deploy **provided `preDeployCommand` is
+`php artisan beai:deploy`** — see *Release Steps on Deploy* above. It was NOT
+true that Railway ran `migrate --force` when this note was first written; that
+was the defect `beai:deploy` fixes. The migration itself is purely additive
+(`CREATE TABLE`, one new foreign key to the existing `users` table, no
+column/table alterations), so it is safe to run against a live database with no
+downtime.
 
 ## Recovering a Locked-Out User
 

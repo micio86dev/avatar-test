@@ -1,6 +1,7 @@
 ---
 # BEAI — local development stack
-# All image tags are pinned per D25 (design.md Version Catalog). Never use `latest`.
+# All image tags are pinned per docs/version-catalog.md (D25) — the LIVE catalog,
+# not the design.md copy, which drifted. Never use `latest`.
 # Run: docker compose up -d
 # Stop: docker compose down
 # Full teardown (remove volumes): docker compose down -v
@@ -40,7 +41,7 @@ x-api-environment: &api-environment
   # Safe for the scheduler lock: `onOneServer()` needs a `LockProvider`, and
   # `Illuminate\Cache\RedisStore` implements it just as `DatabaseStore` does
   # (verified — `RedisStore extends TaggableStore implements CanFlushLocks,
-  # LockProvider`). `api/bootstrap/app.php:32` was updated alongside this pin
+  # LockProvider`). `bootstrap/app.php`'s `withSchedule()` note was updated alongside this pin
   # and now deliberately names no store at all, which is the durable shape:
   # what the lock requires is that the store be SHARED across processes, and
   # `CACHE_STORE=file` is the setting that quietly turns it into no lock.
@@ -146,9 +147,14 @@ services:
   # ---------------------------------------------------------------------------
   # App services — enabled once the Dockerfiles exist in each app directory.
   # Each app requires postgres + redis healthy before starting.
-  # api: `php artisan serve` on port 8000 (NOT php-fpm on 9000 — the image has
-  # never run fpm, and that myth already cost this file two wrong port numbers
-  # and a healthcheck that validated an fpm config nobody loaded).
+  # api: nginx on port 8000, forwarding to php-fpm on 127.0.0.1:9000 INSIDE the
+  # container, both under supervisord — see the image CMD in api/Dockerfile and
+  # the `fastcgi_pass` in api/docker/nginx.conf. Publish 8000, never 9000: fpm is
+  # not reachable from outside the container, and publishing it once left the API
+  # unreachable while the container still reported healthy.
+  # This comment previously claimed the image ran `php artisan serve`. It did,
+  # until b5b9f97 replaced it precisely because that is Laravel's DEVELOPMENT
+  # server and handles one request at a time.
   # frontend SSR: Nitro node-server on port 3000.
   # backoffice SPA: nginx static serve on port 3001 (mapped from container 80).
   #
@@ -169,10 +175,11 @@ services:
     # Override DB/Redis to use compose service names (not localhost).
     environment: *api-environment
     ports:
-      # The image CMD is `php artisan serve --host=0.0.0.0 --port=8000`, so the
-      # container listens on 8000. This previously published container port 9000
-      # (an fpm convention the image does not follow), which left the API
-      # unreachable from the host while the container still reported healthy.
+      # nginx listens on 8000 inside the container and hands PHP to fpm on
+      # 127.0.0.1:9000, which is container-local and must NOT be published
+      # (see the `listen` and `fastcgi_pass` directives in api/docker/nginx.conf).
+      # Publishing 9000 here once left the API unreachable from the host while
+      # the container still reported healthy.
       - "${API_PORT:-8000}:8000"
     depends_on: *api-depends-on
     healthcheck:
@@ -238,7 +245,7 @@ services:
       # whole point rather than a stylistic preference.
       #
       # `GET /api/health/queue` returns **HTTP 200 for `degraded`**
-      # (`QueueHealthController.php:79-98`), and `reservationStalled` — a worker
+      # (`QueueHealthController::__invoke()`), and `reservationStalled` — a worker
       # that is up but wedged on a stuck reserved job — is one of the three
       # inputs to `degraded`. A plain `curl -fsS` fails only on >= 400, so it
       # would have reported that container **healthy**: the exact failure this
@@ -291,14 +298,14 @@ services:
   # Stated in that order on purpose. `deploy.replicas: 1` below is NOT a pin —
   # `docker compose up --scale scheduler=3` overrides it with no error and no
   # warning. What actually prevents a scheduled task from running twice is the
-  # `->onOneServer()` chained on every scheduled task (`api/bootstrap/app.php`
-  # lines 46 and 50), backed by a lock in whichever cache store is configured —
-  # a Redis key under this stack's `CACHE_STORE: redis`, not a `cache_locks`
-  # row. The store is not named here on purpose; see the anchor's note.
-  # An earlier revision of this comment claimed the replica count was the
-  # guarantee, which directly contradicted `api/bootstrap/app.php:28-31` — two
-  # files asserting opposite things about the same line is how a safety property
-  # gets deleted by someone who read only the reassuring one.
+  # `->onOneServer()` chained on every task in `bootstrap/app.php`'s
+  # `withSchedule()` block, backed by a lock in whichever cache store is
+  # configured — a Redis key under this stack's `CACHE_STORE: redis`, not a
+  # `cache_locks` row. The store is not named here on purpose; see the anchor's
+  # note. An earlier revision of this comment claimed the replica count was the
+  # guarantee, which directly contradicted that same block — two files asserting
+  # opposite things about the same property is how a safety property gets
+  # deleted by someone who read only the reassuring one.
   # ---------------------------------------------------------------------------
   scheduler:
     build:
@@ -373,12 +380,29 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      # The SSR runtime image (node:24-slim) ships NEITHER curl NOR wget, so the
+      # The SSR runtime image (node:24.11-slim, pinned in docs/version-catalog.md
+      # — never a bare major, which is what tag_pinned exists to reject) ships
+      # NEITHER curl NOR wget, so the
       # previous curl-based probe could never succeed — the container reported
       # unhealthy forever while actually serving correctly. Node's global fetch
       # is always present, so use the runtime we already depend on.
       test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 15s
+      # 5s is correct and was measured, not guessed. If you find this container
+      # sitting `unhealthy` while /health returns 200 from inside it, the probe
+      # is NOT the cause — the Docker VM is out of resources.
+      #
+      # Seen 2026-08-27: `unhealthy`, 13 straight "exceeded timeout (5s)", and
+      # a hand-run of the identical command exiting 0. It looked exactly like a
+      # timeout that needed raising. It was not: 14 containers (including an
+      # unrelated Supabase stack) and a dozen buildkit processes shared a
+      # 3.8 GiB VM, and Docker's own log said "timed out STARTING health check"
+      # — the container could not spawn a process at all, let alone fetch.
+      # Raising this to 12s changed nothing, because nothing here was wrong.
+      #
+      # Diagnose with `docker stats --no-stream` and `docker ps | wc -l`
+      # before touching this number. Node cold-starts in ~100ms and a localhost
+      # fetch is instant; 5s is roughly fifty times the honest cost.
       timeout: 5s
       retries: 5
       start_period: 30s
@@ -394,7 +418,30 @@ services:
         # suffix is mandatory: the composables append `/auth/login` to it, and
         # Laravel's CORS middleware only covers `api/*`, so omitting it yields a
         # 404 with no CORS headers that the browser reports as a CORS error.
-        NUXT_PUBLIC_API_BASE: "${BACKOFFICE_API_BASE:-http://localhost:8000/api}"
+        # Relative on purpose. An absolute `http://localhost:8000/api` sends the
+        # BROWSER straight at the api's published port, bypassing the nginx
+        # proxy this image ships — so the proxy works and nothing uses it, and
+        # if that host port is slow or unpublished every request hangs with no
+        # error (seen 2026-08-27: /api/health was 200 in 0.3s through nginx on
+        # :3001 and timed out on :8000, while login sat pending forever).
+        #
+        # It also silently undid the same-origin architecture production runs:
+        # cross-origin here makes `beai_refresh` a THIRD-PARTY cookie, which is
+        # exactly the shape WebKit blocks — the Safari session bug that
+        # `backoffice-same-origin-api` was written to fix, reintroduced in local
+        # dev where it would be blamed on anything but this line.
+        NUXT_PUBLIC_API_BASE: "${BACKOFFICE_API_BASE:-/api}"
+        # REQUIRED by the Dockerfile, which hard-fails without it (see its
+        # `test -n "$BEAI_API_ORIGIN"` guard). Compose never passed it, so
+        # `docker compose build backoffice` could not succeed at all — the
+        # whole-stack path was broken while the infra-only `task up` path,
+        # which never builds this image, stayed green and hid it.
+        #
+        # No `/api` suffix here, unlike NUXT_PUBLIC_API_BASE above: this is an
+        # ORIGIN that nginx appends the request path to, not a base URL the
+        # client concatenates onto. `api` is the compose service name, resolved
+        # on the shared network — localhost inside this container is itself.
+        BEAI_API_ORIGIN: "${BEAI_API_ORIGIN:-http://api:8000}"
       dockerfile: Dockerfile
     image: beai-backoffice:local
     container_name: beai_backoffice
