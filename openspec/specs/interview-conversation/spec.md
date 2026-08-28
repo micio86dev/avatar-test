@@ -4,10 +4,18 @@
 
 Defines the adaptive conversation layer (C8): server-side system-prompt composition from
 BARS indicator data, coverage-driven adaptive follow-up questioning for `standard` sessions
-(SA-02), nudge enforcement on short answers (SA-03), and a PR-gated payload-shape contract
-for the provider session. All behavior is injected at `/start` via the extended
-`QuestionContext`; no per-turn server round-trip is introduced. Additive to C7a's
-five-endpoint contract.
+(SA-02), the STAR coverage protocol and same-episode constraint that govern HOW the avatar
+interviews, the clamped minimum-question floor on the advance rule, nudge enforcement on
+short answers (SA-03), and a PR-gated payload-shape contract for the provider session. All
+behavior is injected at `/start` via the extended `QuestionContext`; no per-turn server
+round-trip is introduced. Additive to C7a's five-endpoint contract.
+
+**The composed prompt is an INSTRUCTION, not a control loop.** `compose()` runs once per
+competency at `/start`; the provider's own LLM then conducts the conversation autonomously,
+with no turn-by-turn server round-trip. Every requirement in this capability is therefore a
+property of the composed STRING, and is verified by asserting on that string. Whether the
+avatar actually obeys is observable only in a live provider interview (`@ai` suite or a
+manual smoke), never in a unit test.
 
 ---
 
@@ -70,7 +78,8 @@ deterministic, side-effect-free function of the following inputs:
 | `assessment_type` | Project configuration (`standard` only — C8) |
 | `role_code` / `role_id` | Project configuration |
 | `project_language` | Project configuration (`it` / `en` binding) |
-| `follow_up_budget` (max N per competency) | Platform config; default N=2 [PROVISIONAL — OQ-1] |
+| `follow_up_budget` (max N per competency) | Platform config `conversation.followup_budget`; default **N=4**, RATIFIED 2026-08-25 |
+| `min_questions` (floor, opening question included) | Platform config `conversation.min_questions`; default 4, CLAMPED by the composer |
 | `nudge_min_chars` | `Project.nudge_min_chars` |
 | `prompt_template_version` | `config/conversation.php`; bumped on any template change |
 
@@ -79,7 +88,16 @@ The composition MUST:
 - Produce identical output for identical inputs (deterministic).
 - Emit a stable `prompt_version` string that uniquely identifies the template and its version.
 - Contain NO hardcoded per-tenant text; all anchor text flows from the versioned framework catalog at the pinned `framework_version_id`.
-- Select the correct language (it/en binding) for all injected text.
+- Select the correct language (it/en binding) for all catalogue-derived text (see the i18n requirement for the exact scope).
+
+Purity is defined as: no LLM call, no HTTP, no time, no randomness, no IO. Reading
+`config/conversation.php` is NOT a purity violation — the composer already reads
+`prompt_version` from it. Identical inputs MUST still produce an identical prompt.
+
+(Previously: `follow_up_budget` was `default N=2 [PROVISIONAL — OQ-1]`, awaiting product
+ratification, and no minimum-question input existed. OQ-1 was RATIFIED on 2026-08-25 at a
+platform default of 4; a nullable per-project override follows as `project-followup-budget`
+and is NOT part of this capability yet.)
 
 #### Scenario: Deterministic composition — same inputs yield same output
 
@@ -161,28 +179,258 @@ anti-leak rule (no BARS anchor or indicator text) and MUST carry a `prompt_versi
 For `assessment_type = 'standard'`, the composed system prompt MUST instruct the avatar
 to conduct coverage-driven follow-up questioning within each competency:
 
-1. Ask at most N follow-up questions per competency, where N = `follow_up_budget` (default N=2, provisional OQ-1).
-2. The avatar MUST be instructed to speak `end_phrase` only when all BARS indicators are addressed OR the follow-up budget is exhausted — not on the first candidate answer.
+1. Ask at most N follow-up questions per competency, where N = `follow_up_budget` (default N=4, RATIFIED 2026-08-25).
+2. The avatar MUST be instructed to speak `end_phrase` only when
+   `(all BARS coverage topics addressed OR the follow-up budget is exhausted) AND the
+   effective minimum question count has been reached` — never on the first candidate answer.
+   The minimum term is normative and its arithmetic is owned by **Requirement: Advance Rule
+   and Minimum Question Count** below; that requirement's clamp is what keeps the
+   `OR budget exhausted` escape reachable.
 3. The system prompt MUST explicitly name the BARS indicators to be covered so the avatar LLM can evaluate coverage.
 4. Follow-up slots are consumed only by coverage-driven turns, not by nudge re-prompts.
+5. The budget is an INSTRUCTION, not a server-side control loop: `compose()` is called once
+   per competency at `/start` and the provider's own LLM then conducts the conversation
+   autonomously. An overshoot of roughly one question is expected behaviour, not a defect.
+   Observed live on 2026-08-25: a competency ran six questions against a budget of 4.
+
+(Previously: item 1 gave N=2 as a provisional default pending OQ-1, and item 2 stated the
+advance condition as `all BARS indicators addressed OR the follow-up budget is exhausted`
+with no minimum-question term. That two-term condition was the source of truth and is now
+superseded — coverage alone no longer permits closing.)
+
+> **Known stale literal — owned by `project-followup-budget`, not a defect here.**
+> `api/app/Http/Controllers/.../InterviewController.php:503` resolves the budget as
+> `config('conversation.followup_budget', 2)`. The `2` is only the missing-key fallback,
+> reachable solely if `config/conversation.php` ceased to exist, so it does not affect the
+> ratified default of 4 that actually ships. It is nonetheless a misleading leftover of the
+> pre-ratification value, and it is the exact line the `project-followup-budget` change will
+> edit (`config(...)` → `$project->followup_budget ?? config(...)`). Deliberately out of
+> scope for `star-interviewer-protocol`; recorded here so it is not rediscovered as a bug.
 
 #### Scenario: follow_up_budget injected into composed prompt
 
-- GIVEN N=2, assessment_type='standard', competency STG with 3 BARS indicators for role BUL
+- GIVEN N=4, assessment_type='standard', competency STG with 3 BARS indicators for role BUL
 - WHEN the prompt is composed
-- THEN the resulting prompt string contains language instructing the avatar to ask at most 2 follow-up questions and to advance (end_phrase) only after coverage or budget exhaustion
+- THEN the resulting prompt string contains language instructing the avatar to ask at most 4 follow-up questions
+- AND it instructs the avatar to advance (end_phrase) only after coverage or budget exhaustion AND the effective minimum question count is reached
 
 #### Scenario: Budget exhaustion triggers end_phrase — integration assertion
 
 - GIVEN a HeyGen session initialized with a standard prompt capping N=2 follow-ups
 - WHEN the avatar has asked the initial question plus 2 follow-up questions
 - THEN the avatar speaks `end_phrase` at the next turn — PROVIDER INTEGRATION TEST ONLY (@ai suite)
+- AND this holds because the effective minimum is clamped to `budget + 1 = 3`, which those
+  three questions satisfy; budget exhaustion can never be blocked by an unmet minimum
 
 #### Scenario: Coverage achieved before budget — end_phrase fires early — integration assertion
 
 - GIVEN a HeyGen session and candidate answers that address all BARS indicators in fewer than N turns
+- AND the effective minimum question count has ALSO been reached
 - WHEN the avatar determines coverage is complete
 - THEN the avatar speaks `end_phrase` before consuming the full N budget — PROVIDER INTEGRATION TEST ONLY (@ai suite)
+
+#### Scenario: Coverage alone does not permit closing below the minimum
+
+- GIVEN coverage of every BARS topic is complete after 2 questions
+- AND the effective minimum question count is 4
+- WHEN the avatar evaluates whether it may close
+- THEN it MUST continue questioning until the minimum is reached — coverage is necessary but
+  no longer sufficient — PROVIDER INTEGRATION TEST ONLY (@ai suite)
+
+---
+
+### Requirement: STAR Coverage Protocol and Same-Episode Constraint
+
+The composed system prompt MUST carry a **STAR coverage protocol** instructing the avatar
+that, after each candidate answer, it determines which of **Situation, Task, Context, Action
+and Result** is least covered *for the episode under discussion*, and makes its next question
+close that gap.
+
+STAR is an ORTHOGONAL layer over the BARS coverage topics, not a replacement for them. The
+BARS indicators answer *which behaviours am I assessing* — competency-specific, authored,
+versioned. STAR answers *is this episode described completely enough to assess anything at
+all* — competency-agnostic and fixed. Both MUST be present in the prompt.
+
+The protocol MUST name Action and Result explicitly as the elements candidates most often
+leave implicit, and MUST distinguish what the candidate personally did from what their team
+did. This exists because the scoring prompt's EVALUATION STANDARDS
+(`PromptBuilder::EVALUATION_STANDARDS`, owned by `specs/scoring-engine`) requires a specific
+situation described with concrete detail, concrete actions the candidate personally took, and
+a measurable outcome — **all three — before an indicator may score 5**. (A 4 does not require
+all three; it requires evidence that CLEARLY exceeds the Score 3 anchor.) The interviewer must
+ask for what the evaluator is required to find.
+
+**These two prompts are a matched pair. An edit to either MUST check the other.**
+
+A STAR element that genuinely does not apply to the episode, or that the candidate states
+they cannot recall, MUST be treated as covered and MUST NOT be re-asked. Without this, an
+inapplicable element becomes an unreachable coverage condition and the competency cannot
+advance — the same deadlock class the advance-rule clamp exists to prevent.
+
+The prompt MUST carry a **same-episode constraint**: every follow-up deepens the single
+episode the candidate has already begun describing, and the avatar MUST NOT ask for a second
+or different example. The single exception is an episode containing no assessable behaviour
+at all, which the avatar MAY replace — otherwise a candidate who opens with a poor example is
+locked into it for the whole competency.
+
+The same-episode constraint MUST be stated ONCE, forcefully, and MUST live inside the STAR
+section rather than in a section of its own: it is meaningless except in reference to the
+episode STAR describes, and separating them would let a future editor delete one without
+noticing the other stopped making sense. Repetition competes with the other rules in the same
+prompt for the model's attention; if one statement is ever shown insufficient by a live
+interview, repetition MAY be added WITH THAT EVIDENCE.
+
+Section order MUST be: role/style → BARS coverage topics → **STAR protocol** → follow-up
+rules → nudge → advance rule. STAR precedes the follow-up rules because it tells the model
+what a follow-up is FOR; a budget stated before any notion of what to spend it on is a number
+without a purpose.
+
+(Previously: the prompt listed BARS indicators as coverage topics, stated a follow-up budget,
+optionally a nudge rule, and an advance rule. It carried no model of what a complete answer
+looks like, nothing preventing the avatar from collecting several shallow episodes instead of
+one deep one, and no floor on the number of questions beyond a bare "Do NOT close after the
+first answer".)
+
+#### Scenario: The STAR protocol is present and names all five elements
+
+- GIVEN a competency with indicators and a valid locale
+- WHEN the system prompt is composed
+- THEN it contains a STAR section naming Situation, Task, Context, Action and Result
+- AND it instructs the avatar to target the least-covered element with its next question
+
+#### Scenario: Action and Result are named as the elements the evaluator demands
+
+- WHEN the system prompt is composed
+- THEN it states that concrete personal actions and a measurable outcome are required
+- AND it distinguishes what the candidate personally did from what their team did
+
+#### Scenario: An inapplicable STAR element does not block advancement
+
+- WHEN the system prompt is composed
+- THEN it states that an element which does not apply, or which the candidate cannot recall, counts as covered and is not re-asked
+
+#### Scenario: The same-episode constraint is present
+
+- WHEN the system prompt is composed
+- THEN it instructs the avatar to deepen the episode already under discussion
+- AND it forbids asking for a second or different example
+- AND it permits replacing an episode that contains no assessable behaviour at all
+
+#### Scenario: The same-episode constraint is stated exactly once
+
+- WHEN the system prompt is composed
+- THEN the key phrase of the constraint occurs exactly one time in the composed string
+
+#### Scenario: STAR precedes the follow-up rules
+
+- WHEN the system prompt is composed
+- THEN the STAR section appears before the follow-up budget section, and after the BARS coverage topics
+
+---
+
+### Requirement: Advance Rule and Minimum Question Count
+
+The prompt MUST carry a **minimum question count**: the avatar MUST NOT speak the closing
+phrase before it has asked at least that many questions in the competency, counting the
+opening question.
+
+The effective minimum question count MUST be `max(1, min(configuredMinimum, budget + 1))`,
+computed by the composer. The `+ 1` is the opening question, which is not a follow-up and
+does not consume budget. The `max(1, …)` floor prevents a configured `0` or negative value
+from stating a minimum of zero questions, which would read as permission to close before
+asking anything.
+
+This clamp is **mandatory, not defensive**. Without it, a configuration where the minimum
+exceeds what the budget permits instructs the avatar to ask at least M questions and at most
+B follow-ups with `M > B + 1` — an unsatisfiable instruction. The avatar then never speaks
+the closing phrase, the client's end-phrase match never fires, the competency runs to its
+session cap, and on HeyGen the session terminates with `MAX_DURATION_REACHED`, which the
+candidate experiences as an error at the end of a question they answered completely. **That is
+a defect this system has already shipped once**, and a minimum question count is by
+construction a new way to reach it.
+
+The composer MUST NOT throw on a minimum that exceeds the budget. A failed composition at
+`/start` is a candidate facing a broken interview because two operator-supplied numbers
+disagreed; clamping degrades to the pre-existing behaviour, which is the correct direction to
+fail in.
+
+The advance condition MUST be: speak the closing phrase when
+`(all coverage topics addressed OR the follow-up budget is exhausted) AND the effective
+minimum question count has been reached`. Because the minimum is clamped to at most
+`budget + 1`, **budget exhaustion always satisfies the minimum**, so the `OR budget exhausted`
+escape hatch remains reachable under every possible configuration. That reachability is the
+whole safety argument and MUST be proven by walking a `(budget, minimum)` grid, not by
+inspecting the arithmetic.
+
+The minimum MUST appear as a conjunct in BOTH branches of the advance rule — the branch where
+an advance phrase is supplied and the fallback branch where it is not.
+
+The advance phrase itself MUST continue to be quoted VERBATIM in the prompt when supplied,
+with the instruction to say it word for word as the final sentence, and the existing
+no-phrase fallback text MUST continue to work. That text is load-bearing: it was added
+because the avatar had previously been told to utter a placeholder whose value it was never
+given, which is how the `MAX_DURATION_REACHED` incident above occurred.
+
+(Previously: the advance condition was `all coverage topics addressed OR the follow-up budget
+is exhausted`, with no minimum-question term and therefore no clamp.)
+
+> **Observation, not a normative demand — the advance condition is stated twice.**
+> `SystemPromptComposer::buildBudgetSection()` closes with *"Advance (speak end_phrase) only
+> after all coverage topics are addressed OR the follow-up budget of N is exhausted"* — the
+> old two-term form, WITHOUT the minimum conjunct — while `buildAdvanceSection()` states the
+> full three-term condition. The authoritative statement is the ADVANCE RULE section, and the
+> 2026-08-25 live smoke closed cleanly on all five competencies, so no harm is demonstrated.
+> It is recorded because a prompt that states the same rule twice at two different strengths
+> is a plausible source of early closing, and because the weaker sentence is what made the
+> original budget-exhaustion test pass without observing the advance section at all.
+
+#### Scenario: Minimum below the budget ceiling is used as configured
+
+- GIVEN a budget of 4 and a configured minimum of 4
+- WHEN the system prompt is composed
+- THEN the effective minimum stated in the prompt is 4
+
+#### Scenario: Minimum exceeding the budget is clamped, not thrown
+
+- GIVEN a budget of 2 and a configured minimum of 6
+- WHEN the system prompt is composed
+- THEN no exception is thrown
+- AND the effective minimum stated in the prompt is 3
+- AND the prompt never states a minimum greater than the number of questions the budget permits
+
+#### Scenario: Budget exhaustion always permits advancing
+
+- GIVEN any budget and any configured minimum
+- WHEN the system prompt is composed
+- THEN the advance rule states that an exhausted follow-up budget permits closing
+- AND the stated effective minimum is never greater than `budget + 1`, so it cannot contradict that
+
+#### Scenario: A budget of zero still yields a satisfiable prompt
+
+- GIVEN a budget of 0 and a configured minimum of 4
+- WHEN the system prompt is composed
+- THEN the effective minimum is 1
+- AND the prompt remains internally consistent
+
+#### Scenario: A zero or negative configured minimum floors at 1
+
+- GIVEN a configured minimum of 0 or a negative value
+- WHEN the system prompt is composed
+- THEN the effective minimum stated is 1, never 0
+
+#### Scenario: The advance phrase is still quoted verbatim
+
+- GIVEN an advance phrase is supplied
+- WHEN the system prompt is composed
+- THEN the phrase appears verbatim in the prompt
+- AND the avatar is instructed to say it word for word as its final sentence
+
+#### Scenario: The no-phrase fallback still applies and carries the minimum
+
+- GIVEN no advance phrase is supplied
+- WHEN the system prompt is composed
+- THEN the prompt still forbids closing after the first answer
+- AND the fallback branch also states the effective minimum question count
 
 ---
 
@@ -307,9 +555,31 @@ MUST respect the project's language (`it`/`en` mandatory).
 
 ### Requirement: i18n — Composed Prompt in Project Language
 
-The composed system prompt (instructions, indicator descriptions, anchor texts, nudge
-instruction, follow-up guidance) MUST be entirely in the project language for the
-`it`/`en` binding. Mixed-language prompts are PROHIBITED.
+All **catalogue-derived** content injected into the composed system prompt — indicator
+descriptions and the anchor texts `{5,3,1}` — MUST be in the project language for the
+`it`/`en` binding. Mixing project-language and English CATALOGUE content in one prompt is
+PROHIBITED: an EN indicator description alongside localised anchors is an incoherent rubric.
+
+The **fixed interviewer directives** are a different category and are authored in English by
+decision: the role/style header, the STAR coverage protocol, the follow-up budget rule, the
+nudge rule and the advance rule are hardcoded English in every locale. They are instructions
+addressed to the model, not text spoken to or read by the candidate, and they are never
+uttered verbatim. Localising them is a deliberate future decision, not an accidental gap —
+whoever takes it MUST localise them as a set, because localising one directive section and
+not its neighbours is the precise failure this scope statement exists to prevent.
+
+> **Why this is stated so explicitly.** The composer's own class docblock claimed "Template
+> sections (all in the project language)" and was FALSE when written: only the coverage
+> section was ever localised. `star-interviewer-protocol` corrected that docblock and settled
+> the question (its OQ-3 / D-5) while adding one more hardcoded-English section, STAR. This
+> spec previously repeated the same false claim; leaving it would have left the source of
+> truth asserting the opposite of shipped, tested behaviour.
+
+(Previously: "The composed system prompt (instructions, indicator descriptions, anchor texts,
+nudge instruction, follow-up guidance) MUST be entirely in the project language … Mixed-language
+prompts are PROHIBITED." That sentence covered the interviewer directives, which have never
+been localised in any shipped version of the composer. The normative hard-fail below is
+UNCHANGED — only the scope claim above is corrected.)
 
 If any required anchor or indicator translation is missing for the project locale, the
 engine MUST NOT silently fall back to English. Composition MUST fail with the
@@ -398,8 +668,24 @@ versioning, language, budget, nudge value).
 The following paths MUST be held to ~95% test coverage (unit / Pest feature tests, no HTTP):
 
 - `BarsIndicatorLoader::load()` — filters by both `role_id` and `competency_id`; cross-role contamination impossible
-- `ConversationService::composePrompt()` — all input combinations: `standard`, it/en, N=0/1/2, nudge_min_chars=0/N, missing translation hard-fail (HTTP 422)
+- `ConversationService::composePrompt()` — all input combinations: `standard`, it/en, N=0/1/2/4, nudge_min_chars=0/N, missing translation hard-fail (HTTP 422)
+- `SystemPromptComposer::effectiveMinimum()` — the clamp, exercised as a GRID over
+  `budget ∈ {0,1,2,4,8}` × `configuredMinimum ∈ {1,2,4,6,10}`, asserting for every pair that
+  the stated minimum is `≤ budget + 1` AND that no higher value appears anywhere in the
+  prompt. A negative-space assertion is required here: proving the correct number is present
+  does not prove a wrong one is absent.
+- STAR section — five elements named, Action/Result emphasis, the inapplicable-element
+  escape, the same-episode constraint asserted at exactly one occurrence
+- Advance rule — the minimum present as a conjunct in BOTH branches (phrase supplied and
+  phrase absent), asserted against the ADVANCE RULE section specifically. An assertion
+  satisfied by the follow-up budget sentence alone does NOT cover this: both sections mention
+  the follow-up budget, so a substring test for `follow-up budget` passes even if the advance
+  section lost its clause entirely.
 - `prompt_version` non-null and changes when template version changes
+- `.env.example` ↔ `config/conversation.php` parity for all `CONVERSATION_*` keys, and the
+  config-sanity invariant `min_questions ≤ followup_budget + 1`. A parity guard MUST be
+  observed to fail at least once against a deliberately desynchronised value; a guard never
+  seen to fail is not a guard.
 - `QuestionContext` widening — `system_prompt` and `prompt_version` non-null after composition
 - `/start` response includes `question_context.prompt_version`
 - Provider payload shape (`Http::fake` assertion) — PR-gated

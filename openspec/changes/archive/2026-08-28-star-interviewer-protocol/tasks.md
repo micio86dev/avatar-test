@@ -80,8 +80,22 @@ D-7 / proposal AD-5.
 ## Apply notes (2026-08-25)
 
 Groups 1-5 implemented on `feature/star-interviewer-protocol` in the `api` submodule,
-branched from `develop` @ `cbd3dc7`. **Committed locally, NOT pushed, NOT deployed.**
-**Group 6 (live smoke) is NOT done — this change is therefore NOT complete.**
+branched from `develop` @ `cbd3dc7`.
+
+> ~~**Committed locally, NOT pushed, NOT deployed.**~~
+> ~~**Group 6 (live smoke) is NOT done — this change is therefore NOT complete.**~~
+>
+> **Corrected 2026-08-28 during verification.** Both statements were false and had
+> been false for days: `865b24a` and `55b71eb` are on `develop` **and** `main`,
+> shipped in `release/0.32.0` and deployed to production, and the Group 6 live-smoke
+> PASS is recorded ~40 lines below in this same file. The notes were written when
+> they were true and never revisited.
+>
+> Left struck through rather than deleted: the point of an apply note is to be a
+> record, and a record that quietly rewrites itself is worth less than one that
+> shows what it used to claim. This is also the exact failure mode the change's
+> own F-2 task fixed in `SystemPromptComposer`'s docblock — a comment that stayed
+> confidently wrong after the code moved underneath it.
 
 | Commit | Slice |
 |---|---|

@@ -737,6 +737,48 @@ PHPStan incident that hid 40 consecutive red runs — a green badge over work th
 - AND a release branch that is merged locally without being pushed to origin does NOT silently
   skip the lane
 
+### Requirement: The `api` Suite MUST Be Deterministic Under Its Own Test Database
+
+> **STATUS: OPEN — specified, NOT yet implemented.** Owner requirement for **ROADMAP R-4**.
+> The finding's evidence (which runs failed, on which disjoint test sets, with which SQLSTATE
+> codes) lives in `openspec/ROADMAP.md` → Carried-forward risk → R-4 and is NOT restated here.
+> Raised independently by two verifications on 2026-08-28 (`star-interviewer-protocol` and
+> `evaluator-evidence-and-rigor`) against changes that were each otherwise archivable. This is
+> a repo-level test-infrastructure defect, not a defect of either change.
+
+A full run of the `api` Pest suite MUST produce the same result on the same commit. Repeated
+runs that fail on **disjoint** sets of tests, with `SQLSTATE[42P01] relation does not exist`
+or `42703 column does not exist`, indicate the shared `beai_test` database being torn down
+underneath tests that are still using it — per-directory `RefreshDatabase` in `tests/Pest.php`
+interacting with parallel workers. Test files that fail in a full run MUST NOT pass in
+isolation; if they do, the suite is reporting the harness, not the code.
+
+This matters beyond inconvenience. A suite whose red is routinely unrelated to the diff trains
+every reader to dismiss red, and is therefore capable of concealing a genuine regression on any
+run. It also makes the 85% coverage gate and the "all test tiers required" contract above
+unenforceable in practice, because a red run carries no information.
+
+Closing this requires its own change: database isolation per parallel worker (or a consistent
+`RefreshDatabase`/`DatabaseTruncation` strategy applied suite-wide rather than per directory).
+It MUST NOT be closed by retrying, reordering, or excluding the affected files.
+
+#### Scenario: The same commit produces the same suite result twice
+
+- GIVEN the `api` suite is run twice in succession against an unchanged working tree
+- WHEN both runs complete
+- THEN the set of failing tests is identical across the two runs (ideally empty)
+- AND no failure cites a missing relation or column belonging to a migration that did run
+
+#### Scenario: A test that fails in the full suite also fails in isolation
+
+- GIVEN a test file reported as failing in a full-suite run
+- WHEN that file is run on its own against the same commit
+- THEN it fails for the same reason
+- AND if it passes in isolation, the full-suite failure is treated as a harness defect that
+  blocks the suite from being used as evidence, not as a flake to be re-run
+
+---
+
 ### Requirement: Framework Catalog Completeness Gate Asserts Both Role-Level And Competency-Level Coverage
 
 The wrapper catalog gate (`scripts/ci-guards.sh`, wired into
