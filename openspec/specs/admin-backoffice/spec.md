@@ -56,10 +56,22 @@ boot-time refresh fails (401, network error), the plugin MUST swallow the
 failure, leave the session empty, and resolve normally — it MUST NOT throw
 and MUST NOT redirect during boot.
 
+The guard MUST decide public access by the route's **first path segment**, skipping an
+`@nuxtjs/i18n` locale prefix, matched against an explicit set of pre-auth roots:
+`unsupported`, `login`, `health`, `forgot-password`, `reset-password`. A suffix match over the
+full path MUST NOT be used: the emailed reset link carries its token as a **path segment**, so
+`/reset-password/{token}` ends with the token and never with the route name — a locked-out
+user clicking their own link would be bounced to `/login`, making the recovery flow
+unreachable by the only people who need it. The first-segment predicate is also strictly
+tighter than a suffix match, which would have made a hypothetical `/projects/login` public.
+
 (Previously: mandated "Bearer JWT storage" without specifying the storage
 medium — the implementation used `sessionStorage`, wiped on tab close. This
 delta replaces it with memory-only storage plus cookie-backed continuity via
 an awaited boot-time refresh.)
+(Previously, as of `self-service-password-reset`: the public-route predicate was a
+`to.path.endsWith(...)` match over a three-entry list, which no token-bearing path could ever
+satisfy.)
 
 #### Scenario: Unauthenticated user is redirected to login
 
@@ -97,6 +109,18 @@ an awaited boot-time refresh.)
 - GIVEN any point in the session lifecycle — login, refresh, or boot
 - WHEN `sessionStorage` and `localStorage` are inspected
 - THEN neither contains an access token or any session credential
+
+#### Scenario: A token-bearing reset link is reachable without a session
+
+- GIVEN no session at all
+- WHEN the visitor opens `/reset-password/{token}` or its locale-prefixed form
+- THEN the guard permits it and does not redirect to `/login`
+
+#### Scenario: The widened predicate exposes no authenticated route
+
+- GIVEN a protected path whose LAST segment happens to be a public root name
+- WHEN the guard evaluates it without a session
+- THEN it is still redirected to `/login`
 
 ### Requirement: WebKit SameSite=None Verification Gate
 
@@ -1016,24 +1040,50 @@ explicitly OUT OF SCOPE for this change.
 
 ### Requirement: Password Field Autofill Hygiene
 
-No form embedding a password-type control, directly or via
-`WriteOnlySecretField`, MAY carry an `autocomplete="username"` anchor ahead of
-it. A hidden or visible field tagged `username` is exactly what teaches
-Chrome's password-manager heuristic to treat the pair as a login credential —
-which, for `WebhookDefaultsForm`/`ProjectForm`, means offering to save an
-organization's webhook secret into the operator's personal password manager.
-That is a credential leak surface this requirement exists to PREVENT, not
-satisfy a console message by creating.
+No form whose password-type control holds a secret belonging to the
+ORGANIZATION or to a third person — directly or via `WriteOnlySecretField` —
+MAY carry an `autocomplete="username"` anchor ahead of it. A hidden or visible
+field tagged `username` is exactly what teaches Chrome's password-manager
+heuristic to treat the pair as a login credential — which, for
+`WebhookDefaultsForm`/`ProjectForm`, means offering to save an organization's
+webhook secret into the operator's personal password manager. That is a
+credential leak surface this requirement exists to PREVENT, not satisfy a
+console message by creating.
+
+The prohibition is scoped by WHOSE credential the field holds, not by the
+presence of a password control. On the operator's OWN sign-in and account
+recovery surfaces the manager offer is correct behaviour, not a leak: there
+the stored pair is the operator's own, and suppressing it would push them
+toward a weaker password they can retype.
 
 Instead, every backoffice text input MUST carry an explicit `autocomplete`
 value matching its purpose. Per WHATWG `autocomplete` semantics, that value
 describes the operator's OWN stored data; every backoffice field that
 describes the organization's configuration or a third person (a colleague
-being created, a candidate's project) is correctly `autocomplete="off"` —
-`login.vue`'s `username`/`current-password` pair is the one place the data
-actually belongs to the signed-in operator, and is the only exception. This
-resolves the console warning as a side effect of every input declaring SOME
-explicit value, not by supplying the specific token Chrome suggests.
+being created, a candidate's project) is correctly `autocomplete="off"`. The
+exceptions are exactly the three pre-auth operator-credential surfaces, where
+the data genuinely is the signing-in operator's own:
+
+| Surface | Declared values |
+|---|---|
+| `login.vue` | `username` + `current-password` |
+| `/forgot-password` | `username` (no password control on the page) |
+| `/reset-password/{token}` | `username` + `new-password` ×2 |
+
+This resolves the console warning as a side effect of every input declaring
+SOME explicit value, not by supplying the specific token Chrome suggests.
+
+(Previously: the prohibition was written unconditionally — *"No form embedding
+a password-type control … MAY carry an `autocomplete="username"` anchor ahead
+of it"* — and named `login.vue`'s pair as *"the only exception"*. Read
+literally, the `/reset-password` page shipped by `self-service-password-reset`
+violated it: an `autocomplete="username"` email input sits ahead of two
+`autocomplete="new-password"` controls, and `/forgot-password` carries a
+`username` input too. The requirement's stated RATIONALE was always about the
+organization's webhook secret, never about the operator's own password, so the
+rule was over-broad rather than the pages being wrong. Narrowed here to the
+scope the rationale actually covers, rather than leaving the source of truth
+asserting a rule the shipped product knowingly breaks.)
 
 Chrome's autofill-hygiene message is emitted on the DevTools Issues channel,
 which browser automation tools do not reliably surface as a console event —
@@ -1437,3 +1487,140 @@ authorization.
   (disabled state bypassed or stale)
 - WHEN `POST /api/entry-links` is called
 - THEN HTTP 403 is returned regardless of what the UI displayed
+
+## ADDED Requirements (self-service-password-reset)
+
+### Requirement: The Recovery Pages Never Undo The API's Anti-Enumeration Contract
+
+`/forgot-password` MUST render an outcome that is identical for a real address, an unknown
+address, and a deactivated account: it MUST NOT name the submitted address, MUST NOT claim an
+inbox was reached, and MUST be phrased conditionally. A "check your inbox" confirmation would
+rebuild in the UI the oracle the API refuses to be. There MUST be no client-side
+"does this address exist" probe on this page.
+
+The success copy MUST be the application's own localized string, not the API's `202` body,
+which is English-only by design because it has no recipient to localize for.
+
+`/login` MUST offer a locale-aware link into the flow, so an operator who cannot sign in has a
+way out of the form.
+
+#### Scenario: Every address produces the same rendered outcome
+
+- GIVEN any address is submitted
+- WHEN the request succeeds
+- THEN one identical, non-committal message is shown, naming no address and asserting no delivery
+
+#### Scenario: The recovery entry point exists on the sign-in page
+
+- WHEN the login page is rendered
+- THEN it links to `/forgot-password` through the locale-aware path helper
+
+### Requirement: Both Recovery Pages Distinguish A Rate-Limit Refusal From A Failure
+
+A `429` from either reset endpoint MUST surface its own copy, distinct from the generic error
+message. The route limit is low enough that a user who mistypes twice will meet it, and a
+generic failure there reads as a broken product rather than "wait a minute".
+
+A server `422` naming a field the page renders MUST land on that field; a `422` naming a field
+the page renders **no** control for — the generic token refusal — MUST NOT be silently
+dropped, and MUST surface at form level with a way to request a new link. (This is the
+recovery-page instance of the shared rule in *Form Field Validation And Banner Contract*, not
+a second, competing rule: the generic `token` refusal is the concrete case that makes the
+general "a 422 on a field without a control still surfaces" clause load-bearing.)
+
+#### Scenario: A throttled request explains itself
+
+- GIVEN the endpoint answers `429`
+- WHEN the response is handled on either recovery page
+- THEN the rate-limit copy is shown, not the generic error copy
+
+#### Scenario: The generic token refusal reaches the operator
+
+- GIVEN the confirm endpoint answers `422` keyed on `token`
+- WHEN the reset page handles it
+- THEN the message is shown at form level AND a link to request a new link is offered
+
+### Requirement: The Reset Page Reads The Emailed Link Shape And Discards The Token After Use
+
+The reset page MUST accept the link shape the API actually mints:
+`{origin}/reset-password/{token}?email={urlencoded address}` — token in a **path segment**,
+address as a query parameter. It MUST match both `/reset-password` and
+`/reset-password/{token}`, so a link truncated by a mail client reaches an explanation and a
+way to request a new one, not a `404` and not a form that could never succeed.
+
+The prefilled address MUST be **visible and editable**: visible so the operator can see which
+account the link resets, editable so a mail client that mangles the query parameter does not
+turn a valid token into a dead end.
+
+On success the page MUST present a terminal state with no submit control — the token has just
+been spent and a control that can only fail is a control that lies — and MUST **clear the
+token out of the address bar**, so it does not survive in browser history or a screen share.
+
+The page MUST mirror the API's minimum password length client-side, so a typo does not spend
+the single-use token.
+
+#### Scenario: The emailed link opens prefilled without a session
+
+- GIVEN the full emailed link
+- WHEN it is opened with no session
+- THEN the form renders with the address prefilled from the query parameter
+
+#### Scenario: The submission carries the token from the path
+
+- WHEN the form is submitted
+- THEN the request body carries the token taken from the path segment and the address from the form field
+
+#### Scenario: A truncated link explains itself
+
+- GIVEN `/reset-password` with no token
+- WHEN the page renders
+- THEN an invalid-link explanation and a request-a-new-link action are shown, with no submittable form
+
+#### Scenario: The spent token leaves the address bar
+
+- GIVEN a successful reset
+- WHEN the success state renders
+- THEN the URL no longer contains the token or the query string
+- AND the success state is not replaced by the invalid-link state as a result
+
+#### Scenario: A mismatched confirmation is caught before the token is spent
+
+- GIVEN a password that does not match its confirmation
+- WHEN the form is submitted
+- THEN no request is sent and the token remains usable
+
+## Carried-Forward Debt
+
+### Requirement: The `/unsupported` Page Carries A Document Title — STATUS: OPEN
+
+> **This requirement is currently VIOLATED and is recorded as open debt, not as
+> shipped behaviour.** It is carried forward from `self-service-password-reset`'s
+> verification (2026-08-28) as ROADMAP risk **R-5**. It is NOT that change's
+> defect and did NOT ride in on its archive: the `backoffice` diff
+> `v0.21.0..v0.22.2` contains no unsupported page, no `app.vue`, no
+> `nuxt.config`, and no layout. It predates the change and needs its own.
+
+`/unsupported` MUST set a non-empty document `<title>`, satisfying the axe-core
+`document-title` rule and WCAG 2.1 AA. It is the SA-11 gate's terminal page —
+the one page a user on an unsupported browser or viewport ever reaches — so an
+untitled document there is the worst place in the product to have one: the user
+has no navigation left and the tab is their only remaining context.
+
+Measured state as of 2026-08-28: `backoffice/tests/e2e/unsupported-gate.spec.ts:36`
+fails the axe `document-title` check identically on **chromium, webkit and
+mobile**, which makes `bun run test:e2e` exit 1 on a clean tree. A suite whose
+red is unrelated to the diff trains a reader to dismiss red — the same failure
+mode already recorded as R-4 for the `api` suite.
+
+#### Scenario: The unsupported page has a title
+
+- GIVEN a visitor redirected to `/unsupported` by the SA-11 gate
+- WHEN the document is inspected
+- THEN `<title>` is present and non-empty
+
+#### Scenario: The accessibility gate passes on all three Playwright projects
+
+- GIVEN the axe-core scan of `/unsupported`
+- WHEN it runs under the chromium, webkit, and mobile projects
+- THEN the `document-title` rule passes in each, and `bun run test:e2e` exits 0
+  on a clean tree
