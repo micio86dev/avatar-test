@@ -681,6 +681,104 @@ spend occurs on normal developer PR workflows.
 - THEN it passes solely on the basis of mock-based tests covering AI-path code
 - AND no AI API cost is incurred during coverage measurement
 
+---
+
+### Requirement: A Skipped `@ai` Guard Test MUST NOT Report Success
+
+> **STATUS: OPEN — specified, NOT yet implemented.** Carried forward from the
+> `evaluator-evidence-and-rigor` verification (2026-08-28), where it was raised as a WARNING
+> against a change that was otherwise archivable. This is a repo-level CI defect; it is not a
+> defect of that change. It is recorded here because the `ai-integration` lane is this
+> capability's, and an archived change folder is not a place a defect can be found again.
+
+An `@ai` test that is the **sole** mechanism guarding a behaviour MUST fail loudly when its
+precondition is absent, never `skip`. `->skip(fn () => empty(getenv('ANTHROPIC_API_KEY')))` is
+indistinguishable from a pass at the job-status level: GitHub Actions concludes `success` on
+`Tests: 2 skipped (0 assertions)`. The `ai-integration.yml` job MUST therefore fail when it
+runs with no `ANTHROPIC_API_KEY`, and MUST fail when the `@ai` selection produces zero
+executed assertions — a lane whose entire purpose is to spend money calling a real model has
+nothing to report if it called nothing.
+
+The lane's trigger MUST also reach the code it is meant to guard. Triggering only on push to
+`release/**` is not sufficient in a Git Flow where release branches may be merged locally and
+never pushed to origin: `ai-integration` last ran on `release/0.33.0`, and the 0.34.0–0.36.x
+branches were never pushed, so the lane has not executed since. The trigger MUST cover
+whatever branch actually carries code to production (`main` at minimum), or the schedule MUST
+guarantee a run per release.
+
+**Concrete open instance.** `api`'s `tests/Feature/Scoring/RubricAdherenceDriftTest` states in
+its own docblock that it is the ONLY mechanism in the suite that can detect the model drawing
+the exceeds/meets line differently. A severity recalibration is exactly that change, and
+`scoring-engine`'s `prompt_version` 3.0.0 recalibration is live in production having never
+been observed by this test: the only `ai-integration` run containing that code (run
+32878803967, `release/0.33.0`, sha b5167b0e) logged an empty `ANTHROPIC_API_KEY`, reported
+`2 skipped (0 assertions)`, and concluded `success`. This is the same masking class as the
+PHPStan incident that hid 40 consecutive red runs — a green badge over work that never ran.
+
+#### Scenario: The ai-integration job fails when its API key is missing
+
+- GIVEN the `ai-integration.yml` workflow is triggered with `ANTHROPIC_API_KEY` unset or empty
+- WHEN the job runs
+- THEN the job fails with an explicit "required secret missing" error
+- AND it does NOT conclude `success` on a skipped test
+
+#### Scenario: A run that executes zero assertions fails
+
+- GIVEN the `@ai` group selection matches tests but every one of them self-skips
+- WHEN the job evaluates the Pest result
+- THEN it fails, because a lane that asserted nothing has verified nothing
+
+#### Scenario: The lane reaches production code at least once per release
+
+- GIVEN a version shipped to `main` whose diff touches scoring prompts or the LLM contract
+- WHEN the release completes
+- THEN at least one `ai-integration` run exists that contains that commit and executed the
+  `@ai` group with assertions
+- AND a release branch that is merged locally without being pushed to origin does NOT silently
+  skip the lane
+
+### Requirement: The `api` Suite MUST Be Deterministic Under Its Own Test Database
+
+> **STATUS: OPEN — specified, NOT yet implemented.** Owner requirement for **ROADMAP R-4**.
+> The finding's evidence (which runs failed, on which disjoint test sets, with which SQLSTATE
+> codes) lives in `openspec/ROADMAP.md` → Carried-forward risk → R-4 and is NOT restated here.
+> Raised independently by two verifications on 2026-08-28 (`star-interviewer-protocol` and
+> `evaluator-evidence-and-rigor`) against changes that were each otherwise archivable. This is
+> a repo-level test-infrastructure defect, not a defect of either change.
+
+A full run of the `api` Pest suite MUST produce the same result on the same commit. Repeated
+runs that fail on **disjoint** sets of tests, with `SQLSTATE[42P01] relation does not exist`
+or `42703 column does not exist`, indicate the shared `beai_test` database being torn down
+underneath tests that are still using it — per-directory `RefreshDatabase` in `tests/Pest.php`
+interacting with parallel workers. Test files that fail in a full run MUST NOT pass in
+isolation; if they do, the suite is reporting the harness, not the code.
+
+This matters beyond inconvenience. A suite whose red is routinely unrelated to the diff trains
+every reader to dismiss red, and is therefore capable of concealing a genuine regression on any
+run. It also makes the 85% coverage gate and the "all test tiers required" contract above
+unenforceable in practice, because a red run carries no information.
+
+Closing this requires its own change: database isolation per parallel worker (or a consistent
+`RefreshDatabase`/`DatabaseTruncation` strategy applied suite-wide rather than per directory).
+It MUST NOT be closed by retrying, reordering, or excluding the affected files.
+
+#### Scenario: The same commit produces the same suite result twice
+
+- GIVEN the `api` suite is run twice in succession against an unchanged working tree
+- WHEN both runs complete
+- THEN the set of failing tests is identical across the two runs (ideally empty)
+- AND no failure cites a missing relation or column belonging to a migration that did run
+
+#### Scenario: A test that fails in the full suite also fails in isolation
+
+- GIVEN a test file reported as failing in a full-suite run
+- WHEN that file is run on its own against the same commit
+- THEN it fails for the same reason
+- AND if it passes in isolation, the full-suite failure is treated as a harness defect that
+  blocks the suite from being used as evidence, not as a flake to be re-run
+
+---
+
 ### Requirement: Framework Catalog Completeness Gate Asserts Both Role-Level And Competency-Level Coverage
 
 The wrapper catalog gate (`scripts/ci-guards.sh`, wired into

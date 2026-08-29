@@ -1,131 +1,25 @@
-# Password Recovery Specification
+# Delta for Password Recovery
 
-## Purpose
+> **Written after the fact.** This change shipped to production (`api` v0.36.0–0.36.2,
+> `backoffice` v0.22.0–0.22.2) with **no `design.md` and no `tasks.md`**, and these delta
+> specs were authored afterwards by reading the shipped code and its tests. The
+> requirements below therefore describe **what was built**, not what the proposal wished
+> for; where the two differ, the code is the fact and the difference is recorded in the
+> requirement text. This is a process gap, named rather than papered over: the ADs in
+> `proposal.md` carried the design load that `design.md` should have carried, and no task
+> ledger exists to reconcile against.
 
-Give a locked-out backoffice user a way back into their account, by two paths
-that are deliberately not interchangeable:
+> **Non-Goal reversal (AD-1).** At archive time, the FIRST Non-Goal bullet of
+> `openspec/specs/password-recovery/spec.md` — *"Self-service email reset: … Deferred until
+> mail is configured and proven to deliver on both services"* — MUST be **deleted**, and the
+> deletion recorded as an overturn of D2 of `archive/2026-08-18-admin-password-reset`. The
+> blocker was **deliverability**, and deliverability is now measurable (`beai:mail-selftest`).
+> The Non-Goal *"Rate limiting"* is likewise superseded by the throttle requirement below.
+> Every CLI requirement in that spec stays in force: the command is the break-glass path for
+> the case where mail itself is broken, and deleting it would convert a degraded dependency
+> into a total one.
 
-1. **Self-service HTTP reset** (`POST /api/auth/forgot-password` →
-   `POST /api/auth/reset-password`, plus the backoffice pages that drive them).
-   The common case. Depends on a delivering mail transport.
-2. **Operator artisan command** (`beai:reset-user-password`), run over a
-   production shell. The **break-glass** path, for the case where mail itself
-   is broken. It is NOT redundant with path 1 and MUST NOT be deleted on the
-   grounds that self-service now exists: deleting it converts a degraded
-   dependency (mail is down) into a total one (nobody can recover at all).
-
-(Previously: *"Command-line only — this is not an HTTP-facing recovery flow."*
-That sentence described the capability accurately until the self-service flow
-shipped. See **Superseded Non-Goals** below for the decision record.)
-
-## Requirements
-
-### The operator command (break-glass path)
-
-Every requirement in this subsection is scoped to `beai:reset-user-password`.
-None of them was relaxed, narrowed, or superseded when the self-service flow
-shipped — the command is the path that survives a mail outage.
-
-### Requirement: Operator-Initiated Password Reset By Email
-
-The system MUST provide a non-interactive artisan command that resets an
-existing user's password given their email, without requiring the current
-password.
-
-#### Scenario: Operator resets a known user
-
-- GIVEN a user exists with the given email
-- WHEN an operator runs the command with `--no-interaction`
-- THEN the command exits 0
-- AND the user can log in with the printed password
-
-#### Scenario: Unknown email is refused
-
-- GIVEN no user exists with the given email
-- WHEN the command runs with that email
-- THEN it exits non-zero, writes nothing, and states the email was not found
-- AND no enumeration concern applies: this is a shell command requiring
-  server access, not a public endpoint
-
-### Requirement: Password Is Always Generated, Never Supplied
-
-The command MUST NOT accept an operator-supplied password (e.g.
-`--password=`). It MUST generate the password itself.
-
-#### Scenario: No password-input option exists
-
-- GIVEN the command's option list
-- WHEN inspected
-- THEN no `--password`-equivalent option exists
-- AND the only way to learn the new credential is the command's own output
-
-(An operator-chosen value lands in shell history for a credential meant to
-recover access, not be memorable; the target can change it immediately after
-via `PUT /api/profile/password`.)
-
-### Requirement: Generated Credential Printed Exactly Once, Byte-Identical
-
-The system MUST print the generated password exactly once via raw output
-that bypasses console formatting, so the printed value is byte-identical to
-the stored one.
-
-#### Scenario: Special characters survive printing unmangled
-
-- GIVEN the generator produces a password containing `<`, `>` and `\`
-- WHEN the command prints it
-- THEN the printed string equals the value verified against the stored hash
-- AND it is never written to a log channel
-
-(Repeats a defect already fixed once in `ProvisionOrganizationCommand`:
-`$this->line()` routes through Symfony's `OutputFormatter`, which assigns
-meaning to exactly the characters `Str::password()` can produce. Fix:
-`OutputInterface::OUTPUT_RAW`.)
-
-### Requirement: Deactivated User Is Refused, Not Reactivated
-
-The command MUST refuse a deactivated target and MUST NOT clear
-`deactivated_at` as a side effect.
-
-#### Scenario: Deactivated target is refused
-
-- GIVEN a user with `deactivated_at` set
-- WHEN the command targets that email
-- THEN it exits non-zero, telling the operator to reactivate first
-- AND `deactivated_at` and the password stay unchanged
-
-### Requirement: Non-Interactive, Usable Over a Headless Shell
-
-The command MUST complete under `--no-interaction` with no `ask()`-style
-prompts.
-
-#### Scenario: Runs headless
-
-- GIVEN a shell with no TTY (`railway ssh ... --no-interaction`)
-- WHEN the command runs with only its required argument
-- THEN it completes without waiting on any prompt
-
-(Counter-example: `CreateSuperadmin` calls `ask()` and is unusable in
-exactly this situation.)
-
-### Requirement: Reset Is Transactional
-
-The command MUST apply the password write and the `password_changed_at`
-stamp atomically.
-
-#### Scenario: Mid-write failure leaves nothing changed
-
-- GIVEN the write would fail partway
-- WHEN the command runs
-- THEN neither the password nor `password_changed_at` changes, and it exits
-  non-zero
-
-### The self-service HTTP flow
-
-Added by `self-service-password-reset` (archived 2026-08-29). These
-requirements were written **after** the implementation shipped (`api`
-v0.36.0–0.36.2, `backoffice` v0.22.0–0.22.2), by reading the shipped code and
-its tests; where the code and the proposal differ, the code is the fact and the
-difference is recorded in the requirement text.
+## ADDED Requirements
 
 ### Requirement: The Reset Request Endpoint Cannot Be Used To Enumerate Accounts
 
@@ -345,7 +239,7 @@ limit.
 > caller's IP. The proposal's AD-7 and question 4 assumed `3/min` per IP plus a **per-email
 > hourly cap**; the per-email cap was deliberately NOT shipped, because it trades mail-bombing
 > against a targeted **recovery-denial** attack on a known victim. That remains an OPEN
-> product decision, not an implementation choice — see **Open Decisions** below.
+> product decision, not an implementation choice.
 
 #### Scenario: The request leg throttles, and identically for a known and an unknown address
 
@@ -464,86 +358,3 @@ that is not.
 - WHEN the probe is run against that un-overridden configuration
 - THEN it refuses, so a passing suite cannot be read as evidence that production mail delivers
 - AND the reset flow's own tests assert the rendered message and never send
-
-## Superseded Non-Goals
-
-A reversed decision that leaves no trace looks like it was never made. These four
-Non-Goals stood in this spec until `self-service-password-reset` was archived on
-**2026-08-29**; each is recorded here with what overturned it.
-
-| Non-Goal, as it stood | Status | Record |
-|---|---|---|
-| *"Self-service email reset … Deferred until mail is configured and proven to deliver on both services."* | **OVERTURNED** | This is **D2 of `openspec/changes/archive/2026-08-18-admin-password-reset`**, reversed by **AD-1** of `self-service-password-reset`'s `proposal.md`. D2's blocker was **deliverability**, not desirability — and deliverability became *measurable* with `beai:mail-selftest`, which refuses to report success on a transport that delivers nothing. The flow shipped in `api` v0.36.0 / `backoffice` v0.22.0. The deferral condition itself is NOT yet met in production — see **Open Decisions** — but it is now a deployment step with a pass/fail probe, not an open engineering question. |
-| *"Reset-token table, backoffice UI trigger"* | **OVERTURNED** | Both shipped. The token table is Laravel's own `password_reset_tokens` driven through the `Password` broker (AD-2 — the table and broker config already existed and were entirely unused); the UI trigger is `/forgot-password` plus `/reset-password/{token}` in the backoffice. |
-| *"Rate limiting (shell command, not an HTTP surface — belongs to `nfr-hardening` if a future email flow needs it)."* | **SUPERSEDED** | The future email flow arrived. Both public routes carry an inline `throttle:6,1` — see *Both Public Reset Routes Are Rate Limited On A Key Independent Of Account Existence*. Ownership did NOT pass to `nfr-hardening`; the throttle ships with the routes it protects. |
-| *"Non-admin roles for a future email flow."* | **OVERTURNED BY OMISSION — read Open Decisions** | The shipped flow applies **no role check at all**, so this Non-Goal is not merely lifted for non-admins, it never existed as a constraint in code. This was never decided. It is carried forward below rather than quietly retired. |
-
-## Non-Goals
-
-- Collateral finding, recorded for awareness: with no delivering mail transport,
-  `ScoringFailedNotification` and `WebhookDeliveryDeadNotification` also reach
-  nobody in production today. Still true as of 2026-08-29.
-- Any `--password=`-style option on the operator command. Unchanged and still
-  binding — see *Password Is Always Generated, Never Supplied*.
-- `UserPolicy` changes: admin-resets-another-admin already works via
-  `PATCH /api/users/{user}`.
-- Candidate-facing reset, email verification, password-strength policy, 2FA, and
-  "log out my other devices" as a user-invocable action.
-- Throttling the rest of the `/api/auth` prefix (`login`, `refresh`, `logout`,
-  `me`). Explicitly out of scope — see `identity-auth`'s *The Auth Surface Gains
-  Exactly Two Public, Throttled Reset Routes*.
-
-## Open Decisions
-
-Carried forward from `self-service-password-reset`'s verification (2026-08-28)
-so they do not live only inside a closed change folder. Each is **shipped
-production behaviour resting on an unratified assumption**, not a defect.
-
-### OD-1 — No role check exists anywhere in the flow (proposal Q1, never answered)
-
-Every **active** user can self-serve, platform superadmins included.
-`ForgotPasswordController` never looks the user up at all (that is required, by
-the anti-enumeration requirement above); `ResetPasswordController` gates only on
-existence and `deactivated_at`. There is no role predicate at any point in
-either leg.
-
-This may well be correct — a locked-out superadmin needs recovery more than
-anyone, and the alternative would put a role lookup into a path that must stay
-branch-free. **It was not decided.** If the answer is ever "some roles must not
-self-serve", note that it cannot be implemented on the request leg without
-reopening the timing oracle; it belongs off-request, in the send job, alongside
-the deactivated check.
-
-### OD-2 — The per-email rate cap was deliberately not shipped (proposal Q4 / AD-7)
-
-Recorded in full on the throttle requirement above and in `api/routes/api.php`.
-Summary: a per-email cap trades mail-bombing against a targeted
-**recovery-denial** attack on a known victim. Owner's product decision, not an
-implementation gap. Not restated here beyond the pointer, so the two cannot drift.
-
-### OD-3 — The flow is inert in production; the ship gate is unmet
-
-Verified live against Railway on 2026-08-28: `RESEND_API_KEY` is **empty** and
-there is **no `MAIL_MAILER` key at all** on **both** the `api` and `worker`
-services, so `config('mail.default')` resolves to `log`, which delivers nothing
-without erroring. `BACKOFFICE_ORIGIN` **is** set on both, and
-`MAIL_FROM_ADDRESS=noreply@quint.org`.
-
-The endpoint answers `202` and the message reaches nobody — exactly the
-behaviour *The Flow Is Inert Without A Delivering Mail Transport* requires. The
-gate to enable it is `php artisan beai:mail-selftest --to=<real inbox>` exiting
-0 on **both** services against a real transport. **This is the owner's
-deployment step; no engineering task closes it.** Until then
-`beai:reset-user-password` remains the only working recovery path, which is why
-it was not deleted. Runbook: `docs/deploy.md` → *Recovering a Locked-Out User*.
-
-### OD-4 — Q2, Q3, Q5 and Q6 shipped on assumed answers, never ratified
-
-Each is defensible and each is now production behaviour:
-
-| Q | Assumed answer, now shipped | Where |
-|---|---|---|
-| Q2 | No mail is sent to a deactivated user (mirrors the CLI's refuse-don't-reactivate) | `SendPasswordResetLinkJob.php:105-109` |
-| Q3 | Token TTL 60 minutes | `config/auth.php:127` (`AUTH_PASSWORD_RESET_EXPIRE_MINUTES`) |
-| Q5 | A `user.password_reset` audit row, with a log fallback for superadmins | `ResetPasswordController.php:137-160` |
-| Q6 | Reassurance copy that names no requesting IP or user agent | `ResetPasswordNotification.php:63-67` |

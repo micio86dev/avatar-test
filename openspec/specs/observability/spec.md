@@ -93,11 +93,27 @@ Clarity MUST capture:
 Clarity MUST be connected to the Google Analytics 4 property so that behavioral
 sessions can be correlated with product events.
 
+Clarity's coverage is universal **except** on the routes the *Session Replay Never
+Runs On A Recovery Page* requirement below declares replay-unsafe. That carve-out
+is a hard exclusion, not a configuration preference: the recorder MUST NOT run
+there at all. Coverage is otherwise unconditional — a route is either on the
+replay-unsafe list or it is recorded.
+
+(Previously: *"the Microsoft Clarity snippet is loaded on every page in both
+apps"*, stated without exception. That was already inaccurate before
+`self-service-password-reset` — `/participants/**` and `/login` have been
+excluded in `backoffice/app/utils/analytics-path.ts` since the redaction utility
+was written, because the participants branch renders candidate display names and
+references. The exception set was never reflected here. This change added
+`/forgot-password` and `/reset-password` to that same list and is the occasion
+for correcting the drift, not its cause.)
+
 #### Scenario: Clarity script is loaded in frontend and backoffice
 
 - GIVEN the `frontend` and `backoffice` Nuxt apps
 - WHEN a page is rendered and the network requests are inspected
 - THEN the Microsoft Clarity snippet is loaded on every page in both apps
+  EXCEPT those declared replay-unsafe
 
 #### Scenario: Clarity is connected to the GA4 property
 
@@ -661,3 +677,72 @@ continue to serve as the unauthenticated liveness probe consumed by container or
   dead-lettered
 - THEN the `queue-runtime` capability's health endpoint is the answer
 - AND no business dashboard, Sentry, or external analytics platform is relied upon for that signal
+
+---
+
+<!-- added by self-service-password-reset -->
+
+### Requirement: A Credential Carried In A URL Path Is Redacted Before Any Analytics Or Error Sink
+
+The password reset link carries a **live, single-use credential as a path segment**
+(`/reset-password/{token}?email=...`). Route redaction MUST collapse that segment to a
+placeholder before a route is handed to any third-party sink, and query strings MUST continue
+to be stripped **wholesale** rather than filtered by an allowlist — the reset link's `?email=`
+is exactly the value the API refuses to confirm the existence of.
+
+The rule MUST apply to every path a route reaches a sink through: the analytics `page_path`,
+the error reporter's `request.url`, and navigation breadcrumbs, which pass bare paths rather
+than absolute URLs. The error reporter's URL redaction MUST delegate to the one shared
+implementation rather than re-deriving these rules, so the two cannot drift apart.
+
+Key-based denylists MUST NOT be relied on for this: they match a **key on an object** and
+cannot reach a value embedded in a path.
+
+#### Scenario: The token is collapsed out of an absolute URL
+
+- GIVEN `https://ops.example/reset-password/a-live-token?email=ada%40example.com`
+- WHEN the URL is redacted for the error sink
+- THEN the result is `https://ops.example/reset-password/:token`, with no query string
+
+#### Scenario: The token is collapsed out of a navigation breadcrumb path
+
+- GIVEN a navigation breadcrumb carrying `to: /reset-password/a-live-token`
+- WHEN the breadcrumb is scrubbed
+- THEN the recorded value is `/reset-password/:token` and the raw token appears nowhere in the event
+
+#### Scenario: A deeper path is not silently half-cleaned
+
+- GIVEN a path with more segments than the redaction pattern expects
+- WHEN it is redacted
+- THEN it falls through unredacted rather than being partially rewritten, so the failure is visible rather than deceptive
+
+### Requirement: Session Replay Never Runs On A Recovery Page
+
+Session recording MUST be disabled on `/login`, `/forgot-password`, and `/reset-password`, in
+addition to the participant surfaces. Redacting the URL says nothing about what is rendered
+**on** the page: `/reset-password` is where a new credential is typed, and `/forgot-password`
+receives the address the entire flow refuses to confirm. Recording the pair — an address and
+the fact that this person is recovering an account — would rebuild the enumeration oracle
+off-site, in a store nobody at BEAI can purge.
+
+Input masking defaults in a vendor dashboard MUST NOT be treated as the control here: a
+default is precisely what can be changed without anyone touching this repository.
+
+The complete replay-unsafe set is therefore `participants`, `login`, `forgot-password`,
+`reset-password`, each matching the branch entire and each tolerating an `@nuxtjs/i18n`
+locale prefix. This set is the exception named by the *Microsoft Clarity — User Behavior
+Analytics* requirement above; the two MUST NOT be allowed to drift, and the single
+implementation both refer to is `backoffice/app/utils/analytics-path.ts`.
+
+#### Scenario: Both recovery routes are unsafe for replay
+
+- GIVEN `/forgot-password`, `/reset-password`, and `/reset-password/{token}`, with or without a locale prefix
+- WHEN each is tested for replay safety
+- THEN each is reported unsafe and the recorder does not run
+
+#### Scenario: The participants branch stays unsafe, list included
+
+- GIVEN `/participants` and `/participants/{id}`, with or without a locale prefix
+- WHEN each is tested for replay safety
+- THEN each is reported unsafe — the list shows display names and candidate references, so
+  "only the detail page is sensitive" is wrong on its face

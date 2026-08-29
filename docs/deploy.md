@@ -151,9 +151,28 @@ downtime.
 
 ## Recovering a Locked-Out User
 
-When an existing user has forgotten their password and no in-app recovery
-path applies (self-service email reset is not yet shipped), an operator with
-shell access to the `api` service can reset it directly:
+Self-service email reset **has shipped** (api v0.36.0, backoffice v0.22.0):
+`/forgot-password` in the backoffice. Prefer it — it revokes the user's whole
+refresh-token family, which the operator command below also does but which no
+other path guarantees.
+
+**It is inert until mail is configured.** `BACKOFFICE_ORIGIN` is set on both
+`api` and `worker`, but `RESEND_API_KEY` is empty and `MAIL_MAILER` is unset,
+so `config('mail.default')` resolves to `log` — which delivers nothing, without
+erroring. Set `RESEND_API_KEY` and `MAIL_MAILER=resend` on **both** services
+(the link is minted inside a queued job, so the worker needs them too), verify
+the sender domain with the provider, then confirm with:
+
+```
+railway ssh --service api -- php artisan beai:mail-selftest --to=you@example.com
+```
+
+That command refuses to report success on the `log` and `array` transports, so
+a pass from it means real delivery rather than a green light over a no-op.
+
+While mail is unconfigured — or during a provider outage, when the reset email
+cannot arrive — an operator with shell access to the `api` service can reset a
+password directly:
 
 ```
 railway ssh --service api -- php artisan beai:reset-user-password user@example.com --no-interaction
