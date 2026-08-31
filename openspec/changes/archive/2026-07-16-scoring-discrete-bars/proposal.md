@@ -12,9 +12,9 @@ Success = every binding document states indicator scores are the discrete set **
 
 - **`CLAUDE.md` (lines 137–144)** — replace "1–5 scale (interpolation allowed, e.g. 4)" with **discrete {1,3,5}, closest-anchor selection, no 2/no 4**; replace the example "COL 3.67 from 4,3,4" with a valid discrete one (e.g. **COL 3.67 from 5,3,3**); add the **unassessable = `-1`/null** rule (exempt from {1,3,5}, excluded from the competency mean).
 - **`openspec/ROADMAP.md` (line 42, C9 row)** — "indicators 1–5" → **discrete {1,3,5}**.
-- **`docs/app_description/02-domain/02-valutazione.md` (line 33)** — "tipicamente 1–5" → precise **discrete {1,3,5}**.
-- **`docs/app_description/03-ux-reference/02-output-valutazione.md` (line 38)** — same correction.
-- **`docs/app_description/03-ux-reference/esempio-report-valutazione.json`** — regenerate **all per-indicator scores to {1,3,5}** only; keep the **`-1` sentinel on SLF** (reliability 67%); keep each `competency.score` a fractional mean internally consistent with its regenerated indicators; keep `reliability` values coherent.
+- **`docs/app_description/02-domain/02-evaluation.md` (line 33)** — "tipicamente 1–5" → precise **discrete {1,3,5}**.
+- **`docs/app_description/03-ux-reference/02-evaluation-output.md` (line 38)** — same correction.
+- **`docs/app_description/03-ux-reference/evaluation-report-example.json`** — regenerate **all per-indicator scores to {1,3,5}** only; keep the **`-1` sentinel on SLF** (reliability 67%); keep each `competency.score` a fractional mean internally consistent with its regenerated indicators; keep `reliability` values coherent.
 
 ### Out of Scope (non-goals)
 
@@ -43,9 +43,9 @@ Doc-correction only — the sole viable approach, since the engine is greenfield
 |------|--------|-------------|
 | `CLAUDE.md` (137–144) | Modified | Discrete {1,3,5}, closest-anchor, no interpolation; valid example; add `-1` unassessable rule |
 | `openspec/ROADMAP.md` (42) | Modified | C9 row: "indicators 1–5" → discrete {1,3,5} |
-| `docs/app_description/02-domain/02-valutazione.md` (33) | Modified | "tipicamente 1–5" → discrete {1,3,5} |
-| `docs/app_description/03-ux-reference/02-output-valutazione.md` (38) | Modified | Same |
-| `docs/app_description/03-ux-reference/esempio-report-valutazione.json` | Modified | Regenerate all indicator scores to {1,3,5}; keep SLF `-1`; recompute means/reliability |
+| `docs/app_description/02-domain/02-evaluation.md` (33) | Modified | "tipicamente 1–5" → discrete {1,3,5} |
+| `docs/app_description/03-ux-reference/02-evaluation-output.md` (38) | Modified | Same |
+| `docs/app_description/03-ux-reference/evaluation-report-example.json` | Modified | Regenerate all indicator scores to {1,3,5}; keep SLF `-1`; recompute means/reliability |
 | Framework catalog `bars/*.json`, `competencies.json`, `roles.json` | Unchanged | Anchors already {5,3,1} — explicitly untouched |
 
 ## Risks
@@ -71,6 +71,6 @@ Pure documentation edit on a `feature/*` branch — no code, no data, no deploy.
 - [ ] `CLAUDE.md` states discrete {1,3,5} closest-anchor scoring, no interpolation, with a valid example and the `-1` unassessable rule (exempt + excluded from the mean).
 - [ ] `openspec/ROADMAP.md` C9 row reads "discrete {1,3,5}", not "indicators 1–5".
 - [ ] Both domain/UX docs state discrete {1,3,5} (no "tipicamente 1–5").
-- [ ] `esempio-report-valutazione.json` contains only `{1,3,5}` indicator scores plus the `-1` on SLF; every `competency.score` equals the arithmetic mean of its assessed indicators; reliability values coherent.
+- [ ] `evaluation-report-example.json` contains only `{1,3,5}` indicator scores plus the `-1` on SLF; every `competency.score` equals the arithmetic mean of its assessed indicators; reliability values coherent.
 - [ ] The `bars/SRX.json` gap is recorded as a C3 dependency.
 - [ ] No framework catalog file changed.

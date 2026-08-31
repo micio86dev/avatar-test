@@ -238,7 +238,7 @@ stale direction. Then restore.
 
 ## D5 — The documentation fix
 
-`docs/app_description/02-domain/01-ruoli-e-competenze.md:78` — *"File completi: ICO.json, FLL.json,
+`docs/app_description/02-domain/01-roles-and-competencies.md:78` — *"File completi: ICO.json, FLL.json,
 MLL.json, BUL.json"* — is replaced by a pointer, **in Italian** (the file's language), with **no
 numbers in prose**:
 
@@ -360,7 +360,7 @@ files**. Vitest via `bun run test:unit`.
 | `backoffice/app/pages/projects/index.vue` | Modify | Resolve coverage for the distinct role codes |
 | `backoffice/i18n/locales/{it,en}.json` | Modify | Four keys each |
 | `backoffice/tests/unit/**`, `tests/e2e/projects-crud.spec.ts` | Modify | Per D7 |
-| `docs/app_description/02-domain/01-ruoli-e-competenze.md` | Modify | Line 78 → the pointer paragraph |
+| `docs/app_description/02-domain/01-roles-and-competencies.md` | Modify | Line 78 → the pointer paragraph |
 | `api/**` | **Unchanged** | `bars_available` already correct; no snapshot movement |
 
 ## Open Questions

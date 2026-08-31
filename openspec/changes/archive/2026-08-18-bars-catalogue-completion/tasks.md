@@ -41,7 +41,7 @@ Chain strategy: stacked-to-main
 ## Phase 1: SRX Responsibilities Prerequisite (deliverable 1)
 
 - [x] 1.1 Author SRX `responsibilities` (design §3 exact sentence) in `docs/app_description/02-domain/framework/roles.json` and vendor into `api/database/framework/roles.json` (byte-identical).
-- [x] 1.2 Update `docs/app_description/02-domain/01-ruoli-e-competenze.md` line 20 (SRX row: replace "responsabilità da definire in configurazione").
+- [x] 1.2 Update `docs/app_description/02-domain/01-roles-and-competencies.md` line 20 (SRX row: replace "responsabilità da definire in configurazione").
 - [x] 1.3 Run `./vendor/bin/pest tests/Feature/Seeders/GapResolutionTest.php` unlocked — `missing_role_meta`(SRX) resolves. Run `LockedRoleMetaFillTest.php` — locked path fills + signals.
 
 ## Phase 2: Authoring Standards & CI Guards (judgment + mechanical, before any new anchor)
@@ -209,7 +209,7 @@ Chain strategy: stacked-to-main
 ## Phase 7: Close-Out
 
 - [x] 7.1 Confirm `scripts/framework-known-gaps.txt` and `scripts/framework-competency-gaps.txt` are both empty (26 pair lines + SRX line, cumulatively deleted across Phases 3–6 — this is the indivisible fill-and-clear act).
-- [x] 7.2 Update `docs/app_description/02-domain/01-ruoli-e-competenze.md` §Copertura BARS (lines 78–83) to state full coverage; matrix table stays factual.
+- [x] 7.2 Update `docs/app_description/02-domain/01-roles-and-competencies.md` §Copertura BARS (lines 78–83) to state full coverage; matrix table stays factual.
 - [x] 7.3 Update `openspec/specs/framework-catalog/spec.md` `## Non-Goals (Explicit)` bullet "Inventing missing domain data — SRX BARS..." — **direct prose edit**, not a delta Requirement block (deltas cannot touch this section); do after the change's delta is archived, or the archive pipeline leaves a promoted spec contradicting the just-landed change.
 - [x] 7.4 Update `tests/Feature/Api/BarsAvailableFlagTest.php` and `PartialCatalogApiTest.php` to fixture-based scenarios (no real pair is `bars_available=false` post-completion); restate `role_no_bars` scenario in `scoring-engine` scope against a fixture.
 - [x] 7.5 Final assertion suite: zero pending `competency_no_bars`/`role_no_bars`/`missing_role_meta` rows; per-role counts 45/54/54/42/54; `GET /api/framework/roles/{role}/competencies` → `bars_available=true` for all 83 pairs.

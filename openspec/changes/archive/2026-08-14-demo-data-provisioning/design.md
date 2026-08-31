@@ -234,7 +234,7 @@ reason enough.
 | `utterances.text` (avatar + candidate) | project language | It is speech |
 | `indicator_scores.indicator_text` | **English, read from `BarsIndicator.text`** — never authored | Catalog is en-only; `FrameworkCatalogSeeder.php:327-330` records the standing `missing_translation` gap |
 | `indicator_scores.excerpts` | Italian / English, per project | Verbatim candidate speech |
-| `indicator_scores.explanation` | English | House style in `docs/app_description/03-ux-reference/esempio-report-valutazione.json` |
+| `indicator_scores.explanation` | English | House style in `docs/app_description/03-ux-reference/evaluation-report-example.json` |
 | Project/participant names, command output | English | Artifact language convention |
 
 No new convention is invented; the reference report's split (Italian excerpts,

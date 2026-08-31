@@ -6,12 +6,12 @@
 
 ## Intent
 
-`docs/app_description/02-domain/03-tipi-assessment.md:48` makes pauses a **per-project option**:
+`docs/app_description/02-domain/03-assessment-types.md:48` makes pauses a **per-project option**:
 
 > Pause | Ogni quante competenze mostrare una pausa (es. ogni N competenze; `null` = nessuna pausa)
 
 and binding acceptance criterion **SA-04**
-(`docs/app_description/06-acceptance-criteria/01-scenari-accettazione.md:36-40`) makes the trigger
+(`docs/app_description/06-acceptance-criteria/01-acceptance-scenarios.md:36-40`) makes the trigger
 explicit: *a project with a pause every 3 competencies* shows the pause screen after the 3rd.
 
 The delivered flow ignores the option entirely. It interposes a manual screen after **every**

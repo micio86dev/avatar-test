@@ -22,7 +22,7 @@ All 13/13 tasks marked `[x]` in `openspec/changes/scoring-discrete-bars/tasks.md
 
 ## Check 1 — Indicator scores ∈ {1,3,5,-1} + competency.score arithmetic
 
-Command: Python3 parse + assert loop over `esempio-report-valutazione.json`
+Command: Python3 parse + assert loop over `evaluation-report-example.json`
 
 | Comp | JSON indicators | assessed | arithmetic | stored | vs design | PASS? |
 |------|----------------|----------|-----------|--------|-----------|-------|
@@ -59,7 +59,7 @@ All 12 entries match the authoritative breakdown table in `design.md` (approved 
 
 ## Check 3 — Excerpts and explanations unchanged
 
-Command: `git diff HEAD -- docs/app_description/03-ux-reference/esempio-report-valutazione.json`
+Command: `git diff HEAD -- docs/app_description/03-ux-reference/evaluation-report-example.json`
 
 The diff shows only `"score"` lines changed (36 lines: 12 competency-level + 24 indicator-level). No `explanation`, `excerpts`, `indicator`, or `reliability` field was touched.
 
@@ -91,9 +91,9 @@ The diff shows only `"score"` lines changed (36 lines: 12 competency-level + 24 
 
 ## Check 6 — Domain/UX docs
 
-- `02-valutazione.md` line 33: `"tipicamente 1–5"` → ABSENT; `"sull'insieme discreto {1,3,5}; -1 se non valutabile"` → PRESENT **PASS**
-- `02-output-valutazione.md` illustrative JSON block: `"score": 4` → `"score": 3` (confirmed in diff) **PASS**
-- `02-output-valutazione.md` line 38+: `"tipicamente su scala 1–5"` → ABSENT; discrete wording + -1 sentinel + reliability non-normative note → PRESENT **PASS**
+- `02-evaluation.md` line 33: `"tipicamente 1–5"` → ABSENT; `"sull'insieme discreto {1,3,5}; -1 se non valutabile"` → PRESENT **PASS**
+- `02-evaluation-output.md` illustrative JSON block: `"score": 4` → `"score": 3` (confirmed in diff) **PASS**
+- `02-evaluation-output.md` line 38+: `"tipicamente su scala 1–5"` → ABSENT; discrete wording + -1 sentinel + reliability non-normative note → PRESENT **PASS**
 
 ---
 
@@ -112,7 +112,7 @@ Apply agent's regex refinement is correct and faithful to design intent: it catc
 ## Check 8 — Framework catalog + engine code untouched
 
 - `git diff HEAD -- docs/app_description/02-domain/framework/` → 0 lines (untouched) **PASS**
-- Modified files in working tree: `CLAUDE.md`, `openspec/ROADMAP.md`, `docs/app_description/02-domain/02-valutazione.md`, `docs/app_description/03-ux-reference/02-output-valutazione.md`, `docs/app_description/03-ux-reference/esempio-report-valutazione.json` + tooling-only (`.atl/skill-registry.md`, `skills-lock.json`).
+- Modified files in working tree: `CLAUDE.md`, `openspec/ROADMAP.md`, `docs/app_description/02-domain/02-evaluation.md`, `docs/app_description/03-ux-reference/02-evaluation-output.md`, `docs/app_description/03-ux-reference/evaluation-report-example.json` + tooling-only (`.atl/skill-registry.md`, `skills-lock.json`).
 - No `.php`, `.ts`, `.vue`, `.js`, or engine files modified.
 
 **Result**: PASS — out-of-scope files untouched, no engine code added.

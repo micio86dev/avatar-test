@@ -175,8 +175,8 @@ rubric (residual levels 4/2, anchor-primacy tie-break). Any wording asserting
 this change.
 
 Files in scope: `CLAUDE.md`, `openspec/ROADMAP.md` (C9 row),
-`docs/app_description/02-domain/02-valutazione.md`,
-`docs/app_description/03-ux-reference/02-output-valutazione.md`, and the 4×
+`docs/app_description/02-domain/02-evaluation.md`,
+`docs/app_description/03-ux-reference/02-evaluation-output.md`, and the 4×
 `AGENTS.md` files.
 (Previously: required these documents to state the discrete {1,3,5} domain
 and prohibit any 1–5 continuous/interpolated wording.)
@@ -195,9 +195,9 @@ and prohibit any 1–5 continuous/interpolated wording.)
 - WHEN the C9 row is read
 - THEN it references "indicators {1,2,3,4,5}" (not "discrete {1,3,5}")
 
-#### Scenario: esempio-report-valutazione.json values remain legal, unchanged is acceptable
+#### Scenario: evaluation-report-example.json values remain legal, unchanged is acceptable
 
-- GIVEN `esempio-report-valutazione.json` after this change
+- GIVEN `evaluation-report-example.json` after this change
 - WHEN every per-indicator score field is read
 - THEN each value is a member of {1, 2, 3, 4, 5, -1}
 - AND leaving the existing {1,3,5,-1} values unchanged (a subset) satisfies this

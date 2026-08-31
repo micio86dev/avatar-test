@@ -1240,7 +1240,7 @@ unreachable dead code — no `navigateTo('/interview/done')` call exists anywher
 `frontend/` — and is not the rendered surface; see design.md S15.) The redirect MUST fire regardless of the resulting
 `Evaluation` status (`completed` or `pending`, per C9): evaluation is asynchronous and
 NOT yet known at redirect time (per
-`docs/app_description/04-integration-surface/04-uscita-utente.md` — "la valutazione non
+`docs/app_description/04-integration-surface/04-user-exit.md` — "la valutazione non
 è sincrona con il redirect"), and the frontend MUST NOT wait for it or poll for it before
 redirecting.
 

@@ -1,42 +1,42 @@
-# BEAI — Documentazione per rebuild
+# BEAI — Rebuild documentation
 
-Pacchetto documentale per lo sviluppo **da zero** della web app BEAI (assessment soft skill tramite intervista vocale con AI).
+Documentation package for building the BEAI web app **from scratch** (soft-skill assessment through an AI voice interview).
 
-## Destinatario
+## Audience
 
-Sviluppatore esterno incaricato di progettare e implementare la nuova piattaforma con **libertà tecnologica completa**.
+An external developer tasked with designing and implementing the new platform with **complete technological freedom**.
 
-## Cosa contiene
+## What it contains
 
-| Cartella | Contenuto |
+| Folder | Content |
 |----------|-----------|
-| [01-product-and-journeys](./01-product-and-journeys/) | Cos'è il prodotto, attori, journey utente, architettura concettuale |
-| [02-domain](./02-domain/) | Ruoli, competenze, BARS, logica di valutazione, tipi di assessment |
-| [03-ux-reference](./03-ux-reference/) | Messaggi in-app, esempio output valutazione |
-| [04-integration-surface](./04-integration-surface/) | Traccia astratta: SSO, API, webhook, uscita utente |
-| [05-business-rules](./05-business-rules/) | Lifecycle candidato, soglie valutazione, requisiti non funzionali |
-| [06-acceptance-criteria](./06-acceptance-criteria/) | Scenari di accettazione narrativi |
-| [07-out-of-scope](./07-out-of-scope/) | Cosa non è richiesto (retrocompatibilità, stack attuale) |
+| [01-product-and-journeys](./01-product-and-journeys/) | What the product is, actors, user journeys, conceptual architecture |
+| [02-domain](./02-domain/) | Roles, competencies, BARS, evaluation logic, assessment types |
+| [03-ux-reference](./03-ux-reference/) | In-app messages, sample evaluation output |
+| [04-integration-surface](./04-integration-surface/) | Abstract outline: SSO, API, webhooks, user exit |
+| [05-business-rules](./05-business-rules/) | Candidate lifecycle, evaluation thresholds, non-functional requirements |
+| [06-acceptance-criteria](./06-acceptance-criteria/) | Narrative acceptance scenarios |
+| [07-out-of-scope](./07-out-of-scope/) | What is not required (backward compatibility, current stack) |
 
-## Ordine di lettura consigliato
+## Suggested reading order
 
-1. `01-product-and-journeys/01-panoramica-prodotto.md`
-2. `02-domain/01-ruoli-e-competenze.md`
-3. `04-integration-surface/` (tutti i file)
+1. `01-product-and-journeys/01-product-overview.md`
+2. `02-domain/01-roles-and-competencies.md`
+3. `04-integration-surface/` (all files)
 4. `05-business-rules/`
 5. `06-acceptance-criteria/`
 6. `07-out-of-scope/`
 
-## Principi guida
+## Guiding principles
 
-- **Vincolante:** dominio (competenze, ruoli, scoring), funzionalità prodotto, regole di business.
-- **Traccia (non vincolante):** tipi di integrazione esterna (SSO, API, webhook) — da progettare ex novo.
-- **Fuori scope:** retrocompatibilità con integrazioni, API o stack della versione attuale.
+- **Binding:** the domain (competencies, roles, scoring), product functionality, business rules.
+- **Outline (non-binding):** the kinds of external integration (SSO, API, webhooks) — to be designed from scratch.
+- **Out of scope:** backward compatibility with the integrations, APIs or stack of the current version.
 
-## Fonti interne (riferimento Provider attuale)
+## Internal sources (reference to the current provider)
 
-Documentazione estratta e riscritta da materiali in `documentazione-fornitore/`, `mockup/` e note di progetto. Non include codice sorgente né contratti API specifici della versione corrente.
+Documentation extracted and rewritten from materials in `documentazione-fornitore/`, `mockup/` and project notes. It includes neither source code nor API contracts specific to the current version.
 
 ---
 
-*Ultimo aggiornamento: luglio 2026*
+*Last updated: July 2026*

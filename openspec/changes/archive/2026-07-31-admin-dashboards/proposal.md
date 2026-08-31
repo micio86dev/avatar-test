@@ -56,7 +56,7 @@ mirroring `api/routes/api.php:66-68`:
 | `GET /api/dashboard/metrics` (org KPI summary) | RBAC only |
 
 Plus: `ParticipantPolicy`, `EvaluationPolicy`, a shared lifecycle read-gate, an admin
-evaluation serializer reproducing `docs/app_description/03-ux-reference/esempio-report-valutazione.json`,
+evaluation serializer reproducing `docs/app_description/03-ux-reference/evaluation-report-example.json`,
 Pest feature tests, Scramble annotations. Final task (gated on C10 merging): add the
 additive `url` key to `EvaluationPayloadAssembler::renderFiles()` per the C10 contract at
 `openspec/changes/webhooks-integration/design.md:309,460`.
@@ -148,7 +148,7 @@ blast radius. Purpose-built `CandidateTable.vue` / `EvaluationReport.vue` per `D
 
 **D5 — Report rendering correctness.** Indicator scores are the discrete set `{1,3,5}`;
 `-1` means **unassessable** and is **excluded** from the competency mean. Verified in the
-reference: `esempio-report-valutazione.json:362-393` — `SLF` has `5, 3, -1`, `reliability "67%"`,
+reference: `evaluation-report-example.json:362-393` — `SLF` has `5, 3, -1`, `reliability "67%"`,
 `score 4.0` = mean(5,3). The viewer MUST render `-1` as a distinct "no evidence" treatment,
 never as a numeric chip on a 1–5 colour scale. `reliability` arrives pre-rendered as a percent
 string (`EvaluationPayloadAssembler.php:146`).

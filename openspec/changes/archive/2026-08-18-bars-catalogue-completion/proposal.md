@@ -51,7 +51,7 @@ texts**, plus SRX's `responsibilities`. On completion the catalogue is 83 pairs 
 | 4 | `scripts/framework-known-gaps.txt` and `scripts/framework-competency-gaps.txt` emptied of entries | Same commits that fill the pairs |
 | 5 | Vendored tree `api/database/framework/` updated byte-identically | Cross-Stack Consistency gate |
 | 6 | `framework_gaps` row reconciliation — resolved gaps must stop reporting as pending | See Approach; the seeder has no resolution path today |
-| 7 | `docs/app_description/02-domain/01-ruoli-e-competenze.md` §Copertura BARS + SRX row updated | Both become factually false on completion |
+| 7 | `docs/app_description/02-domain/01-roles-and-competencies.md` §Copertura BARS + SRX row updated | Both become factually false on completion |
 | 8 | Production re-seed via `railway ssh` | With the lock-guard check below |
 
 ### Out of Scope
@@ -228,7 +228,7 @@ None.
 | `api/database/framework/**` | Modified | Vendored copy, byte-identical |
 | `scripts/framework-known-gaps.txt` | Modified | `SRX` entry removed |
 | `scripts/framework-competency-gaps.txt` | Modified | All 26 pair entries removed |
-| `docs/…/02-domain/01-ruoli-e-competenze.md` | Modified | §Copertura BARS; SRX row line 20 |
+| `docs/…/02-domain/01-roles-and-competencies.md` | Modified | §Copertura BARS; SRX row line 20 |
 | `openspec/specs/framework-catalog/spec.md` | Modified | Delta per Capabilities |
 | `api/database/seeders/FrameworkCatalogSeeder.php` | Modified? | Only if gap resolution is seeder-side |
 | Production DB (`railway ssh`) | Modified | Re-seed + gap reconciliation |

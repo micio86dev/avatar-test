@@ -230,7 +230,7 @@ phpstan, pint) below are **mandatory manual substitutes for missing CI**, not op
       truncation at `config('webhooks.errors.max_last_error_chars')` applied AFTER
       redaction, never before.
 - [x] 6.3 RED `api/tests/Unit/C10/EvaluationPayloadAssemblerTest.php`: `text` block
-      matches `esempio-report-valutazione.json`; `reliability` delegates to
+      matches `evaluation-report-example.json`; `reliability` delegates to
       `App\Services\Scoring\ReliabilityRenderer::render()` (assert delegation, never
       re-derive the formula); `files` has exactly `transcript`+`evaluation_raw`, no
       `audio`; unscorable competency → `score:null` + additive `unscorable_reason`;

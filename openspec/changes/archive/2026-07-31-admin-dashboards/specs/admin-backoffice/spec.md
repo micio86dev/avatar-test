@@ -101,7 +101,7 @@ indicators unassessable renders `–`, never `0`. Mean thresholds: `<2.5 error`,
 `2.5–3.5 warning`, `>3.5 success`. Excerpts render in `--font-mono`, verbatim
 from the transcript (substring-validated by the API, never invented client-side).
 
-#### Scenario: SLF fixture renders per esempio-report-valutazione.json
+#### Scenario: SLF fixture renders per evaluation-report-example.json
 
 - GIVEN a competency `SLF` with indicator scores `[5, 3, -1]` and `reliability "67%"`
 - WHEN the report viewer renders it

@@ -118,7 +118,7 @@ The admin evaluation serializer MUST query `Evaluation`/`CompetencyResult`/
 `IndicatorScore` under the ambient `TenantContext` scope. It MUST NOT reuse
 `EvaluationPayloadAssembler`'s `withoutGlobalScopes()` calls (`:46,48,69,112`),
 which are correct only in that job's no-ambient-resolver context. Output shape
-reproduces `esempio-report-valutazione.json` (competency mean, `reliability`
+reproduces `evaluation-report-example.json` (competency mean, `reliability`
 percent string, indicator scores, verbatim excerpts).
 
 #### Scenario: Serializer never bypasses the tenant scope

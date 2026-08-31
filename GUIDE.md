@@ -1,42 +1,45 @@
-# BEAI — Guida alla prova in locale
+# BEAI — Local trial guide
 
-Come far girare BEAI sulla tua macchina e cosa puoi effettivamente vedere.
+How to run BEAI on your machine, and what you can actually see once it is up.
 
-> **Ogni comando qui sotto è stato eseguito davvero**, su questa macchina, il
-> 2026-08-01. Dove qualcosa non funziona lo dico, invece di far finta.
+> **Every command below was really executed**, on this machine, on 2026-08-01.
+> Where something does not work, it is stated plainly rather than glossed over.
 
 ---
 
-## 1. Prerequisiti
+## 1. Prerequisites
 
-Serve solo **Docker Desktop** (testato con 29.4.3). Tutto il resto gira dentro i
-container: niente PHP, Node o Bun sull'host per avviare lo stack.
+Only **Docker Desktop** is required (tested with 29.4.3). Everything else runs
+inside the containers: no PHP, Node or Bun on the host to bring the stack up.
 
 ```bash
-docker info      # deve rispondere senza errori
+docker info      # must respond without errors
 ```
 
 ---
 
-## 2. Avvio
+## 2. Startup
 
-Dalla root del wrapper:
+From the wrapper root:
 
 ```bash
 ./scripts/dev.sh
 ```
 
-È idempotente: rilanciarlo non rompe nulla. Opzioni utili:
+It is idempotent: re-running it breaks nothing. It always rebuilds the app
+images: the backoffice is a static SPA, its bundle is produced at build time, and
+a stale image serves stale code no matter what the working tree says. Useful
+options:
 
-| Comando | Cosa fa |
+| Command | What it does |
 |---|---|
-| `./scripts/dev.sh --build` | forza il rebuild delle immagini |
-| `./scripts/dev.sh --status` | stato e salute dei servizi |
-| `./scripts/dev.sh --logs` | segue i log di tutti i servizi |
-| `./scripts/dev.sh --down` | ferma i container (i dati restano) |
-| `./scripts/dev.sh --fresh` | **DISTRUTTIVO**: cancella i volumi e riparte da zero |
+| `./scripts/dev.sh --no-build` | start without rebuilding (reuse the current images) |
+| `./scripts/dev.sh --status` | service status and health |
+| `./scripts/dev.sh --logs` | follow the logs of all services |
+| `./scripts/dev.sh --down` | stop the containers (data is kept) |
+| `./scripts/dev.sh --fresh` | **DESTRUCTIVE**: drop the volumes and start from scratch |
 
-Quando finisce vedi:
+When it finishes you see:
 
 ```
 Candidate app   http://localhost:3000
@@ -46,7 +49,7 @@ Mailpit         http://localhost:8025
 Postgres        localhost:5432   ·   Redis  localhost:6379
 ```
 
-Verifica veloce:
+Quick check:
 
 ```bash
 curl -s http://localhost:8000/api/health
@@ -55,16 +58,15 @@ curl -s http://localhost:8000/api/health
 
 ---
 
-## 3. Popolare il database
+## 3. Populating the database
 
-Il database appena migrato è **vuoto e inutilizzabile**: senza il catalogo dei
-framework (competenze, ruoli, ancore BARS) non si può creare nessun progetto.
+A freshly migrated database is **empty and unusable**: without the framework
+catalog (competencies, roles, BARS anchors) no project can be created.
 
-### 3.1 Catalogo + ruoli
+### 3.1 Catalog + roles
 
-Il catalogo vive nel **wrapper** (`docs/app_description/`), non dentro il
-sottomodulo `api` — quindi il container non lo vede. Va copiato dentro una
-volta:
+The catalog lives in the **wrapper** (`docs/app_description/`), not inside the
+`api` submodule — so the container cannot see it. It has to be copied in once:
 
 ```bash
 docker cp docs/app_description/02-domain/framework beai_api:/tmp/framework
@@ -73,33 +75,33 @@ docker compose exec -e FRAMEWORK_CATALOG_PATH=/tmp/framework api \
   php artisan db:seed
 ```
 
-> **Perché il passaggio manuale.** Il seeder cerca il catalogo in
-> `dirname(base_path())/docs/...`, che funziona in un checkout ma dentro
-> l'immagine diventa `/var/docs`, dove non c'è niente. La variabile
-> `FRAMEWORK_CATALOG_PATH` esiste apposta per scavalcare quel default.
+> **Why the manual step.** The seeder looks for the catalog in
+> `dirname(base_path())/docs/...`, which works in a checkout but resolves to
+> `/var/docs` inside the image, where there is nothing. The
+> `FRAMEWORK_CATALOG_PATH` variable exists precisely to override that default.
 >
-> Il mount diretto (`./docs:/var/docs:ro` nel compose) sarebbe più pulito, ma
-> **su questa macchina non funziona**: il progetto sta su `/Volumes/Scheda SSD`
-> e Docker Desktop non ha quel percorso tra le cartelle condivise. Se lo
-> aggiungi in *Settings → Resources → File Sharing*, il mount diventa la strada
-> migliore.
+> A direct mount (`./docs:/var/docs:ro` in the compose file) would be cleaner,
+> but **it does not work on this machine**: the project sits on
+> `/Volumes/Scheda SSD` and Docker Desktop does not list that path among its
+> shared folders. If you add it under *Settings → Resources → File Sharing*, the
+> mount becomes the better route.
 
-Output atteso:
+Expected output:
 
 ```
 Database\Seeders\RolesAndPermissionsSeeder ...... DONE
 Database\Seeders\FrameworkCatalogSeeder ......... DONE
 ```
 
-### 3.2 Organizzazione e admin vero
+### 3.2 A real organization and admin
 
-Non esiste API né schermata per creare un'organizzazione: progetti e partecipanti
-hanno endpoint, le organizzazioni no, e il superadmin di piattaforma nasce con
-`organization_id = null`. Da un database migrato non si arriva quindi in nessun
-modo *via HTTP* a qualcosa in cui fare login. Serve un comando, e funziona
-ovunque (anche in produzione: nessuna password nota, nessun dato finto), perché
-**non chiede niente in input** — gira in un container senza terminale, dove
-`app:create-superadmin` non può andare.
+There is no API and no screen to create an organization: projects and
+participants have endpoints, organizations do not, and the platform superadmin is
+born with `organization_id = null`. From a migrated database there is therefore
+no way *over HTTP* to reach anything you can log into. A command is required, and
+it works everywhere (production included: no known password, no fake data),
+because it **asks for nothing interactively** — it runs in a container with no
+terminal, where `app:create-superadmin` cannot go.
 
 ```bash
 php artisan beai:provision-organization \
@@ -112,59 +114,60 @@ php artisan beai:provision-organization \
 Organization provisioned: Acme Corp (id=1, slug=acme-corp)
 Roles created: admin, operator, viewer (scoped to this organization)
 Administrator: admin@acme.com
-Password: <generata, 20 caratteri>
+Password: <generated, 20 characters>
 This password is shown once and cannot be recovered. Store it now.
 ```
 
-Crea in un'unica transazione l'organizzazione, i tre ruoli di autorizzazione
-(`admin`, `operator`, `viewer`) scoped a quell'organizzazione, e l'utente
-amministratore. Con quelle credenziali entri nel backoffice.
+In a single transaction it creates the organization, the three authorization
+roles (`admin`, `operator`, `viewer`) scoped to that organization, and the
+administrator user. Those credentials get you into the backoffice.
 
-Opzioni utili:
+Useful options:
 
-| Opzione | Effetto |
+| Option | Effect |
 |---|---|
-| `--slug=` | slug esplicito invece di derivarlo dal nome |
-| `--admin-password=` | password scelta da te — in quel caso **non** viene stampata |
-| `--locale=` | lingua delle notifiche dell'admin (default `it`) |
+| `--slug=` | explicit slug instead of deriving it from the name |
+| `--admin-password=` | a password of your choosing — in that case it is **not** printed |
+| `--locale=` | language of the admin's notifications (default `it`) |
 
-> Rifiuta di sovrascrivere: se lo slug o l'email esistono già esce con errore e
-> non scrive nulla. L'admin creato è amministratore **della sua organizzazione**,
-> non un superadmin di piattaforma — quello resta `app:create-superadmin`.
+> It refuses to overwrite: if the slug or the email already exists it exits with
+> an error and writes nothing. The admin it creates is an administrator **of its
+> own organization**, not a platform superadmin — that one remains
+> `app:create-superadmin`.
 
-#### In produzione su Railway: `ssh`, non `run`
+#### In production on Railway: `ssh`, not `run`
 
 ```bash
 railway ssh --service api \
   "php artisan beai:provision-organization --name=Quint --admin-email=admin@quint.com"
 ```
 
-**`railway run` non funziona per questo.** Inietta le variabili dell'ambiente ma
-esegue il comando *sulla tua macchina*, e `DB_HOST` punta a
-`pgvector.railway.internal` — un nome della rete privata di Railway, che da un
-portatile non si risolve:
+**`railway run` does not work for this.** It injects the environment variables
+but executes the command *on your machine*, and `DB_HOST` points at
+`pgvector.railway.internal` — a name on Railway's private network, which does not
+resolve from a laptop:
 
 ```
 SQLSTATE[08006] could not translate host name "pgvector.railway.internal" to address
 ```
 
-`railway ssh` esegue **dentro** il container, dove quel nome esiste. In più le
-credenziali del database non transitano mai dalla tua macchina.
+`railway ssh` runs **inside** the container, where that name exists. On top of
+that, the database credentials never transit through your machine.
 
-Verifica a vuoto prima di scrivere, se vuoi:
+A read-only check before writing, if you want one:
 
 ```bash
 railway ssh --service api "php artisan tinker --execute=\"echo App\\\\Models\\\\Organization::count();\""
 ```
 
-### 3.3 Dati demo
+### 3.3 Demo data
 
-`beai:demo-seed` **non crea mai un utente**, in nessun ambiente: il login resta
-quello creato al §3.2. Quello che porta è un dataset ricco e BARS-valido dentro
-l'organizzazione che hai appena provisionato — progetti, partecipanti in ogni
-stato del ciclo di vita, valutazioni con punteggi calcolati dai motori reali,
-eventi di proctoring. Ogni riga porta il prefisso `beai-demo-`, quindi non si
-confonde mai con dati veri e resta selezionabile per il teardown.
+`beai:demo-seed` **never creates a user**, in any environment: the login stays
+the one created in §3.2. What it brings is a rich, BARS-valid dataset inside the
+organization you have just provisioned — projects, participants in every
+lifecycle status, evaluations with scores computed by the real engines,
+proctoring events. Every row carries the `beai-demo-` prefix, so it never gets
+confused with real data and stays selectable for teardown.
 
 ```bash
 docker compose exec api php artisan beai:demo-seed --org=acme-corp
@@ -180,18 +183,17 @@ Demo dataset provisioned.
   | Snapshots        | 34 objects written to the configured disk                |
 ```
 
-> È idempotente: rilanciarlo non duplica nulla. Se il dataset resta a metà (per
-> esempio una riga cancellata a mano) il comando **rifiuta** di procedere invece
-> di indovinare — usa `beai:demo-teardown --org=acme-corp` per ripulire, poi
-> riesegui il seed.
+> It is idempotent: re-running it duplicates nothing. If the dataset is left
+> half-built (a row deleted by hand, say) the command **refuses** to proceed
+> rather than guess — use `beai:demo-teardown --org=acme-corp` to clean up, then
+> re-run the seed.
 >
-> In produzione serve `--force-production`: creare un progetto demo blocca
-> (`is_locked=true`) una `FrameworkVersion`, un effetto cross-tenant e
-> permanente — il comando lo stampa prima di scrivere qualunque riga.
+> In production `--force-production` is required: creating a demo project locks
+> (`is_locked=true`) a `FrameworkVersion`, a cross-tenant and permanent effect —
+> the command prints this before writing any row.
 
-Per rimuovere tutto quello che questo comando ha creato, incluse le immagini
-segnaposto su object storage, senza toccare i dati veri della stessa
-organizzazione:
+To remove everything this command created, including the placeholder images on
+object storage, without touching the real data of the same organization:
 
 ```bash
 docker compose exec api php artisan beai:demo-teardown --org=acme-corp
@@ -199,149 +201,149 @@ docker compose exec api php artisan beai:demo-teardown --org=acme-corp
 
 ---
 
-## 4. Cosa puoi provare adesso
+## 4. What you can try right now
 
 ### 4.1 Backoffice — http://localhost:3001
 
-Funziona **completamente**. Accedi con le credenziali stampate al §3.2
-(`admin@acme.com` / la password generata una tantum).
+Works **completely**. Log in with the credentials printed in §3.2
+(`admin@acme.com` / the one-time generated password).
 
-- **Dashboard** — metriche aggregate dell'organizzazione
-- **Partecipanti** — elenco con filtri, e il dettaglio del singolo candidato
-- **Template avatar** — volto, voce e messa a punto del colloquio (vedi §4.5)
-- **Banner consenso analytics** — compare dopo il login (vedi §6)
+- **Dashboard** — aggregate metrics for the organization
+- **Participants** — list with filters, plus the individual candidate detail
+- **Avatar templates** — face, voice and interview tuning (see §4.5)
+- **Analytics consent banner** — appears after login (see §6)
 
-I gate di lifecycle sono veri: la trascrizione si apre da `in_valutazione` in
-poi, la valutazione solo su `completato`. Il dataset demo copre tutti e cinque
-gli stati insieme — `beai-demo-c-006` è `in_attesa`, quindi trascrizione e
-valutazione rispondono entrambe **409** per lui; `beai-demo-c-001` è
-`completato` e le espone entrambe. Nessuno dei due è un errore: è il gate che
-funziona.
+The lifecycle gates are real: the transcript opens from `in_valutazione` onwards,
+the evaluation only on `completato`. The demo dataset covers all five statuses at
+once — `beai-demo-c-006` is `in_attesa`, so transcript and evaluation both answer
+**409** for that candidate; `beai-demo-c-001` is `completato` and exposes both.
+Neither is a bug: that is the gate doing its job.
 
-### 4.5 Template avatar
+### 4.5 Avatar templates
 
-Definiscono il volto e la voce che ogni candidato dell'organizzazione incontra.
-**È attivo un solo template alla volta**, garantito da un indice unico parziale
-nel database: non è una regola applicativa, quindi due attivazioni contemporanee
-non possono vincere entrambe.
+They define the face and the voice every candidate of the organization meets.
+**Only one template is active at a time**, guaranteed by a partial unique index
+in the database: this is not an application-level rule, so two concurrent
+activations cannot both win.
 
-Il form è costruito dalle *field spec* servite dall'API — 12 knob per HeyGen, 17
-per Tavus — quindi una manopola aggiunta lato server compare qui senza toccare
-il frontend, e una che il server non conosce non può comparire affatto.
+The form is built from the *field specs* served by the API — 12 knobs for HeyGen,
+17 for Tavus — so a knob added server-side shows up here without touching the
+frontend, and one the server does not know about cannot show up at all.
 
-Cose da sapere provandolo:
+Things worth knowing while trying it:
 
-- **Il servizio è nominato solo qui.** Ti serve per sapere da quale dashboard
-  copiare gli identificativi. Il candidato non lo vede mai: nessuna stringa,
-  nessun errore, nessuna traduzione del frontend nomina il fornitore.
-- **Svuotare un campo lo rimuove**, non lo azzera: assente significa "usa il
-  default del fornitore", stringa vuota è un valore.
-- **Il servizio non è modificabile** dopo la creazione — le impostazioni
-  appartengono a un solo fornitore e nessuna si sovrappone.
-- **Il template attivo non si può eliminare**: attivane un altro prima.
-- Senza chiave provider puoi creare e attivare template, ma il colloquio non
-  parte (vedi §5).
+- **The provider is named only here.** You need it to know which dashboard to
+  copy the identifiers from. The candidate never sees it: no string, no error, no
+  frontend translation names the vendor.
+- **Clearing a field removes it**, it does not zero it: absent means "use the
+  provider default", an empty string is a value.
+- **The provider cannot be changed** after creation — the settings belong to a
+  single vendor and none of them overlap.
+- **The active template cannot be deleted**: activate another one first.
+- Without a provider key you can create and activate templates, but the interview
+  does not start (see §5).
 
-Un'organizzazione **senza** template attivo non è un errore: i colloqui usano i
-default d'ambiente, esattamente come prima che questa funzione esistesse.
+An organization **without** an active template is not an error: interviews fall
+back to the environment defaults, exactly as before this feature existed.
 
 ### 4.2 API — http://localhost:8000
 
 ```bash
-# Usa l'email e la password stampate al §3.2 (beai:provision-organization).
+# Use the email and password printed in §3.2 (beai:provision-organization).
 TOKEN=$(curl -s -X POST http://localhost:8000/api/auth/login \
   -H 'Content-Type: application/json' -H 'Accept: application/json' \
-  -d '{"email":"admin@acme.com","password":"<la password generata al §3.2>"}' \
+  -d '{"email":"admin@acme.com","password":"<the password generated in §3.2>"}' \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
 
 curl -s http://localhost:8000/api/auth/me -H "Authorization: Bearer $TOKEN" -H 'Accept: application/json'
 curl -s http://localhost:8000/api/participants -H "Authorization: Bearer $TOKEN" -H 'Accept: application/json'
 ```
 
-Verificato: il login restituisce un JWT, `/me` riporta utente + organizzazione +
-ruoli, `/participants` restituisce solo i candidati del tuo tenant.
+Verified: the login returns a JWT, `/me` reports user + organization + roles, and
+`/participants` returns only the candidates of your tenant.
 
-Documentazione OpenAPI generata da Scramble: `http://localhost:8000/docs/api`.
+OpenAPI documentation generated by Scramble: `http://localhost:8000/docs/api`.
 
-### 4.3 App candidato — http://localhost:3000
+### 4.3 Candidate app — http://localhost:3000
 
-La radice è una **pagina informativa**, non una home: nessun login, nessun form.
-È voluto — un candidato non digita mai questo indirizzo, ci arriva da un magic
+The root is an **informational page**, not a home: no login, no form. That is
+intentional — a candidate never types this address, they arrive from a magic
 link.
 
 ### 4.4 Mailpit — http://localhost:8025
 
-Cattura tutte le mail in uscita. In locale non parte nessun invio finché non
-scateni una notifica.
+Captures all outgoing mail. Locally nothing is sent until you trigger a
+notification.
 
 ---
 
-## 5. Cosa NON puoi provare (e perché)
+## 5. What you cannot try (and why)
 
-Qui sta la risposta onesta a "è tutto pronto?".
+This is the honest answer to "is everything ready?".
 
-### Il colloquio vero non parte
+### The real interview does not start
 
-Servono credenziali che non esistono in questo repo, e giustamente:
+It needs credentials that do not exist in this repo, and rightly so:
 
-| Serve | Per cosa | Dove sta |
+| Needed | For what | Where it lives |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | scoring BARS asincrono | va nel variable store, mai committata |
-| chiave provider avatar (HeyGen / Tavus) | video + voce sintetica | idem |
+| `ANTHROPIC_API_KEY` | asynchronous BARS scoring | goes in the variable store, never committed |
+| avatar provider key (HeyGen / Tavus) | video + synthetic voice | same |
 
-Senza chiave avatar la schermata di consenso e il device-check si vedono, ma
-l'avatar non si connette. Senza chiave Anthropic un colloquio completato resta
-`in_valutazione` e non arriva mai a `completato`.
+Without an avatar key the consent screen and the device check are visible, but
+the avatar does not connect. Without an Anthropic key a completed interview stays
+in `in_valutazione` and never reaches `completato`.
 
-### Il magic link va costruito a mano
+### The magic link has to be built by hand
 
-Il flusso reale è: il sistema chiamante chiama `POST /api/m2m/sso-link` con una
-chiave M2M, ottiene un token, e manda il candidato su
-`/api/sso/exchange?token=…`. Per farlo in locale devi prima creare un client M2M
-(`POST /api/m2m/clients` con il JWT admin). `beai:demo-seed` **non** lo fa:
-minare token di ingresso è una cosa che merita un passaggio esplicito.
+The real flow is: the calling system calls `POST /api/m2m/sso-link` with an M2M
+key, gets a token, and sends the candidate to `/api/sso/exchange?token=…`. To do
+that locally you first have to create an M2M client (`POST /api/m2m/clients` with
+the admin JWT). `beai:demo-seed` **does not** do it: minting ingress tokens is
+the kind of thing that deserves an explicit step.
 
-### Il purge GDPR è disattivato
+### The GDPR purge is disabled
 
-`beai:purge-expired-data` esiste ed è testato, ma spedisce **spento** e tutte le
-durate sono `null`: aspettano una firma legale (decisione aperta #2). Lanciarlo
-ora stampa `Retention is DISABLED` e non tocca niente. È l'unica cosa rimasta
-aperta in C13.
+`beai:purge-expired-data` exists and is tested, but it ships **switched off** and
+all durations are `null`: they are waiting on legal sign-off (open decision #2).
+Running it now prints `Retention is DISABLED` and touches nothing. It is the only
+thing still open in C13.
 
-### Pulse non si apre dal browser
+### Pulse does not open in the browser
 
-`/pulse` registra tutto correttamente nelle tabelle `pulse_*`, ma la dashboard
-HTML non è navigabile: l'API è stateless a JWT, senza login di sessione, e le
-chiamate XHR di Livewire non portano l'header `Authorization`. Serve un
-autenticatore davanti, oppure leggi le tabelle. Dettagli in
+`/pulse` records everything correctly in the `pulse_*` tables, but the HTML
+dashboard is not navigable: the API is stateless JWT, with no session login, and
+Livewire's XHR calls do not carry the `Authorization` header. It needs an
+authenticator in front of it, or you read the tables directly. Details in
 `docs/observability.md`.
 
 ---
 
-## 6. Analytics e consenso
+## 6. Analytics and consent
 
-GA4 e Microsoft Clarity sono cablati in entrambe le app Nuxt, ma **spenti due
-volte**: nessun ID configurato, e consenso negato di default. In locale non parte
-nulla verso terzi.
+GA4 and Microsoft Clarity are wired into both Nuxt apps, but **switched off
+twice**: no ID configured, and consent denied by default. Locally nothing is sent
+to third parties.
 
-Se vuoi vedere il banner, avvia con un ID finto:
+If you want to see the banner, start with a fake ID:
 
 ```bash
 NUXT_PUBLIC_GA_MEASUREMENT_ID=G-TEST ./scripts/dev.sh --build
 ```
 
-Il banner **non compare** sulle rotte del colloquio, né su participants/login nel
-backoffice: lì gli analytics non girano proprio, e un dialog sui cookie sopra la
-valutazione di una persona sarebbe la cosa sbagliata nel posto sbagliato.
+The banner **does not appear** on the interview routes, nor on
+participants/login in the backoffice: analytics simply do not run there, and a
+cookie dialog on top of a person's evaluation would be the wrong thing in the
+wrong place.
 
 ---
 
-## 7. Test
+## 7. Tests
 
-Girano fuori da Docker e servono il toolchain locale (PHP 8.5, Bun, Node 24).
+They run outside Docker and need the local toolchain (PHP 8.5, Bun, Node 24).
 
 ```bash
-# API — 1320 test
+# API — 1320 tests
 cd api && php -d memory_limit=4G vendor/bin/pest
 cd api && ./vendor/bin/phpstan analyse --memory-limit=1G
 
@@ -354,66 +356,68 @@ cd backoffice && bunx vitest run
 cd backoffice && bunx playwright test
 ```
 
-> **Trappola vera**: Playwright riusa un server già in ascolto sulla 3000/3001.
-> Se ne hai avviato uno a mano — o se gira il container — i test girano contro
-> *quello*, senza le variabili d'ambiente che Playwright inietta, e fallirebbero
-> per motivi che non c'entrano col codice. Ferma tutto prima.
+> **A real trap**: Playwright reuses a server already listening on 3000/3001. If
+> you started one by hand — or if the container is running — the tests run
+> against *that one*, without the environment variables Playwright injects, and
+> would fail for reasons that have nothing to do with the code. Stop everything
+> first.
 
-> Se un build Nuxt fallisce con `Invalid or unexpected token`, non è il codice:
-> è `node_modules` corrotto. `rm -rf node_modules && bun install` risolve.
-> Il solo `bun install` non basta.
+> If a Nuxt build fails with `Invalid or unexpected token`, it is not the code:
+> `node_modules` is corrupted. `rm -rf node_modules && bun install` fixes it.
+> `bun install` alone is not enough.
 
 ---
 
-## 8. Problemi frequenti
+## 8. Common problems
 
-| Sintomo | Causa | Rimedio |
+| Symptom | Cause | Remedy |
 |---|---|---|
-| `db:seed` → `Call to undefined function fake()` | immagine vecchia | `docker compose build api` |
-| `db:seed` → catalogo non trovato | `docs/` non visibile nel container | rifai il `docker cp` di §3.1 |
-| `api` non parte, errore su mount | file sharing Docker | rimuovi il mount, o abilita il path |
-| Backoffice mostra 401 | JWT scaduto | rifai il login |
-| Docker si impianta | backend bloccato | `pkill -f 'Docker Desktop'; pkill -f com.docker.backend; open -a Docker` |
+| `db:seed` → `Call to undefined function fake()` | stale image | `docker compose build api` |
+| `db:seed` → catalog not found | `docs/` not visible in the container | redo the `docker cp` from §3.1 |
+| `api` does not start, mount error | Docker file sharing | remove the mount, or enable the path |
+| Backoffice shows 401 | expired JWT | log in again |
+| Docker hangs | backend stuck | `pkill -f 'Docker Desktop'; pkill -f com.docker.backend; open -a Docker` |
 
 ---
 
-## 8.1 Vercel: disattivato di proposito
+## 8.1 Vercel: disabled on purpose
 
-Il deploy target è **Railway**. Una GitHub App di Vercel era collegata a questo
-wrapper e creava un deployment Production a ogni merge su `main` — in pratica
-innocuo, perché qui non c'è applicazione da servire, ma è comunque una
-violazione di una regola vincolante.
+The deploy target is **Railway**. A Vercel GitHub App was connected to this
+wrapper and created a Production deployment on every merge to `main` — harmless
+in practice, since there is no application to serve here, but still a violation
+of a binding rule.
 
-`vercel.json` con `git.deploymentEnabled: false` lo spegne dal repository.
-Il file è lì per **impedire** i deploy su Vercel, non per configurarli.
+`vercel.json` with `git.deploymentEnabled: false` switches it off from the
+repository. The file is there to **prevent** Vercel deploys, not to configure
+them.
 
-Per rimuoverlo del tutto serve scollegare l'integrazione dalla dashboard Vercel:
-questo file la neutralizza, non la disinstalla.
+Removing it entirely requires disconnecting the integration from the Vercel
+dashboard: this file neutralizes it, it does not uninstall it.
 
-## 9. Stato del prodotto
+## 9. Product status
 
-14 slice verticali (C1→C14). **Tutte consegnate.**
+14 vertical slices (C1→C14). **All delivered.**
 
-C14 ha anche chiuso due difetti che erano già in produzione: il candidato vedeva
-un iframe del fornitore dentro la pagina del colloquio, e le sessioni Tavus non
-raggiungevano mai il completamento — quindi non venivano mai valutate.
+C14 also closed two defects that were already in production: the candidate saw a
+provider iframe inside the interview page, and Tavus sessions never reached
+completion — so they were never evaluated.
 
-Resta un solo task bloccante in tutto il progetto: le **durate di retention
-GDPR**. Serve un legale, non altro codice — il meccanismo è costruito perché
-ratificarle sia un cambio di configurazione, non di codice.
+A single blocking task remains across the whole project: the **GDPR retention
+durations**. That needs a lawyer, not more code — the mechanism is built so that
+ratifying them is a configuration change, not a code change.
 
-Due cose rinviate per scelta, scritte in `openspec/changes/avatar-provider-templates/tasks.md`:
-nessun override del template per progetto (i progetti hanno già `language`,
-quindi un solo avatar per organizzazione potrebbe stare stretto a chi intervista
-in due lingue), e gli id avatar/voce non sono validati contro l'inventario reale
-del fornitore.
+Two things deferred by choice, written up in
+`openspec/changes/avatar-provider-templates/tasks.md`: no per-project template
+override (projects already have a `language`, so a single avatar per organization
+may be tight for anyone interviewing in two languages), and avatar/voice ids are
+not validated against the provider's real inventory.
 
-Le tre lacune emerse scrivendo questa guida, tutte reali e nessuna bloccante per
-provare il prodotto:
+The three gaps that surfaced while writing this guide, all real and none of them
+blocking for trying the product:
 
-1. **Nessuna superficie per creare un'organizzazione** — né API né UI. Oggi ci
-   pensa `beai:provision-organization` (§3.2).
-2. **Il catalogo framework non è raggiungibile dal container** — path relativo al
-   wrapper, ora scavalcabile con `FRAMEWORK_CATALOG_PATH`.
-3. **Il colloquio end-to-end richiede credenziali di provider** che nessuno ha
-   ancora messo in un ambiente.
+1. **No surface to create an organization** — neither API nor UI. Today
+   `beai:provision-organization` covers it (§3.2).
+2. **The framework catalog is not reachable from the container** — the path is
+   relative to the wrapper, now overridable with `FRAMEWORK_CATALOG_PATH`.
+3. **The end-to-end interview requires provider credentials** that nobody has put
+   into an environment yet.

@@ -42,6 +42,13 @@ and a reference for the port, not the final architecture.
   `develop`. Applies to the wrapper and each submodule (each versioned independently);
   the wrapper pins submodule release tags.
 - **Conventional commits only.** Never add Co-Authored-By / AI attribution.
+- **Repo language: English, always.** Code, identifiers, comments, UI copy, commit
+  messages, SDD artifacts and **every `.md`** (`GUIDE.md`, `README.md`, `docs/`) are
+  written in English. The **only** exceptions are i18n translation content (frontend
+  and backend locale files) and language-specific test fixtures — e.g. the Italian
+  transcript samples that exercise Italian handling, the bilingual `{en, it}` framework
+  catalogue under `docs/app_description/02-domain/framework/`, and
+  `03-ux-reference/evaluation-report-example.json`.
 - **Deploy target: Railway** (never Vercel), and only on explicit request.
 
 ---
@@ -216,7 +223,7 @@ table and dependencies.
 - `legacy-demo/src/lib/proctor-config.ts` — proctoring taxonomy + `summarizeIntegrity()` (C7/C9).
 - `legacy-demo/src/lib/db.ts` — current SQLite schema to evolve into PostgreSQL/Eloquent.
 - `docs/app_description/02-domain/framework/{roles,competencies,bars/*}.json` — binding catalog (C3).
-- `docs/app_description/03-ux-reference/esempio-report-valutazione.json` — evaluation output shape (C9).
+- `docs/app_description/03-ux-reference/evaluation-report-example.json` — evaluation output shape (C9).
 - `docs/dev-setup.md` — required local toolchain + Dependency Resolution Policy (D37/D38). See this before any `composer install` / `bun install` in a new environment.
 - `docs/git-flow.md` — Git Flow ×4 + SemVer M.m.p release flow for all four repos.
 - `docs/version-catalog.md` — Version Catalog: the single source of truth for all pinned versions. Extracted from D25 of the archived project-skeleton-ci design, which drifted once it could no longer be corrected in place.

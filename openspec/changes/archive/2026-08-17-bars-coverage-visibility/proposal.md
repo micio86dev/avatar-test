@@ -4,7 +4,7 @@
 
 39 of 83 declared role×competency pairs have BARS anchors (ICO 15/15, FLL 8/18, MLL 8/18, BUL 8/14, SRX 0/18). The 44-pair gap is tracked already (`framework_gaps.kind=competency_no_bars`). Three defects sit on top of it:
 
-1. `docs/app_description/02-domain/01-ruoli-e-competenze.md:78` states *"File completi: ICO.json, FLL.json, MLL.json, BUL.json"*. Three of those four are partial — a note that precedes its fact.
+1. `docs/app_description/02-domain/01-roles-and-competencies.md:78` states *"File completi: ICO.json, FLL.json, MLL.json, BUL.json"*. Three of those four are partial — a note that precedes its fact.
 2. The API computes the truth and the client discards it. `CompetencyResource.php:56` emits `bars_available`; it reaches `backoffice/types/api.ts:1285`; `ProjectForm.vue:555` drops it; `CompetencyPicker.vue` never reads it. An operator picks an uncovered competency, runs the interviews, and finds out at scoring time (`ScoreEvaluationJob.php:571` → `unscorable_reason=role_no_bars`).
 3. The CI catalog gate asks the ROLE question only (`scripts/ci-guards.sh:529`). A BARS file covering 8 of 18 competencies passes green.
 
@@ -45,7 +45,7 @@ Selecting an uncovered competency today has exactly one outcome: an unscorable c
 
 | Area | Impact | Description |
 |---|---|---|
-| `docs/app_description/02-domain/01-ruoli-e-competenze.md` | Modified | Line 78 completeness claim → coverage table |
+| `docs/app_description/02-domain/01-roles-and-competencies.md` | Modified | Line 78 completeness claim → coverage table |
 | `backoffice/app/components/molecules/CompetencyPicker.vue` | Modified | Consume coverage flag; disable-for-selection + reason |
 | `backoffice/app/components/organisms/ProjectForm.vue` | Modified | Stop dropping `bars_available` at line 555 |
 | `backoffice/i18n/locales/{it,en}.json` | Modified | New copy keys (both mandatory) |

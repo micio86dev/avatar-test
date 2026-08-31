@@ -9,7 +9,7 @@ Close the gap `interview-frontend/spec.md` already names:
 
 ## What the binding doc asks for
 
-`docs/app_description/04-integration-surface/04-uscita-utente.md:33`:
+`docs/app_description/04-integration-surface/04-user-exit.md:33`:
 
 | Caso | Comportamento suggerito |
 |---|---|

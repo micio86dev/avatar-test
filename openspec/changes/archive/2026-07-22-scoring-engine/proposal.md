@@ -2,7 +2,7 @@
 
 ## Intent
 
-The interview produces **nothing usable** until scoring runs. C7a captures a transcript (one `InterviewSession` per competency); C9 turns that transcript into the **BARS competency evaluation** the whole product exists to deliver — the shape in `docs/app_description/03-ux-reference/esempio-report-valutazione.json`. Today `FinalizeInterview` (`api/app/Jobs/FinalizeInterview.php:112`) has only a `TODO(C9)` hook; there is no `Evaluation`, no prompt/anchor injection, no LLM scoring, no reliability/gate, no `ai_requests`. C9 builds the async engine end-to-end (Horizon, p95 < 10 min), deterministic (`temperature=0`) and versioned.
+The interview produces **nothing usable** until scoring runs. C7a captures a transcript (one `InterviewSession` per competency); C9 turns that transcript into the **BARS competency evaluation** the whole product exists to deliver — the shape in `docs/app_description/03-ux-reference/evaluation-report-example.json`. Today `FinalizeInterview` (`api/app/Jobs/FinalizeInterview.php:112`) has only a `TODO(C9)` hook; there is no `Evaluation`, no prompt/anchor injection, no LLM scoring, no reliability/gate, no `ai_requests`. C9 builds the async engine end-to-end (Horizon, p95 < 10 min), deterministic (`temperature=0`) and versioned.
 
 Success = a `pending`/`completed` `Evaluation` (per-competency means from **assessed** indicators, reliability, ≥90% gate) is persisted and emitted for C10, driving `in_valutazione → completato`.
 
