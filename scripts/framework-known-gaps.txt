@@ -46,7 +46,7 @@
 # the vendored api/database/framework/bars/); a parity-only gate stayed green
 # over it for exactly that reason — the two copies agreed, and both were
 # wrong. roles.json assigns SRX 18 competencies
-# (docs/app_description/02-domain/01-ruoli-e-competenze.md line 53, the
+# (docs/app_description/02-domain/01-roles-and-competencies.md line 53, the
 # "N. competenze" column); bars-catalogue-completion Phase 6 landed
 # bars/SRX.json in both trees — 18 competencies, 54 indicators, authored to
 # the same standard as every other role — and removed the SRX line below in
