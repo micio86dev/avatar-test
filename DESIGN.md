@@ -108,6 +108,30 @@ contrast calculation, never by eye.
 | `--color-info` | `#3b82f6` | Informational states |
 | `--color-info-light` | `#dbeafe` | Info backgrounds |
 
+**Feedback alert variants.** `alertVariants` (`components/ui/alert/index.ts`) shipped with
+only `default` and `destructive`, and `destructive` recoloured just its TEXT — so a failed
+save and a successful one were the same white card with differently-coloured words, and
+success had no colour at all. The tokens above already existed and were simply never wired
+in. Each outcome now tints its whole surface and border:
+
+| Variant | Light fill | Light text | Dark fill | Dark text |
+|---------|-----------|-----------|-----------|-----------|
+| `success` | `--color-success-light` | `--color-success-dark` | `--color-success / 15%` | `--color-success` |
+| `warning` | `--color-warning-light` | `--color-warning-dark` | `--color-warning / 15%` | `--color-warning` |
+| `destructive` | `--color-error-light` | `--destructive` (`#b91c1c`) | `--destructive / 15%` | `--destructive` |
+
+Light mode uses the text-safe `-dark` tokens, never `--color-success` / `--color-warning`,
+which §3.1 marks *non-text: icons/fills only* and which measure **below AA** on their own
+tint — asserted as a failure in `tests/unit/theme.spec.ts` so a later edit cannot swap them
+back in, still look green, and silently drop under the threshold. Dark mode inverts the
+relationship rather than reusing the same tokens: a `#dcfce7` fill on a dark ground is a
+glare, so the saturated hue becomes a low-alpha fill and, being legible against dark where
+it was not against pale, also the text.
+
+**No side-stripe accent borders** on any variant. A thick `border-l` is the reflex
+decoration for status callouts and reads as template output; a full border on a tinted
+surface carries the same signal. Enforced by a test, not by convention.
+
 #### Interview-specific
 
 | Token | Value | Usage |
