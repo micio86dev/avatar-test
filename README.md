@@ -18,13 +18,35 @@ that is pushed to the calling HR system via webhook.
 ```bash
 git clone --recursive https://github.com/your-org/beai.git
 cd beai
-./scripts/dev.sh
+./dev.sh
 ```
 
 One command brings up the whole stack in Docker — API, both Nuxt apps, Postgres,
 Redis, Mailpit, queue worker and scheduler — creating missing `.env` files,
 generating secrets and applying migrations along the way. It needs only Docker +
 Compose v2, and it is safe to re-run.
+
+| | |
+|---|---|
+| `./dev.sh` | start everything, idempotent |
+| `./dev.sh --build` | force a rebuild of the app images |
+| `./dev.sh --seed` | seed the database and provision the demo dataset |
+| `./dev.sh --status` | service health |
+| `./dev.sh --logs` | follow all logs |
+| `./dev.sh --down` | stop containers, keep your data |
+| `./dev.sh --fresh` | **destructive** — wipe volumes and rebuild |
+
+Once up: candidate app on **:3000**, backoffice on **:3001**, API on **:8000**,
+and **Mailpit on :8025**, which captures every email the stack sends so nothing
+reaches a real inbox in development.
+
+`./dev.sh` is a thin entry point; the launcher itself is `scripts/dev.sh`. One
+implementation, two ways in — a second copy would not stay a copy.
+
+`task up` is a **different** thing, not a shortcut for this: it starts only the
+three infra containers (Postgres, Redis, Mailpit) and no application images, for
+when you run PHP or Bun directly on your machine. Use it for the host-side test
+loop; use `./dev.sh` when you want the product running.
 
 Then: `--logs`, `--status`, `--down`, `--build`, `--seed`, `--fresh`.
 Full walkthrough, including the one manual step (creating an admin account) and
