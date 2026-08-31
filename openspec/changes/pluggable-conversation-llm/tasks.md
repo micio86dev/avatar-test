@@ -610,6 +610,85 @@ own instructions warn against ("extend it, don't duplicate it").
 - [x] P8.11 `bun run codegen:check && bun run lint && bun run test:unit` — green for the full
   scope (P8.1–P8.10). See apply-progress for full output.
 
+## PR P8b — Binding-integrity follow-up (`backoffice`)
+
+> **Found in production use, not by the P8 suite.** Three defects that all surface as the same
+> thing to an operator: a red `model_not_found` under a model picker they could not use, and a
+> raw i18n key rendered as an alert. P8's tests asserted the CLEARING direction of I1 and the
+> three 422 codes the copy table happened to list — neither is the same as asserting the
+> invariant, or the emit sites.
+
+- [x] P8b.1 **RED** `AvatarTemplateForm.spec.ts`: choosing ONE half of the binding is refused
+  before submit, in BOTH directions, flagging the half that is missing. The two I1 watchers only
+  covered clearing — choosing left the other watched value unchanged, so nothing fired and the
+  draft reached the server half-bound (`model_not_found` for a credential with no model,
+  `credential_not_found` for a model with no credential).
+- [x] P8b.2 **GREEN** `validateLlmBinding()`, run alongside the other validators in `submit()` and
+  never short-circuited, so an operator with two problems sees both.
+- [x] P8b.3 **RED** `AvatarTemplateForm.spec.ts`: a bound template whose catalogue resolves EMPTY
+  or REJECTS carries `llm_model_id` / `llm_credential_id` through untouched, is not labelled
+  unbound, and can still be unbound explicitly. `onMounted`'s `boundModel?.key ?? null` read an
+  unresolvable id as an unbind while `llmCredentialId` stayed initialised from the prop — opening
+  a bound template to rename it submitted `llm_model_id: null`. Reachable in EVERY environment
+  where `beai:sync-llm-registry` has not run: the migration creates `llm_models` empty and nothing
+  else fills it.
+- [x] P8b.4 **GREEN** `unresolvedBoundModelId` + `effectiveModelId`; the unbound badge, the I1
+  guard and the submit payload all read the effective id, not the picker key. Normalised with
+  `?? null` — a new template carries no `llm_model_id` key at all, and `undefined` reads as
+  neither an id nor a null.
+- [x] P8b.5 **RED/GREEN** `i18n-help-keys.spec.ts`: locale parity for every binding error and
+  every post-save warning, both derived from the THROW / EMIT sites rather than from what the
+  locale happens to contain, plus an assertion that the copy is not merely the code echoed back.
+  Missing: `error.llm.model_not_found`, and the whole `warning.llm_*` family
+  (`llm_provider_unreachable`, `llm_credential_missing`, `llm_secret_failed`, `llm_config_failed`)
+  — `avatar_templates.warning` had only ever been authored for the Tavus `pal_*` path, so every
+  HeyGen save rendered its i18n key verbatim in the alert. Authored in `en` + `it`.
+- [x] P8b.6 `bun run codegen:check && bun run lint && bun run test:unit` — 1109 passed, 0 lint
+  errors, client in sync.
+
+## PR P8c — The registrar was calling a host that does not exist (`api`)
+
+> **The defect P8b's copy was politely describing.** With the warning finally readable, the
+> message it carried turned out to be false: `llm_secret_failed` reads as "the vendor rejected
+> your credential", and no vendor ever saw it.
+
+- [x] P8c.1 **RED** point every `Http::fake` in `HeygenLlmRegistrarTest`, `HeygenSyncStatePersistence`,
+  `ProviderContractFixtureTest`, `LlmCredentialHeygenLifecycleTest`, `AvatarTemplateApiTest` and
+  `AvatarTemplateLlmBindingActionTest` at the real host — 14 failures, all of them the code still
+  calling `heygen.com`. Added a test that pins the HOST, which nothing did before: every fake
+  matched on the path alone and would have passed against either domain.
+- [x] P8c.2 **GREEN** `SECRETS_URL` / `CONFIGURATIONS_URL` → `https://api.liveavatar.com/v1/...`.
+  Nothing else changed: the request bodies match `CreateSecretRequestSchema` and
+  `CreateLLMConfigurationSchema` field for field, and the `{code, data, message}` wrapper makes
+  the existing `data.id` read correct.
+- [x] P8c.3 Repointed `LlmCredentialHeygenLifecycleTest`'s `assertNotSent`. Left matching on
+  `heygen.com` it would have held no matter what the registrar did — a test that cannot fail,
+  reading as coverage this behaviour does not have.
+- [x] P8c.4 Full Pest suite: 2598 passed, 0 failed, 6 skipped.
+
+**Evidence (live, 2026-08-31, with the key already configured in production).** The
+`api.heygen.com` v1 tier answers a REAL endpoint with 401 JSON on a bad key, so its 404 is
+routing, not auth:
+
+| Request | Response |
+|---|---|
+| `GET api.heygen.com/v1/video_status.get` (real) | 401 JSON `Unauthorized` |
+| `GET api.heygen.com/v1/definitely_not_real_xyz123` (invented) | 404 Werkzeug HTML |
+| `GET api.heygen.com/v1/secrets` | 404 Werkzeug HTML — identical to the invented path |
+| `GET api.liveavatar.com/v1/secrets` | **200** |
+
+> **Process finding, worth more than the fix.** `apply-progress.md:1130-1151` records "live
+> evidence" of HTTP 200 from `api.heygen.com/v1/secrets` on 2026-08-26 — a detailed envelope,
+> 405s on PATCH and PUT. It is not reproducible against that host. `apply-progress.md:1170` even
+> flags the host itself as "not covered by the supplied live evidence beyond the endpoints
+> actually probed", and it shipped anyway. The golden fixtures then froze the assumption. Recorded
+> smoke evidence is a claim until re-run.
+
+> **NOT fixed here, flagged for the owning slice.** `pages/avatar-templates/index.vue` renders
+> warnings with a bare `$t()` and no `te()` gate, unlike the 422 mapper — so a future code with no
+> copy is shown as its key again. P8b.5's parity test fails CI in that case, which is the stronger
+> guard; a gate would only downgrade the leak from a key to a raw code.
+
 ## PR P9 — Cost Views + i18n (`backoffice`)
 
 - [ ] P9.1 **RED** `backoffice/tests/unit/components/organisms/SessionReviewPanel.spec.ts`: avatar
