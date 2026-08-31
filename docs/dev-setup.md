@@ -26,6 +26,45 @@ All versions are pinned per the Version Catalog (design.md D25) and must match e
 | Playwright browsers | **Chromium + WebKit** | Install with `--with-deps` flag |
 | k6 | any recent | Local load tests only; never CI on PRs |
 
+### Host resources (not optional)
+
+| Resource | Minimum | Why |
+|---|---|---|
+| Memory available **to the Docker VM** | **6 GB** (8 GB comfortable) | The `frontend` image build runs `bun run build` — Nuxt 4 producing the client bundle, the SSR bundle and the Nitro server (~3100 modules) inside one container |
+| Host RAM | **12 GB** | Docker Desktop defaults its VM to roughly half the host; an 8 GB host yields ~3.8 GB, which is below the floor above |
+| Free disk | **~20 GB** | `beai-api:local` alone is ~6 GB, plus the build cache |
+
+**Why this is a hard requirement, not a suggestion.** Below the floor the
+`frontend` build does not degrade — it is **SIGKILLed by the cgroup OOM killer**
+at the Nitro step, after the client and SSR bundles have both reported success:
+
+```
+[nitro] Building Nuxt Nitro server (preset: node-server)
+error: script "build" was terminated by signal SIGKILL (Forced quit)
+failed to solve: ResourceExhausted: cannot allocate memory
+```
+
+Two things that look like fixes and are not:
+
+- **`NODE_OPTIONS=--max-old-space-size`** does nothing here. The kill comes from
+  the cgroup, not from V8 exhausting its heap. Capping the heap can move the
+  failure, not remove it.
+- **Building services one at a time** is already what `scripts/dev.sh` does
+  (see its own comment on the serial build loop — this was fixed once before for
+  exactly this reason). Observed 2026-08-31: the build still OOMs with the whole
+  stack stopped and `docker builder prune -af` run first. A single `frontend`
+  build does not fit under the floor, with nothing else running.
+
+Docker Desktop 29.x exposes VM memory **only through the GUI** — Settings →
+Resources → Memory, then Apply & Restart. There is no CLI for it, and
+`~/Library/Group Containers/group.com.docker/settings-store.json` does not carry
+the key, so this cannot be scripted or checked into the repo.
+
+If you are under the floor and need the stack up now, `./scripts/dev.sh --no-build`
+reuses the images already on the machine. Know what that costs: those images
+serve whatever code they were built from, which for a stale image is not the
+working tree.
+
 ---
 
 ## Installation Guide

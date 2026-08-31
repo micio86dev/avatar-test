@@ -16,6 +16,29 @@ own cadence.
 | `frontend` | Nuxt 4 SSR candidate app | `package.json` `version` |
 | `backoffice` | Nuxt 4 SPA admin panel | `package.json` `version` |
 
+### The catalogue pin points the other way
+
+The wrapper pins submodule tags. There is exactly one dependency running the
+**opposite** way, and it is easy to forget: `api`'s CI has no wrapper checkout,
+so it clones `docs/app_description/` out of the wrapper to satisfy the seeder
+and the catalogue tests, which resolve `dirname(base_path())/docs/…`.
+
+That clone is pinned by **`api/.wrapper-ref`** (a wrapper tag, currently
+`v0.24.2`). So:
+
+- A wrapper release that changes the catalogue or renames a file under
+  `docs/app_description/` does **not** reach `api` until someone bumps
+  `api/.wrapper-ref` — deliberately, in a PR, with the suite green.
+- Renaming or removing anything the api suite opens at runtime is therefore a
+  **two-repo change**: land it in the wrapper, release the wrapper, then bump
+  `.wrapper-ref` and reconcile the api code in one PR.
+
+Before the pin existed, that clone took the wrapper's default branch at HEAD. On
+2026-08-31 a docs-only rename in the wrapper turned `api` CI red for an api
+commit that had not changed, and the release order had to be inverted to
+recover. A job another repository can break without touching this one is not
+reproducible — hence the pin.
+
 ---
 
 ## Branch Model
@@ -47,6 +70,36 @@ Each repo uses [Semantic Versioning](https://semver.org):
 - **MAJOR** (`M`): breaking API/contract changes (e.g. `/api/v2/` prefix, removed fields).
 - **MINOR** (`m`): additive, non-breaking changes (new endpoints, new optional fields, new features).
 - **PATCH** (`p`): backward-compatible bug fixes and security patches.
+
+### Release Prerequisites (check ONCE per repo, before the first release)
+
+| Repo | Prerequisite | Status as of 2026-08-31 |
+|---|---|---|
+| `api` | Repository secret **`ANTHROPIC_API_KEY`** | ❌ **NOT SET** — see below |
+| `api` | Repository secret `AI_TEST_MODEL` | Optional; defaults to `claude-haiku-4-5-20251001` |
+| `api` | `.wrapper-ref` names a wrapper tag that exists | ✅ `v0.24.2` |
+
+**`ANTHROPIC_API_KEY` is missing and that blocks the release gate.**
+`api/.github/workflows/ai-integration.yml` runs the `@ai` group — the real-LLM
+tests, `RubricAdherenceDriftTest` among them. Its first step asserts the
+credential is present and **fails the workflow when it is not**, deliberately:
+every `@ai` test self-skips on an empty key, so without that assertion the job
+would exit `0` having verified nothing, which is worse than red.
+
+Set it once, per repo, before cutting the next `api` release:
+
+```bash
+gh secret set ANTHROPIC_API_KEY -R micio86dev/backend
+gh secret list -R micio86dev/backend      # confirm it is there
+```
+
+**How this stayed hidden.** Releases 0.34.0 through 0.36.x cut the release
+branch locally, merged, and deleted it without ever pushing — so the workflow
+never triggered and nobody learned the secret was absent. `v0.37.1` (2026-08-31)
+was the first release to actually publish its release branch; the gate ran, and
+failed on the missing credential. It was merged anyway because that change
+contained no scoring code, but that reasoning does not generalise: **the next
+release that touches scoring must not merge on a red `ai-integration`.**
 
 ### Release Steps (per repo)
 
