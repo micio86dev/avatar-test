@@ -5,7 +5,7 @@
 
 C9 = the asynchronous BARS scoring engine. Triggered by C7a's `FinalizeInterview` job
 (`api/app/Jobs/FinalizeInterview.php:112` — the `TODO(C9)` hook), Horizon queue, p95 < 10 min.
-Produces the per-competency evaluation matching `docs/app_description/03-ux-reference/esempio-report-valutazione.json`.
+Produces the per-competency evaluation matching `docs/app_description/03-ux-reference/evaluation-report-example.json`.
 Computes competency means (assessed indicators only), reliability, applies the ≥90% gate, drives
 `in_valutazione → completato`, persists a versioned `Evaluation`. Webhook delivery is C10.
 
@@ -151,7 +151,7 @@ FinalizeInterview
 
 Standard suite: `FakeLLMProvider` (bound for testing), zero AI spend, canned JSON. Cassettes under
 `api/tests/Fixtures/cassettes/` (filename = temp0 + model + prompt-hash); use
-`esempio-report-valutazione.json` as the golden cassette (prove COL 3.67 from {5,3,3}; SLF 4.0 from
+`evaluation-report-example.json` as the golden cassette (prove COL 3.67 from {5,3,3}; SLF 4.0 from
 {5,3,-1}, reliability 67%). `@ai` group: real-LLM tagged tests run only in the `ai-integration` workflow
 (`workflow_dispatch`/`release/*`, `AI_TEST_MODEL=claude-haiku`), never on PR/develop, additive. Coverage:
 critical zones (indicator-domain validation, competency mean, 90% gate, tenant scoping) ~95%. Determinism

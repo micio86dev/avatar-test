@@ -138,7 +138,7 @@ unchanged). Composition: ICO 0, FLL 10, MLL 10, BUL 6, SRX 0 = 26.
       apply-progress report). CORRECTED (post-verify): the 58%+ E2E failure rate originally reported
       was an orphaned Playwright container holding stale resources, not a real `login()` blocker — full
       local suite (chromium + webkit + mobile, 129 tests) now runs 100% green, including this scenario.
-- [x] 4.4 Update `docs/app_description/02-domain/01-ruoli-e-competenze.md:78` — replace the "File
+- [x] 4.4 Update `docs/app_description/02-domain/01-roles-and-competencies.md:78` — replace the "File
       completi" claim with the Italian pointer paragraph naming `scripts/framework-known-gaps.txt` and
       `scripts/framework-competency-gaps.txt` as the exact source of truth. **No numbers in prose.**
       Land last — it describes the state the gate now enforces.

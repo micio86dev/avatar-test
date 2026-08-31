@@ -19,7 +19,7 @@ Excerpts render in `--font-mono`, verbatim from the transcript.
 (Previously: indicator domain was `{1,3,5}` only, rendered as exactly three
 chip states; the 2.5/3.5 mean boundaries were unreachable in practice.)
 
-#### Scenario: SLF fixture renders per esempio-report-valutazione.json
+#### Scenario: SLF fixture renders per evaluation-report-example.json
 
 - GIVEN a competency `SLF` with indicator scores `[5, 3, -1]` and `reliability "67%"`
 - WHEN the report viewer renders it

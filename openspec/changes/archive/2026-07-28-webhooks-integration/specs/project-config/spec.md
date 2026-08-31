@@ -16,7 +16,7 @@ migration's default) and newly created projects. Rationale: C10 is the first web
 delivery implementation ever shipped (verified: no outbound delivery code exists in
 `api/app` prior to this change) — there is no prior delivery history to preserve, so a
 project that has a `webhook_url` configured at all is presumed to want both events per
-the binding contract (`docs/app_description/04-integration-surface/03-webhook-eventi.md`).
+the binding contract (`docs/app_description/04-integration-surface/03-webhook-events.md`).
 
 `StoreProjectRequest` and `UpdateProjectRequest` MUST validate any submitted
 `webhook_events` value against the closed `{progress, evaluation}` set — an unknown

@@ -19,7 +19,7 @@ Every claim below was opened in this session. Nothing is inherited from the prop
 | Participant status is a plain string, no enum | `Participant.php:54` (`@property string $status`), `api/app/Enums/` contains only `EvaluationStatus`, `WebhookEventType`, `WebhookDeliveryStatus`, `WebhookSkipReason` |
 | Transcript is per-SESSION, and a participant has MANY sessions | `TranscriptAssembler.php:34` takes one `InterviewSession`; `InterviewSession.php:48-49` carries `question_index` + `competency_code`; `ScoreEvaluationJob.php:335-338` loads one session per competency |
 | `competency.score` is nullable by design | `CompetencyResult.php:39` (`@property float|null $score`), `:67` "CC2 — all-indicators-(-1) → NULL score" |
-| Reference report shape confirmed, including `-1` | `docs/app_description/03-ux-reference/esempio-report-valutazione.json:2-37` (COL: 5,3,3 → `"score": 3.67`, `"reliability": "100%"`) and `:374-392` (SLF: 5,3,**-1** → `"score": 4.0`, `"reliability": "67%"`) |
+| Reference report shape confirmed, including `-1` | `docs/app_description/03-ux-reference/evaluation-report-example.json:2-37` (COL: 5,3,3 → `"score": 3.67`, `"reliability": "100%"`) and `:374-392` (SLF: 5,3,**-1** → `"score": 4.0`, `"reliability": "67%"`) |
 | `ai_requests` has NO cost column | `2026_07_22_000004_create_ai_requests_table.php:54-61` — `input_tokens`, `output_tokens`, `latency_ms` only. No price/currency anywhere. |
 | Participants indexes are org-lead | `2026_07_20_000001_create_participants_table.php:66-67` — `(organization_id, project_id)`, `(organization_id, status)` |
 | JWT TTL + denylist | `api/config/jwt.php:108` `ttl=30` (min), `:127` `refresh_ttl=20160` (14 d), `:227` `blacklist_enabled=true`. Rotation semantics: `AuthController.php:42-48,86-98`. API issues **no cookie** — `AuthController.php:181-186` returns JSON only. |
@@ -149,7 +149,7 @@ All under `Route::middleware(['auth:api', TenantContext::class])` in a new group
 | `GET /api/participants` | — | 200 paginated | filters `project_id`, `status`, `q`; `per_page` 1–100, default 20 |
 | `GET /api/participants/{id}` | `Summary` | 200 | detail + lifecycle timeline (`started_at`, `completed_at`, session count) + `files` map |
 | `GET /api/participants/{id}/transcript` | `Transcript` | 200 JSON | ordered utterances grouped by session |
-| `GET /api/participants/{id}/evaluation` | `Evaluation` | 200 JSON | BARS report, shape of `esempio-report-valutazione.json` |
+| `GET /api/participants/{id}/evaluation` | `Evaluation` | 200 JSON | BARS report, shape of `evaluation-report-example.json` |
 | `GET /api/participants/{id}/transcript/download` | `Transcript` | 200 `text/plain` | D9 |
 | `GET /api/participants/{id}/evaluation/download` | `Evaluation` | 200 `application/json` | D9 |
 | `GET /api/dashboard/metrics` | — | 200 | D7 |
@@ -248,7 +248,7 @@ Note on the `impeccable` guidance to tint neutrals toward the brand hue: **decli
 | Pest — unit | `LifecycleReadGate` | Matrix: 5 statuses (`in_attesa`, `in_corso`, `in_valutazione`, `completato`, `errore`) × 3 scopes, **plus a synthetic unknown status** asserting deny. ~95% coverage. |
 | Pest — feature | every new endpoint | Cross-org `participant_id` → 404 on **all seven**, including the plain-`Model` path (D1). Gated reads → 409 + `error: lifecycle_not_ready` before the threshold, 200 after. RBAC: viewer/operator/admin. |
 | Pest — arch | tenancy backstop | No `withoutGlobalScopes(` under `app/Http/`; no `Participant::` static call under `app/Http/Controllers/Api/`. |
-| Vitest | every component (`DESIGN.md:315`) | `ScoreChip` — one case per value in `{1,3,5,-1}`, asserting the numeral/`–` text and the visually-hidden label, not the color class. `EvaluationReport` — the SLF fixture from `esempio-report-valutazione.json:374-392` (`5,3,-1` → mean `4.0`, reliability `67%`), plus an all-unassessable competency rendering `–` and never `0`. Token test per D10. |
+| Vitest | every component (`DESIGN.md:315`) | `ScoreChip` — one case per value in `{1,3,5,-1}`, asserting the numeral/`–` text and the visually-hidden label, not the color class. `EvaluationReport` — the SLF fixture from `evaluation-report-example.json:374-392` (`5,3,-1` → mean `4.0`, reliability `67%`), plus an all-unassessable competency rendering `–` and never `0`. Token test per D10. |
 | Playwright — chromium + webkit | login → list → detail → report → download | Role-based locators **only** (`getByRole`, `getByLabel`) — zero CSS class/id selectors. `@axe-core/playwright` (`backoffice/package.json:29`) clean on every view. `toHaveScreenshot` on the report grid; the 2% tolerance is already configured (`playwright.config.ts:24-26`). |
 | Playwright — mobile | SA-11 | Existing `mobile` project already restricts to `**/unsupported-gate.spec.ts` (`:46-49`); extend that spec so **every** admin route redirects to `/unsupported`, including while authenticated. |
 

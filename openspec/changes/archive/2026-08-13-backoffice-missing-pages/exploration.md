@@ -102,7 +102,7 @@ What the archive actually says:
   standalone `/reports` page, a cross-participant index, filters, or export.
 - PDF export is an explicit C11 **non-goal** (`spec.md:118-124`).
 - `api/routes/api.php` has no `/reports` and no `/evaluations` index route.
-- `docs/app_description/03-ux-reference/esempio-report-valutazione.json` is keyed by
+- `docs/app_description/03-ux-reference/evaluation-report-example.json` is keyed by
   competency code for **one** candidate, confirming the canonical shape is
   per-participant rather than a cross-participant listing.
 - DESIGN.md §8.2 lists "Reports" in the nav with a one-line description that

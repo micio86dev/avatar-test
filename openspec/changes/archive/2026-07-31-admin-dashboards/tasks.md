@@ -177,7 +177,7 @@ B1 keeps B1 reviewable.
 ### Phase 5: RED — Serializer Fixtures (PR A2, TDD)
 
 - [x] 5.1 RED `api/tests/Unit/Services/Admin/AdminEvaluationSerializerTest.php`: the
-      `SLF` fixture from `esempio-report-valutazione.json:374-392` (`5,3,-1` → mean
+      `SLF` fixture from `evaluation-report-example.json:374-392` (`5,3,-1` → mean
       `4.0`, `reliability "67%"`) plus an all-`-1` competency → `score: null`
       (`CompetencyResult.php:39,67`), never `0`.
 - [x] 5.2 RED `api/tests/Unit/Services/Admin/AdminTranscriptSerializerTest.php`: a

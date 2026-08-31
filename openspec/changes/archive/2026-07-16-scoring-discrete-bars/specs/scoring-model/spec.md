@@ -160,9 +160,9 @@ continuous scale or interpolation is PROHIBITED after this change.
 Files in scope:
 - `CLAUDE.md` (lines 137–144)
 - `openspec/ROADMAP.md` (C9 row)
-- `docs/app_description/02-domain/02-valutazione.md`
-- `docs/app_description/03-ux-reference/02-output-valutazione.md`
-- `docs/app_description/03-ux-reference/esempio-report-valutazione.json`
+- `docs/app_description/02-domain/02-evaluation.md`
+- `docs/app_description/03-ux-reference/02-evaluation-output.md`
+- `docs/app_description/03-ux-reference/evaluation-report-example.json`
 
 #### Scenario: CLAUDE.md states discrete {1,3,5} with no interpolation language
 
@@ -179,9 +179,9 @@ Files in scope:
 - WHEN the C9 row is read
 - THEN it references "discrete {1,3,5}" (not "indicators 1–5")
 
-#### Scenario: esempio-report-valutazione.json contains only legal indicator scores
+#### Scenario: evaluation-report-example.json contains only legal indicator scores
 
-- GIVEN docs/app_description/03-ux-reference/esempio-report-valutazione.json after regeneration
+- GIVEN docs/app_description/03-ux-reference/evaluation-report-example.json after regeneration
 - WHEN every per-indicator score field is read
 - THEN each value is a member of {1, 3, 5} ∪ {-1}
 - AND the SLF competency retains its -1 sentinel on the unassessable indicator

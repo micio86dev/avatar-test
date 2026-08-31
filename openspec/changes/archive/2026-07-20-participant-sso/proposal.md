@@ -8,8 +8,8 @@ that lets them enter the interview — the candidate ingress path. C6 delivers t
 dedicated candidate auth guard that later slices (C7 interview, C9 scoring,
 C10 webhooks) build on. Without C6 no candidate can authenticate; the interview
 engine has no identity to attach to. Binding sources:
-`docs/app_description/04-integration-surface/01-ingresso-sso.md`,
-`05-business-rules/01-lifecycle-candidato.md`, `CLAUDE.md` (SSO ingress, lifecycle).
+`docs/app_description/04-integration-surface/01-sso-ingress.md`,
+`05-business-rules/01-candidate-lifecycle.md`, `CLAUDE.md` (SSO ingress, lifecycle).
 
 ## Scope
 

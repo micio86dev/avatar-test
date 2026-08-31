@@ -14,10 +14,10 @@ field. This is not an oversight — it is the opaque-candidate-identifier contra
 (`:40-41` "Opaque SSO identifier — stored VERBATIM") and GDPR data minimisation working as
 designed. BEAI is **structurally incapable of contacting a candidate**, and the binding
 integration docs put that job with the caller: the calling system generates the secure link
-(`docs/app_description/04-integration-surface/01-ingresso-sso.md:9`), need not even pre-create
+(`docs/app_description/04-integration-surface/01-sso-ingress.md:9`), need not even pre-create
 the candidate (`:33`), and BEAI's own "generate SSO link" is offered as an *"alternativa o
 complemento"* to portal entry — an M2M capability, not a sending channel
-(`docs/app_description/04-integration-surface/02-api-capacita.md:75`).
+(`docs/app_description/04-integration-surface/02-api-capabilities.md:75`).
 
 **Already owed — operator-facing notification.** `users.email` exists and is `unique`
 (`api/database/migrations/0001_01_01_000000_create_users_table.php:17`), so organization staff
@@ -96,7 +96,7 @@ meaning without a ratified deadline policy).
 
 | Answer | Scope implication |
 |---|---|
-| **A — Calling portal keeps candidate contact** (recommended; matches `03-ecosistema.md:53-59` and all of `04-integration-surface/`) | No PII added. C12 as proposed is complete. A future slice may add a `participant.stalled` / `participant.deadline_approaching` **webhook event type** reusing C10's delivery machinery end-to-end — days of work, zero new PII, zero new GDPR surface. |
+| **A — Calling portal keeps candidate contact** (recommended; matches `03-ecosystem.md:53-59` and all of `04-integration-surface/`) | No PII added. C12 as proposed is complete. A future slice may add a `participant.stalled` / `participant.deadline_approaching` **webhook event type** reusing C10's delivery machinery end-to-end — days of work, zero new PII, zero new GDPR surface. |
 | **B — BEAI stores candidate email and sends** | New migration adding PII to `participants`; retention/purge rule required **before** the column ships (blocks on decision #2); reminder cadence config on `projects` (blocks on decision #5); consent/lawful-basis question with the tenant; a candidate-facing email template set in ≥2 locales; the scheduler infra from D9 becomes mandatory, not optional. This is its own vertical slice, not a C12 sub-task. |
 
 Answer A is recommended. Answer B is legitimate but must be planned as its own change with the

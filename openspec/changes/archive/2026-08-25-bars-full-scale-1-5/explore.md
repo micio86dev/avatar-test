@@ -37,7 +37,7 @@ holds.
 
 The design doc's "unified remapping rule" (mean-preserving → nearest-neighbor, with
 sentiment tie-breaks) was a one-time, hand-derived exercise to regenerate
-`esempio-report-valutazione.json`'s illustrative numbers. It is not runtime logic and
+`evaluation-report-example.json`'s illustrative numbers. It is not runtime logic and
 has no code embodiment to retire.
 
 Since that change archived, **C9 (scoring-engine) was actually built** on top of the
@@ -128,8 +128,8 @@ discretion.
 - `openspec/specs/scoring-engine/spec.md` — likely carries its own domain assertions;
   `sdd-spec` must check.
 - `openspec/ROADMAP.md` (C9 row) — "indicators {1,3,5}".
-- `docs/app_description/02-domain/02-valutazione.md` — "insieme discreto {1,3,5}".
-- `docs/app_description/03-ux-reference/02-output-valutazione.md` — same wording.
+- `docs/app_description/02-domain/02-evaluation.md` — "insieme discreto {1,3,5}".
+- `docs/app_description/03-ux-reference/02-evaluation-output.md` — same wording.
 
 **Code**
 
@@ -148,7 +148,7 @@ discretion.
 
 ### May change
 
-- `docs/app_description/03-ux-reference/esempio-report-valutazione.json` — current
+- `docs/app_description/03-ux-reference/evaluation-report-example.json` — current
   values stay legal (`{1,3,5,-1}` ⊂ `{1,2,3,4,5,-1}`). Adding a 2/4 example has
   documentation and QA value, not correctness value.
 - `api/tests/Fixtures/cassettes/col_slf_golden.php` and

@@ -144,7 +144,7 @@ re-confirmed by the product owner rather than changing silently. See the questio
 | # | Deliverable | Repo |
 |---|---|---|
 | 1 | `DESIGN.md` §8.3 rewrite: domain `{1,2,3,4,5,-1}`, five assessed chip states | wrapper |
-| 2 | Binding-doc corrections mirroring/reversing 2026-07-16: `CLAUDE.md`, `openspec/ROADMAP.md` (C9 row), `docs/app_description/02-domain/02-valutazione.md`, `docs/app_description/03-ux-reference/02-output-valutazione.md`, and the 4× `AGENTS.md` | wrapper + 3 submodules |
+| 2 | Binding-doc corrections mirroring/reversing 2026-07-16: `CLAUDE.md`, `openspec/ROADMAP.md` (C9 row), `docs/app_description/02-domain/02-evaluation.md`, `docs/app_description/03-ux-reference/02-evaluation-output.md`, and the 4× `AGENTS.md` | wrapper + 3 submodules |
 | 3 | `scoring-model` delta: MODIFIED "Indicator Score Domain" (supersedes the `NEVER 4` scenarios), plus consequential edits to "Unassessable Indicator Sentinel", "Competency Score Arithmetic", "Reliability Formula" wording | wrapper |
 | 4 | `scoring-engine` delta: MODIFIED "Indicator Score Domain Validation", "Competency Mean Recomputed Server-Side", "LLM Parse Error" | wrapper |
 | 5 | `admin-backoffice` delta: MODIFIED "BARS Report Viewer Rendering Correctness" | wrapper |
@@ -174,7 +174,7 @@ Also out of scope:
 - **Re-scoring historical evaluations** — past Evaluations keep `prompt_version 1.0.0` and their original scores. No backfill.
 - **Reliability formula, validity threshold T, and the ≥90% completion gate** — untouched.
 - **Webhook/API contract change** — `EvaluationPayloadAssembler` passes `score` through raw; `openapi.json` pins no enum. Nothing to renegotiate.
-- **`DemoDataset` / `esempio-report-valutazione.json` regeneration** — current values stay legal; diversifying them is documentation value, optional, not correctness.
+- **`DemoDataset` / `evaluation-report-example.json` regeneration** — current values stay legal; diversifying them is documentation value, optional, not correctness.
 
 ## Capabilities
 
@@ -217,8 +217,8 @@ safety**, not for line count.
 | `DESIGN.md` §8.3 | Modified | New domain + five assessed chip states; must land first |
 | `CLAUDE.md` (Binding domain constraints) | Modified | `{1,3,5}` / "no 2, no 4" → `{1,2,3,4,5}` + AD-1 rubric summary |
 | `openspec/ROADMAP.md` (C9 row) | Modified | "indicators {1,3,5}" → `{1,2,3,4,5}` |
-| `docs/app_description/02-domain/02-valutazione.md` | Modified | "insieme discreto {1,3,5}" |
-| `docs/app_description/03-ux-reference/02-output-valutazione.md` | Modified | Same wording |
+| `docs/app_description/02-domain/02-evaluation.md` | Modified | "insieme discreto {1,3,5}" |
+| `docs/app_description/03-ux-reference/02-evaluation-output.md` | Modified | Same wording |
 | `AGENTS.md`, `api/AGENTS.md`, `frontend/AGENTS.md`, `backoffice/AGENTS.md` | Modified | 4× domain-constraint restatement |
 | `api/app/Services/Scoring/IndicatorValidator.php` | Modified | `LEGAL_SCORES = [1,2,3,4,5,-1]` |
 | `api/app/Services/Scoring/PromptBuilder.php` | Modified | AD-1 rubric; drop the "no 2, no 4" instruction |

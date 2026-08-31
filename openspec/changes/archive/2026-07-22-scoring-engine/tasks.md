@@ -127,7 +127,7 @@ Chain strategy: feature-branch-chain
 
 ### Phase 9: `CassetteLLMProvider` (PR 2)
 
-- [x] 9.1 Create `api/app/Testing/CassetteLLMProvider.php`: implements `LLMProvider`; constructor takes `array $cassette` keyed by `competency_code`; `complete(string $prompt, array $options): string` looks up `$options['competency_code']` in the cassette and returns the configured JSON string. Keys by `competency_code` (not call-order) to resist reordering. Add `tests/Fixtures/cassettes/col_slf_golden.php` returning the COL `{5,3,3}` and SLF `{5,3,-1}` LLM responses derived from `docs/app_description/03-ux-reference/esempio-report-valutazione.json`.
+- [x] 9.1 Create `api/app/Testing/CassetteLLMProvider.php`: implements `LLMProvider`; constructor takes `array $cassette` keyed by `competency_code`; `complete(string $prompt, array $options): string` looks up `$options['competency_code']` in the cassette and returns the configured JSON string. Keys by `competency_code` (not call-order) to resist reordering. Add `tests/Fixtures/cassettes/col_slf_golden.php` returning the COL `{5,3,3}` and SLF `{5,3,-1}` LLM responses derived from `docs/app_description/03-ux-reference/evaluation-report-example.json`.
 
 ### Phase 10: Transcript Assembly (PR 2)
 

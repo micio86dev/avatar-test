@@ -96,10 +96,10 @@ illustratively; left untouched.)
 |------|--------|-------------|
 | `CLAUDE.md` (137–144) | Modify | Replace 1–5/interpolation wording + example; add -1 rule |
 | `openspec/ROADMAP.md` (line 42) | Modify | C9 row "indicators 1–5" → "indicators {1,3,5}" |
-| `docs/app_description/02-domain/02-valutazione.md` (line 33) | Modify | "tipicamente 1–5" → discrete {1,3,5} |
-| `docs/app_description/03-ux-reference/02-output-valutazione.md` (line 17) | Modify | Illustrative JSON block: `"score": 4` → `"score": 3` (inside indicator object) so the code block does not show an out-of-set value |
-| `docs/app_description/03-ux-reference/02-output-valutazione.md` (line 38) | Modify | Same + reliability non-normative note |
-| `docs/.../esempio-report-valutazione.json` | Modify | Regenerate all indicator scores + means |
+| `docs/app_description/02-domain/02-evaluation.md` (line 33) | Modify | "tipicamente 1–5" → discrete {1,3,5} |
+| `docs/app_description/03-ux-reference/02-evaluation-output.md` (line 17) | Modify | Illustrative JSON block: `"score": 4` → `"score": 3` (inside indicator object) so the code block does not show an out-of-set value |
+| `docs/app_description/03-ux-reference/02-evaluation-output.md` (line 38) | Modify | Same + reliability non-normative note |
+| `docs/.../evaluation-report-example.json` | Modify | Regenerate all indicator scores + means |
 
 ### Exact edits (quote → replacement)
 
@@ -115,12 +115,12 @@ with:
 
 **ROADMAP.md 42** — `indicators 1–5, competency mean` → `indicators {1,3,5}, competency mean (assessed only)`.
 
-**02-valutazione.md 33** — `| `score` | Punteggio assegnato (tipicamente 1–5) |`
+**02-evaluation.md 33** — `| `score` | Punteggio assegnato (tipicamente 1–5) |`
 → `| `score` | Punteggio assegnato sull'insieme discreto {1,3,5}; -1 se non valutabile |`.
 
-**02-output-valutazione.md line ~17** (inside the illustrative JSON code block, indicator `score` field) — `"score": 4` → `"score": 3` so the code block does not exhibit an illegal value that contradicts the updated note below it.
+**02-evaluation-output.md line ~17** (inside the illustrative JSON code block, indicator `score` field) — `"score": 4` → `"score": 3` so the code block does not exhibit an illegal value that contradicts the updated note below it.
 
-**02-output-valutazione.md 38** — `- I punteggi per indicatore sono tipicamente su scala 1–5;`
+**02-evaluation-output.md 38** — `- I punteggi per indicatore sono tipicamente su scala 1–5;`
 → `- I punteggi per indicatore usano l'insieme discreto {1,3,5} (ancora più vicina, mai valori intermedi); -1 = non valutabile (escluso dalla media);`
 and append: `- i valori di `reliability` nell'esempio sono illustrativi e non normativi (in attesa della decisione aperta #1);`.
 
@@ -220,8 +220,8 @@ No migration. Pure doc edit on `feature/*`; rollback = `git revert`. Zero runtim
 
 ## Ordering / Atomicity
 
-1. Edit the text files (independent, any order): CLAUDE.md, ROADMAP.md, 02-valutazione.md,
-   02-output-valutazione.md (both line ~17 and line ~38 edits).
+1. Edit the text files (independent, any order): CLAUDE.md, ROADMAP.md, 02-evaluation.md,
+   02-evaluation-output.md (both line ~17 and line ~38 edits).
 2. Regenerate JSON (scores → recompute means → keep reliability + note).
 3. Ensure CLAUDE.md's "COL 3.67 from 5,3,3" matches the JSON COL indicators exactly.
 4. Run grep + JSON-invariant checks before commit. Single atomic commit (doc correction).

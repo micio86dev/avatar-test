@@ -34,14 +34,14 @@ candidate is redirected to the project's `exit_redirect_url` at interview end.
 1. **`webhook_deliveries` persistence + `DeliverWebhookJob`** — org-scoped delivery record
    written before the HTTP call; queued job performs the signed POST and records the outcome.
 2. **`evaluation` event delivery** — listeners on the existing `EvaluationCompleted` /
-   `EvaluationFailed` events. Payload per `docs/app_description/03-ux-reference/esempio-report-valutazione.json`,
+   `EvaluationFailed` events. Payload per `docs/app_description/03-ux-reference/evaluation-report-example.json`,
    `status` ∈ `completed` | `pending`, reliability rendered with the **existing** C9 rule
    (`openspec/specs/scoring-engine/spec.md:303-307`) — reused, never re-derived.
 3. **`files` block in the `evaluation` payload — partial** (D9): `transcript` and
    `evaluation_raw` references only. Per-question `audio` is an explicit non-goal.
 4. **`progress` event emission + delivery** — two new domain events at two seams (D2 below).
 5. **Per-project enabled event types** (D10) — required by the binding
-   `docs/app_description/04-integration-surface/03-webhook-eventi.md:12` ("tipi di evento
+   `docs/app_description/04-integration-surface/03-webhook-events.md:12` ("tipi di evento
    abilitati"); no such column exists today.
 6. **HMAC-SHA256 signing** (D3), **stable idempotency key** (D4), **bounded retry/backoff with
    dead-lettering** (D5), all per-project configured. Payload carries an explicit schema
@@ -112,7 +112,7 @@ be a tenant-scoped query, not a `failed_jobs` blob grep; (d) the binding doc's "
   payload is a **per-competency answer list** — competency completion is the domain-meaningful
   "recorded answer" boundary. It also leaves the TOCTOU-critical `DB::affectingStatement`
   guard completely untouched.
-- **Binding-doc compliance (ratified).** `docs/app_description/04-integration-surface/03-webhook-eventi.md:21-22`
+- **Binding-doc compliance (ratified).** `docs/app_description/04-integration-surface/03-webhook-events.md:21-22`
   requires emission "Alla creazione del candidato (primo accesso o creazione esplicita)" and
   "Dopo ogni risposta registrata **(o a intervalli significativi di avanzamento)**". The
   parenthetical is the explicit authorisation for competency-completion granularity — this is
@@ -133,7 +133,7 @@ UUID generated **once** at row creation and **unchanged across every retry**. A 
 `(organization_id, project_id, event_type, dedupe_key)` collapses duplicate emissions (e.g. the
 D2 SSO race) into one row. Receiver contract: BEAI guarantees **at-least-once**, never
 exactly-once — the receiver MUST treat a repeated `X-BEAI-Delivery-Id` as a no-op, matching
-`docs/app_description/04-integration-surface/00-panoramica.md`.
+`docs/app_description/04-integration-surface/00-overview.md`.
 
 **D5 — Retry: 6 attempts, exponential+jitter, explicit dead-letter (ratified).** ~10 s / 60 s /
 5 min / 30 min / 2 h (~2.7 h total window). `2xx` → `delivered`;
@@ -168,7 +168,7 @@ exposes it (`api/app/Http/Resources/ParticipantResource.php:58`,
 `openspec/specs/participant-sso/spec.md:23` assigned the trigger to C7; C7 shipped without it.
 Per `ROADMAP.md:43` C10 owns it: redirect when set, keep the static terminal state when null;
 fires regardless of evaluation status (a `pending` evaluation still redirects normally, per
-`04-uscita-utente.md`).
+`04-user-exit.md`).
 
 > **CORRECTION (post-design, orchestrator-verified).** An earlier revision of this decision
 > named `frontend/app/pages/interview/done.vue` as the target page and called D8 a "small,
@@ -186,9 +186,9 @@ fires regardless of evaluation status (a `pending` evaluation still redirects no
 
 **D9 — `files` block ships in v1, populated only where a producer exists (ratified: partial).**
 The binding doc requires a `files` sub-field —
-`docs/app_description/04-integration-surface/03-webhook-eventi.md:64`: "Riferimenti ad asset:
+`docs/app_description/04-integration-surface/03-webhook-events.md:64`: "Riferimenti ad asset:
 audio per domanda, trascrizione, file valutazione raw". Verified ground truth:
-`docs/app_description/03-ux-reference/esempio-report-valutazione.json` contains **only** the
+`docs/app_description/03-ux-reference/evaluation-report-example.json` contains **only** the
 `text` block — there is **no `files` block in the sample**; there is **no per-question audio
 storage and no transcript file artifact anywhere in `api/`** (the transcript lives in the DB as
 utterance rows). The only S3-backed artifact that exists is the proctoring JPEG
@@ -208,7 +208,7 @@ asset.
   not exist in any delivered slice.
 
 **D10 — Enabled event types: a `webhook_events` column on `projects` (ratified: in scope).**
-`docs/app_description/04-integration-surface/03-webhook-eventi.md:12` requires "tipi di evento
+`docs/app_description/04-integration-surface/03-webhook-events.md:12` requires "tipi di evento
 abilitati" alongside URL and secret. Verified absent: searching all of
 `api/database/migrations/` for `webhook_url|webhook_secret|webhook_events|enabled_events|event_types`
 returns only `webhook_url` and `webhook_secret`
@@ -268,7 +268,7 @@ returns only `webhook_url` and `webhook_secret`
 | Cross-tenant secret or URL resolution in a queued job | Med | Job takes a scalar id, loads `withoutGlobalScopes()` and re-derives org from the row (`ScoreEvaluationJob` pattern); dedicated isolation tests |
 | `QUEUE_CONNECTION=sync` in CI (`api/.github/workflows/ci.yml:45`) makes `->delay()` a no-op | Med | Assert on persisted delivery rows + `Queue::fake()`, never on wall-clock backoff |
 | Frozen payload drifts from a later re-score | Low | Intentional: replay re-sends what was sent; a re-score emits a **new** event → new delivery row |
-| Chatty `progress` volume | Low | D2 binds emission to competency completion, not per utterance — compliant per `03-webhook-eventi.md:22` |
+| Chatty `progress` volume | Low | D2 binds emission to competency completion, not per utterance — compliant per `03-webhook-events.md:22` |
 | No `laravel/horizon` for queue observability at scale | Med | D7: explicitly deferred, recorded as C9 debt; `database` driver is sufficient for C10 correctness |
 | **CLOSED** — unconfigured `webhook_url` left the delivery state machine undefined | — | **Ratified**: persist a `skipped` row (D10 step 1). No longer blocks spec. |
 | `files.audio` expected by an integrator on day one | Low | D9: absent-by-design in v1, documented as a non-goal with the decision #2 pointer; `files` is an open map so `audio` is additive |
@@ -329,7 +329,7 @@ All five proposal questions were answered by the product owner; none remains ope
 
 | # | Question | Ratified outcome | Recorded in |
 |---|---|---|---|
-| 1 | Progress granularity | Creation + each competency end. **Compliant** with `03-webhook-eventi.md:22` "(o a intervalli significativi di avanzamento)" — not a deviation | D2 |
+| 1 | Progress granularity | Creation + each competency end. **Compliant** with `03-webhook-events.md:22` "(o a intervalli significativi di avanzamento)" — not a deviation | D2 |
 | 2 | Retry window | 6 attempts / ~2.7 h, all values in `config/webhooks.php`, none hardcoded | D5 |
 | 3 | Dead-letter alerting | Log + observability counter in C10; operator notification is C12 | D5 |
 | 4 | Unconfigured webhook (was CRITICAL) | Persist a `skipped` row so C11 distinguishes "never configured" from "nothing happened" | D10 |

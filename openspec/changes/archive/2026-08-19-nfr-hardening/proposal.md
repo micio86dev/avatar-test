@@ -29,7 +29,7 @@ Every line below was opened during this proposal. Nothing is inherited.
 | Claim | Evidence |
 |---|---|
 | No audit-log package or model | `api/composer.json:9-31` — no `spatie/laravel-activitylog` / `owen-it/laravel-auditing`; no `AuditLog` among the 21 files in `api/app/Models/` |
-| Audit logs are binding | `CLAUDE.md:164` + `docs/BEAI_BRIEF.md:142` (unqualified NFR). `docs/app_description/05-business-rules/03-requisiti-non-funzionali.md:56` says *"consigliato"* — CLAUDE.md wins per its own source-of-truth framing |
+| Audit logs are binding | `CLAUDE.md:164` + `docs/BEAI_BRIEF.md:142` (unqualified NFR). `docs/app_description/05-business-rules/03-non-functional-requirements.md:56` says *"consigliato"* — CLAUDE.md wins per its own source-of-truth framing |
 | No queue worker anywhere | `api/Dockerfile:75` CMD = `php artisan serve` only; `docker-compose.yml:40` mentions Horizon **in a comment**, no worker service; zero `queue:work\|queue:listen\|horizon\|supervisor` hits in `api/.github/workflows/`; `laravel/horizon` absent from `api/composer.json:9-17` |
 | No scheduler registered | `api/bootstrap/app.php:16-65` — `withRouting`/`withMiddleware`/`withExceptions`/`create()`; no `->withSchedule()` |
 | Sentry / Pulse / Clarity / GA4 absent | `api/composer.json:9-31`; `frontend/package.json:23-62`; `backoffice/package.json:22-58`; and **also absent from both `nuxt.config.ts`** (zero `clarity\|gtag\|analytics\|sentry` hits) — the exploration's "may be script-injected" caveat is now closed |
@@ -208,7 +208,7 @@ This executor cannot query the user directly. Assumptions are marked; correct an
 3. **Deletion semantics: hard delete or anonymize?** `participants` is the FK root of every other artifact and has no `deleted_at` (`…create_participants_table.php:22`). *Implication:* hard delete cascades away completed evaluations the client may need for aggregate reporting; anonymization preserves them but requires a redaction pass over verbatim `excerpts`.
 4. **White-label — five answers needed before any design** (`docs/BEAI_BRIEF.md:83,145` is all that exists): (a) logo + colors only, or full removal of "BEAI" from candidate UI, emails, and the magic-link domain? (b) per-organization or per-project? (c) custom domain / CNAME — i.e. TLS automation? (d) email sender branding? (e) candidate frontend, backoffice, or both? *Implication:* (a)+(c) is the difference between two `projects` columns and a domain-provisioning subsystem.
 5. **Multi-test portal (FR-006) — is it in scope at all?** `docs/BEAI_BRIEF.md:112-113` marks it **Optional** and it has no data model, UX reference, or acceptance criteria anywhere. If yes: (a) candidate-facing hub or admin-facing? (b) does it span existing `Project` rows or introduce a new aggregate above `Project`? *Implication:* (b) is a schema-level decision touching every tenant-scoped query. **Recommendation: defer explicitly and remove it from C13.**
-6. **Audit-log strength.** `CLAUDE.md:164`/`BEAI_BRIEF.md:142` state it flatly; `03-requisiti-non-funzionali.md:56` says *"consigliato"*. Assumed **binding**. *Implication:* if merely recommended, retention and immutability guarantees relax considerably.
+6. **Audit-log strength.** `CLAUDE.md:164`/`BEAI_BRIEF.md:142` state it flatly; `03-non-functional-requirements.md:56` says *"consigliato"*. Assumed **binding**. *Implication:* if merely recommended, retention and immutability guarantees relax considerably.
 
 ### Structural — for the orchestrator
 

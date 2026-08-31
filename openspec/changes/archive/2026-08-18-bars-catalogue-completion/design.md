@@ -101,7 +101,7 @@ BUL on every axis, with no new axis invented**:
 > leading other senior leaders across all business functions.
 
 **Evidence used**, stated so it can be challenged: (a) the four-row ladder above, read
-verbatim from `roles.json`; (b) `01-ruoli-e-competenze.md` line 20 *"Livello
+verbatim from `roles.json`; (b) `01-roles-and-competencies.md` line 20 *"Livello
 executive"* and line 53 *"Set ampio executive"*; (c) SRX's own competency set — it
 keeps `TMG`, `INS`, `SLF`, `COM`, `ITG`, `INC`, so SRX leads people and faces
 customers; it is **not** a staff or advisory role, and must not be authored as one.
