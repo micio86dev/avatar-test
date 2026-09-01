@@ -26,10 +26,14 @@ Redis, Mailpit, queue worker and scheduler — creating missing `.env` files,
 generating secrets and applying migrations along the way. It needs only Docker +
 Compose v2, and it is safe to re-run.
 
+It **rebuilds the app images every time**. The backoffice is a statically
+generated SPA whose bundle is baked into its image, so reusing a stale image
+serves stale code that no `.env` change can fix.
+
 | | |
 |---|---|
-| `./dev.sh` | start everything, idempotent |
-| `./dev.sh --build` | force a rebuild of the app images |
+| `./dev.sh` | rebuild the images, then start everything — idempotent |
+| `./dev.sh --no-build` | start without rebuilding (reuse the current images) |
 | `./dev.sh --seed` | seed the database and provision the demo dataset |
 | `./dev.sh --status` | service health |
 | `./dev.sh --logs` | follow all logs |

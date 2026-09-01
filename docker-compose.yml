@@ -15,6 +15,21 @@
 # where nobody is watching.
 # ---------------------------------------------------------------------------
 x-api-environment: &api-environment
+  # The BROWSER-facing origin, and the mirror image of the DB/Redis overrides
+  # below: those replace localhost with compose service names because the calls
+  # are container-to-container, while this one must NOT be a service name
+  # because the consumer is a browser on the host.
+  #
+  # `APP_URL` is what `AppServiceProvider::forcePublicRootUrl()` builds every
+  # absolute URL from. Left to the request's Host header, a signed profile-photo
+  # URL came back as `http://api:8000/storage/...` — the compose service name,
+  # which no browser can resolve. The response was 200 and the signature valid;
+  # the image simply never loaded.
+  #
+  # Pinned here rather than left to `api/.env` because a stale checkout carrying
+  # `APP_URL=http://localhost` (no port) reproduces the same broken URL, and the
+  # port is something compose already knows.
+  APP_URL: "http://localhost:${API_PORT:-8000}"
   # DB_CONNECTION is pinned here on purpose: without it the container inherits
   # whatever the developer's api/.env happens to say, and a stray
   # DB_CONNECTION=sqlite silently ignores every other override below — the
@@ -344,6 +359,21 @@ services:
         required: false
     environment: *api-environment
     command: ["php", "artisan", "schedule:work"]
+    volumes:
+      # The SAME volume `api` and `worker` share, for the same reason and one
+      # more. Nothing scheduled touches the local disk TODAY — all four tasks
+      # (`queue:prune-failed`, `queue:prune-batches`, `model:prune
+      # RefreshToken`, `ReconcileLlmUsage`) are database-only — so this is
+      # latent rather than fixing a break.
+      #
+      # It is mounted anyway because the GDPR retention purge (product decision
+      # 2) is by nature a SCHEDULED task that deletes files from this disk, and
+      # a scheduler with its own empty volume would report a clean purge over
+      # files it never saw. That is the failure mode the volume comment at the
+      # foot of this file describes as "looking like corruption", except a
+      # purge reports success while doing nothing — which is worse, because
+      # nobody goes looking.
+      - api_storage:/var/www/storage/app
     depends_on: *api-depends-on
     deploy:
       replicas: 1
