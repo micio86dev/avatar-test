@@ -93,7 +93,22 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-beai}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # 5433 on the HOST, not 5432, and the default rather than an opt-in.
+      #
+      # A developer machine very often already runs a native PostgreSQL on
+      # 5432. Docker publishes on the wildcard address while a native server
+      # binds the specific loopback one, and the specific bind WINS — so with
+      # both running, every `localhost:5432` connection silently reaches the
+      # native server instead of this container. That failure is invisible:
+      # the client connects, authenticates, and simply shows a different
+      # database. It cost real time here (an OpenAPI export against the wrong
+      # server, and a SQL client showing databases that were not the app's).
+      #
+      # 5433 makes the two addressable at once and unambiguous. The container's
+      # own port is unchanged, so nothing inside the compose network moves:
+      # services still reach it at `postgres:5432`. Override with POSTGRES_PORT
+      # if you have no native server and prefer the standard port.
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro

@@ -279,10 +279,49 @@ Services, once up:
 | Backoffice | http://localhost:3001 |
 | API health | http://localhost:8000/api/health |
 | Mailpit | http://localhost:8025 |
-| Postgres · Redis | `localhost:5432` · `localhost:6379` |
+| Postgres · Redis | `localhost:5433` · `localhost:6379` |
 
 Ports are overridable in the wrapper `.env` (`FRONTEND_PORT`, `BACKOFFICE_PORT`,
 `API_PORT`, `MAILPIT_UI_PORT`, `POSTGRES_PORT`, `REDIS_PORT`).
+
+#### Why Postgres is on 5433 and not 5432
+
+Because a native PostgreSQL is very often already running on 5432, and the two
+do not fail loudly when they collide — they fail SILENTLY.
+
+Docker publishes on the wildcard address (`*:5432`); a native server binds the
+specific loopback one (`127.0.0.1:5432`). The specific bind wins, so with both
+running, every `localhost:5432` connection reaches the NATIVE server. It
+connects, it authenticates, and it shows a different database. Nothing errors.
+
+That has already cost time on this project twice: an OpenAPI export that ran
+against the wrong server, and a SQL client showing databases that were not the
+application's.
+
+Only the HOST port moved. The container still listens on 5432 and every service
+inside the compose network still reaches it at `postgres:5432`, so nothing in
+the application configuration changes.
+
+**If you have no native PostgreSQL**, set `POSTGRES_PORT=5432` in the wrapper
+`.env` and use the standard port.
+
+**If you do**, keep 5433 and note where each server is used:
+
+| | Host port | Holds |
+|---|---|---|
+| Docker (this compose file) | `5433` | `beai` — the app's real data |
+| Your native server | `5432` | your other projects, and `beai_test` |
+
+`api/phpunit.xml` points the test suite at `127.0.0.1:5432/beai_test`, so **the
+suite runs against your NATIVE server**, not this container. Keep that server on
+PostgreSQL 17 to match production; a different major version is a silent
+divergence that will eventually pass locally and fail in CI. The test database
+needs the `vector` extension:
+
+```bash
+createdb -h 127.0.0.1 -p 5432 -U postgres beai_test
+psql -h 127.0.0.1 -p 5432 -U postgres -d beai_test -c 'CREATE EXTENSION IF NOT EXISTS vector'
+```
 
 ### Option B — host toolchain
 
