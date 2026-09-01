@@ -105,8 +105,9 @@ contrast calculation, never by eye.
 | `--color-warning-dark` | `#92400e` | Text/icon-safe warning (7.1:1 on white, §9.1) — use for BARS warning chips |
 | `--color-error` | `#ef4444` | Error states, validation failures |
 | `--color-error-light` | `#fee2e2` | Error backgrounds |
-| `--color-info` | `#3b82f6` | Informational states |
+| `--color-info` | `#3b82f6` | Informational states (non-text: icons/fills only, see §9.1) |
 | `--color-info-light` | `#dbeafe` | Info backgrounds |
+| `--color-info-dark` | `#1e40af` | Text/icon-safe info (7.15:1 on `--color-info-light`, §9.1) — status badges |
 
 **Feedback alert variants.** `alertVariants` (`components/ui/alert/index.ts`) shipped with
 only `default` and `destructive`, and `destructive` recoloured just its TEXT — so a failed
@@ -265,6 +266,7 @@ tokens below supplement Tailwind's built-in scale for BEAI-specific layout needs
   --color-error-light: #fee2e2;
   --color-info: #3b82f6;
   --color-info-light: #dbeafe;
+  --color-info-dark: #1e40af;
 
   --color-recording: #dc2626;
   --color-avatar-bg: #0f172a;

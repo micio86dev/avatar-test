@@ -2,14 +2,25 @@
 #
 # BEAI — one-shot local development launcher.
 #
-#   ./scripts/dev.sh              start everything (idempotent, safe to re-run)
-#   ./scripts/dev.sh --build      force a rebuild of the app images
+#   ./scripts/dev.sh              rebuild the app images, then start everything
+#   ./scripts/dev.sh --no-build   start without rebuilding (reuse the current images)
 #   ./scripts/dev.sh --seed       run database seeders, then provision the demo dataset
 #   ./scripts/dev.sh --fresh      DESTRUCTIVE: wipe volumes and rebuild from zero
 #   ./scripts/dev.sh --no-worker  start without the worker and scheduler services
 #   ./scripts/dev.sh --status     show service health and exit
 #   ./scripts/dev.sh --logs       follow logs of all services
 #   ./scripts/dev.sh --down       stop containers (volumes preserved)
+#
+# WHY THE BUILD IS THE DEFAULT
+# ----------------------------
+# `backoffice` is a statically generated SPA: its JS bundle is baked into the
+# image at build time, so a container started from a stale image serves stale
+# code no matter what the working tree says. Skipping the build silently shipped
+# a two-week-old login page (2026-08-31), and the symptom — a missing link —
+# looked like a misconfigured `.env`, which is the worst possible place to go
+# looking. Docker's layer cache makes a no-change rebuild cheap; a wrong bundle
+# is not. Use --no-build only when you know nothing under api/, frontend/ or
+# backoffice/ has moved.
 #
 # Requires: Docker + Docker Compose v2. Everything else runs inside containers,
 # so no local PHP, Node or Bun toolchain is needed just to boot the stack.
@@ -34,11 +45,16 @@ die()   { printf '\n%s✗ %s%s\n\n' "$R" "$*" "$N" >&2; exit 1; }
 note()  { printf '    %s%s%s\n' "$DIM" "$*" "$N"; }
 
 # ---------------------------------------------------------------- options
-BUILD=0; SEED=0; FRESH=0; WORKER=1; ACTION=up
+# BUILD defaults to 1 — see "WHY THE BUILD IS THE DEFAULT" in the header.
+BUILD=1; SEED=0; FRESH=0; WORKER=1; ACTION=up
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    # Kept as an accepted no-op: it is what every existing note, alias and
+    # muscle memory types, and failing on it would punish the habit that was
+    # correct until this default flipped.
     --build)     BUILD=1 ;;
+    --no-build)  BUILD=0 ;;
     --seed)      SEED=1 ;;
     --fresh)     FRESH=1; BUILD=1 ;;
     --no-worker) WORKER=0 ;;
@@ -49,8 +65,8 @@ while [[ $# -gt 0 ]]; do
       cat <<'USAGE'
 BEAI — one-shot local development launcher.
 
-  ./scripts/dev.sh              start everything (idempotent, safe to re-run)
-  ./scripts/dev.sh --build      force a rebuild of the app images
+  ./scripts/dev.sh              rebuild the app images, then start everything
+  ./scripts/dev.sh --no-build   start without rebuilding (reuse the current images)
   ./scripts/dev.sh --seed       run database seeders, then provision the demo dataset
   ./scripts/dev.sh --fresh      DESTRUCTIVE: wipe volumes and rebuild from zero
   ./scripts/dev.sh --no-worker  start without the worker and scheduler services
@@ -102,6 +118,31 @@ case "$ACTION" in
     dc ps
     exit 0 ;;
 esac
+
+# ---------------------------------------------------------------- submodules
+#
+# FIRST, and that ordering is load-bearing rather than tidy.
+#
+# `git clone` without `--recursive` — the case this block exists for — leaves
+# `api/`, `frontend/` and `backoffice/` as EMPTY directories. Run after the env
+# step, every one of them looked like a checkout with neither `.env` nor
+# `.env.example`, so `ensure_env` took its last branch: a warning, and no file
+# created. `ensure_secret` then returns 0 without a word (it opens with
+# `[[ -f "$env_file" ]] || return 0`), so no APP_KEY is ever generated.
+#
+# Nothing downstream catches it. `api/.dockerignore` excludes `.env` from the
+# image by design, no entrypoint runs `key:generate`, compose sets no APP_KEY,
+# and `env_file: required: false` means the missing file raises nothing. The api
+# container boots, throws MissingAppKeyException on every request, fails its
+# healthcheck, and the boot fails — AFTER several minutes of building three
+# images, on a machine that meets every documented requirement.
+if [[ -f "$ROOT/.gitmodules" ]] && command -v git >/dev/null 2>&1; then
+  if git -C "$ROOT" submodule status 2>/dev/null | grep -q '^-'; then
+    step "Submodules"
+    git -C "$ROOT" submodule update --init --recursive
+    ok "Submodules initialised"
+  fi
+fi
 
 # ---------------------------------------------------------------- env files
 step "Environment files"
@@ -162,15 +203,6 @@ ensure_secret() {
   ok "api: ${key} generated"
 }
 
-# ---------------------------------------------------------------- submodules
-if [[ -f "$ROOT/.gitmodules" ]] && command -v git >/dev/null 2>&1; then
-  if git -C "$ROOT" submodule status 2>/dev/null | grep -q '^-'; then
-    step "Submodules"
-    git -C "$ROOT" submodule update --init --recursive
-    ok "Submodules initialised"
-  fi
-fi
-
 # ---------------------------------------------------------------- fresh reset
 if [[ $FRESH -eq 1 ]]; then
   step "Fresh reset (destructive)"
@@ -188,8 +220,28 @@ fi
 # ---------------------------------------------------------------- boot
 step "Starting the stack"
 if [[ $BUILD -eq 1 ]]; then
-  note "Building images (this takes a few minutes the first time)"
-  dc build
+  # ONE SERVICE AT A TIME, AND ONLY THESE THREE.
+  #
+  # `dc build` with no arguments builds all FIVE services that declare a
+  # `build:` section, in PARALLEL. That is wrong twice over on a laptop:
+  #
+  #   - worker and scheduler share api's context, Dockerfile and output tag
+  #     (beai-api:local). Building them is the same image a second and third
+  #     time; `dc up` resolves them from the tag api already produced.
+  #   - the remaining three include two Vite/rollup production builds, which
+  #     peak in the GBs each. Docker Desktop on macOS runs a VM with a FIXED
+  #     memory ceiling — 4 GB by default, unrelated to how much RAM the Mac
+  #     has. Two Nuxt builds plus composer inside that ceiling do not fail
+  #     cleanly: the VM swaps, the OOM killer fires, and BuildKit sits on
+  #     `RUN bun run build` with no output and no progress (seen 2026-08-31).
+  #
+  # Serial is not slower here. Those builds were never running concurrently in
+  # any useful sense — they were taking memory away from each other.
+  note "Building images one at a time (a few minutes the first time)"
+  for svc in api frontend backoffice; do
+    note "  → $svc"
+    dc build "$svc"
+  done
 fi
 
 # Secrets must exist before the app boots — generated host-side, never in the image.
@@ -424,7 +476,15 @@ API_PORT="$(port API_PORT)";               API_PORT="${API_PORT:-8000}"
 FE_PORT="$(port FRONTEND_PORT)";           FE_PORT="${FE_PORT:-3000}"
 BO_PORT="$(port BACKOFFICE_PORT)";         BO_PORT="${BO_PORT:-3001}"
 MAIL_PORT="$(port MAILPIT_UI_PORT)";       MAIL_PORT="${MAIL_PORT:-8025}"
-PG_PORT="$(port POSTGRES_PORT)";           PG_PORT="${PG_PORT:-5432}"
+# 5433, matching docker-compose.yml's own default — NOT 5432.
+#
+# `port()` reads the wrapper .env, and `ensure_env` only creates that file when
+# it is absent; it never backfills new keys into an existing one. So anyone
+# whose .env predates the port move has no POSTGRES_PORT line at all and hits
+# this fallback. Printing 5432 sent them to the port a NATIVE Postgres owns —
+# the exact collision the compose change exists to prevent — and the wrong
+# address answers, which is what makes it hard to spot.
+PG_PORT="$(port POSTGRES_PORT)";           PG_PORT="${PG_PORT:-5433}"
 RD_PORT="$(port REDIS_PORT)";              RD_PORT="${RD_PORT:-6379}"
 
 step "BEAI is up"

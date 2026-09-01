@@ -2,8 +2,8 @@
 #
 # BEAI — local stack entry point.
 #
-#   ./dev.sh                 start everything (idempotent, safe to re-run)
-#   ./dev.sh --build         force a rebuild of the app images
+#   ./dev.sh                 rebuild the app images, then start everything
+#   ./dev.sh --no-build      start without rebuilding (reuse the current images)
 #   ./dev.sh --seed          seed the database, then provision the demo dataset
 #   ./dev.sh --fresh         DESTRUCTIVE: wipe volumes and rebuild from zero
 #   ./dev.sh --no-worker     start without the worker and scheduler
@@ -19,7 +19,7 @@
 #
 # WHY THIS FILE IS FOUR LINES OF WORK
 # -----------------------------------
-# The launcher itself is `scripts/dev.sh` — 444 lines that generate the env
+# The launcher itself is `scripts/dev.sh` — it generates the env
 # files, refuse to rotate an existing APP_KEY, sync submodules, wait on health
 # checks and report honestly when something fails to come up. This file exists
 # only so `./dev.sh` works from the repo root, which is where you look for it.
