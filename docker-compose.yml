@@ -15,6 +15,21 @@
 # where nobody is watching.
 # ---------------------------------------------------------------------------
 x-api-environment: &api-environment
+  # The BROWSER-facing origin, and the mirror image of the DB/Redis overrides
+  # below: those replace localhost with compose service names because the calls
+  # are container-to-container, while this one must NOT be a service name
+  # because the consumer is a browser on the host.
+  #
+  # `APP_URL` is what `AppServiceProvider::forcePublicRootUrl()` builds every
+  # absolute URL from. Left to the request's Host header, a signed profile-photo
+  # URL came back as `http://api:8000/storage/...` — the compose service name,
+  # which no browser can resolve. The response was 200 and the signature valid;
+  # the image simply never loaded.
+  #
+  # Pinned here rather than left to `api/.env` because a stale checkout carrying
+  # `APP_URL=http://localhost` (no port) reproduces the same broken URL, and the
+  # port is something compose already knows.
+  APP_URL: "http://localhost:${API_PORT:-8000}"
   # DB_CONNECTION is pinned here on purpose: without it the container inherits
   # whatever the developer's api/.env happens to say, and a stray
   # DB_CONNECTION=sqlite silently ignores every other override below — the
@@ -93,7 +108,22 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-beai}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # 5433 on the HOST, not 5432, and the default rather than an opt-in.
+      #
+      # A developer machine very often already runs a native PostgreSQL on
+      # 5432. Docker publishes on the wildcard address while a native server
+      # binds the specific loopback one, and the specific bind WINS — so with
+      # both running, every `localhost:5432` connection silently reaches the
+      # native server instead of this container. That failure is invisible:
+      # the client connects, authenticates, and simply shows a different
+      # database. It cost real time here (an OpenAPI export against the wrong
+      # server, and a SQL client showing databases that were not the app's).
+      #
+      # 5433 makes the two addressable at once and unambiguous. The container's
+      # own port is unchanged, so nothing inside the compose network moves:
+      # services still reach it at `postgres:5432`. Override with POSTGRES_PORT
+      # if you have no native server and prefer the standard port.
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -169,6 +199,12 @@ services:
     image: beai-api:local
     container_name: beai_api
     restart: unless-stopped
+    volumes:
+      # See `api_storage` at the foot of this file. Without it, everything the
+      # `local` disk writes — proctoring snapshots above all — lives in the
+      # container's writable layer and is destroyed by `--force-recreate`,
+      # `down`, or any rebuild.
+      - api_storage:/var/www/storage/app
     env_file:
       - path: ./api/.env
         required: false
@@ -212,6 +248,11 @@ services:
       dockerfile: Dockerfile
     image: beai-api:local
     restart: unless-stopped
+    volumes:
+      # The SAME volume as `api`, not a second one. The request path writes a
+      # snapshot and a queued job reads it back, so separate volumes would hand
+      # the worker an empty directory and a failure that reads as corruption.
+      - api_storage:/var/www/storage/app
     env_file:
       - path: ./api/.env
         required: false
@@ -318,6 +359,21 @@ services:
         required: false
     environment: *api-environment
     command: ["php", "artisan", "schedule:work"]
+    volumes:
+      # The SAME volume `api` and `worker` share, for the same reason and one
+      # more. Nothing scheduled touches the local disk TODAY — all four tasks
+      # (`queue:prune-failed`, `queue:prune-batches`, `model:prune
+      # RefreshToken`, `ReconcileLlmUsage`) are database-only — so this is
+      # latent rather than fixing a break.
+      #
+      # It is mounted anyway because the GDPR retention purge (product decision
+      # 2) is by nature a SCHEDULED task that deletes files from this disk, and
+      # a scheduler with its own empty volume would report a clean purge over
+      # files it never saw. That is the failure mode the volume comment at the
+      # foot of this file describes as "looking like corruption", except a
+      # purge reports success while doing nothing — which is worse, because
+      # nobody goes looking.
+      - api_storage:/var/www/storage/app
     depends_on: *api-depends-on
     deploy:
       replicas: 1
@@ -485,6 +541,23 @@ volumes:
   postgres_data:
     driver: local
   redis_data:
+    driver: local
+  # Uploaded files written through the `local` disk — proctoring snapshots,
+  # transcripts, anything `FILESYSTEM_DISK=local` produces.
+  #
+  # Without this they live in the container's writable layer, which survives
+  # `restart` and `up -d` but is DESTROYED by `--force-recreate`, `down`, and
+  # every image rebuild. A developer checking that proctoring captured frames
+  # would find them gone after any of those, with nothing to indicate the files
+  # had ever existed.
+  #
+  # Shared by `api` and `worker` on purpose: the request path writes the file
+  # and a queued job reads it back, so two separate volumes would give the
+  # worker an empty directory and a failure that looks like corruption.
+  #
+  # Production is unaffected — Railway sets `FILESYSTEM_DISK=s3`, so nothing
+  # is written to the local disk there at all.
+  api_storage:
     driver: local
 
 # ---------------------------------------------------------------------------

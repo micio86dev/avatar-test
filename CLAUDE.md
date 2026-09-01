@@ -202,11 +202,61 @@ Full rationale in `openspec/ROADMAP.md`. Summary:
    BEAI enforces only its short-lived token expiry and has no deadline concept of its own.
 6. **OPEN** — non-English BARS anchors need expert-authored translations (data, not code).
 7. **OPEN** — provider concurrency/cost at scale; revisit under real load.
-8. **RATIFIED** — BEAI holds **no candidate contact data**. `participants` has no contact
-   column by design and that stays; candidate invitations/reminders belong to the calling
-   system. C12 is operator-facing only.
-9. **PARKED** — white-label and the FR-006 multi-test portal are underspecified (two lines of
-   brief, FR-006 marked "Optional"). Removed from C13 scope until a written requirement exists.
+8. **REVERSED 2026-09-01** — BEAI now holds **one** piece of candidate contact data: an
+   email address, and it is **mandatory**. The original ruling said `participants` has no
+   contact column by design and that invitations belong to the calling system. That was
+   ratified on the assumption that every candidate arrives through an SSO ingress the
+   calling system owns. Operators also create candidates **directly in the backoffice**,
+   and for those there is no calling system to send anything — the invitation had nowhere
+   to come from, so the candidate was created and never told.
+
+   - **Identity is the email address, and it is GLOBAL.** The same person invited by two
+     different organizations is the same person, and BEAI must not hold two records that
+     disagree about who they are. `participants` stays the per-project **enrolment** — one
+     row per candidate per project, carrying that project's status, transcript and
+     evaluation — and the email is what makes two enrolments the same human.
+   - **A global `candidates` table was considered and REJECTED.** It would normalise the
+     name and locale, and in exchange it would create the one thing this product may never
+     have: a read surface spanning tenants. "A tenant must never see another tenant's data"
+     is a binding constraint, and a shared row that both organizations can reach is the
+     shape that breaks it — one careless eager-load away from telling org A that their
+     candidate is also interviewing at org B. Email as the identity key gives the
+     no-duplicates property with no cross-tenant row to leak.
+   - **Cross-tenant isolation is unchanged and non-negotiable.** Every read stays scoped by
+     `organization_id`. Two enrolments sharing an email are two rows in two tenants that
+     never see each other, and no endpoint may answer "where else does this address
+     appear".
+   - **Uniqueness is per project, not global.** `(project_id, email)` — inviting the same
+     person twice to one project is a mistake worth refusing; inviting them to two projects,
+     or to two organizations, is the entire point.
+   - **GDPR (ruling 2) now covers this column.** An email is personal data in a way
+     `candidate_ref` deliberately was not, and the retention sign-off must name it.
+   - C12 notifications stay operator-facing. The candidate invitation is a separate,
+     transactional message — static and multilingual per ruling 10, never a C12 trigger.
+9. **REOPENED 2026-09-01, partially** — white-label. The requirement that was missing now exists
+   and is narrow: an **admin** sets a **logo** and a **primary colour** in Settings, and both Nuxt
+   apps render in them. Nothing else is in scope — no per-tenant copy, no per-tenant layout, and
+   the **FR-006 multi-test portal stays PARKED**, still underspecified.
+   - Both fields are **nullable permanently**. An organization that configures neither renders in
+     the Quint palette this file and `DESIGN.md` define: the product has a brand of its own, and
+     "no logo configured" must never mean "no logo at all".
+   - `organizations.primary_color` is `#rrggbb`, validated by an anchored regex **and** a database
+     CHECK. It is interpolated into a CSS custom property in two apps, so a malformed value is a
+     stylesheet that silently does not apply and one carrying `;`/`}` is a CSS injection into every
+     page a candidate sees. The DB constraint is what also holds for the portability import path.
+   - `organizations.logo_path` is a **path on the configured disk, never a URL** (the disk differs
+     per environment), and is written **only** by `POST /api/organization/logo` — the one place
+     that knows a file was actually stored. It is deliberately not accepted by the settings PATCH.
+   - Uploads are accepted on **magic bytes**, never on the claimed MIME type or the filename.
+     **SVG is refused**: it is XML, XML carries `<script>`, and an inline SVG served from our own
+     origin executes with our origin's privileges.
+
+10. **RATIFIED 2026-09-01** — transactional email is **standard and static**, not per-tenant. Every
+    template is multilingual (`it`/`en`) with placeholders, and is **not** editable by tenant
+    admins. Considered and rejected: an admin able to edit the body of a password-reset mail can
+    remove or alter the link it exists to deliver, and the configuration surface was judged too
+    complex for the audience. Branding (logo, primary colour) still applies to those emails —
+    the CHROME is per-tenant, the WORDS are not.
 
 ---
 
