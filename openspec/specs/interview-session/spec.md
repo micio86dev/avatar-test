@@ -28,14 +28,31 @@ explicitly out of scope.
 
 The system MUST persist one `InterviewSession` row per competency attempt,
 belonging to exactly one `Participant` and one `Organization`. The row MUST
-carry: `question_index` (0-based ordinal, = `position - 1`), `competency_code`,
-`framework_version_id` (copied from `project.framework_version_id` at creation time —
-NEVER re-derived at read time), `status` ∈ `{pending, in_corso, completed, timeout, skipped, error}`
-(default `pending`; `in_corso` after provider success), `provider` (string),
-`provider_session_ref` (nullable), `ended_reason` (nullable) ∈ `{completed, timeout, skipped, error}`,
+carry: `question_index` (0-based ordinal; MUST equal `project_competencies.position`
+of that session's competency within the session's project — never `position - 1`),
+`competency_code`, `framework_version_id` (copied from `project.framework_version_id`
+at creation time — NEVER re-derived at read time), `status` ∈
+`{pending, in_corso, completed, timeout, skipped, error}` (default `pending`;
+`in_corso` after provider success), `provider` (string), `provider_session_ref`
+(nullable), `ended_reason` (nullable) ∈ `{completed, timeout, skipped, error}`,
 `started_at` / `ended_at` (timestampTz, nullable). The primary composite index
 MUST lead with `organization_id`. The table MUST carry a UNIQUE constraint on
 `(participant_id, competency_code)`.
+
+The first competency of a project (`position = 0`) MUST therefore persist
+`question_index = 0`, never a negative value.
+(Previously: `question_index` was defined as `position - 1` against a `position`
+column described as 1-based. `position` has always been 0-based at every writer,
+so the subtraction produced `-1` for the first competency of every project.)
+
+A session's recorded start MUST be set only at the moment it first becomes
+live — the `in_corso` transition — never at row creation. A session that
+never leaves `pending` consumed no provider time and MUST NOT record a
+start; it remains absent, never `0` or any other placeholder.
+(Previously: `started_at` was declared nullable and server-set, but no
+requirement stated WHEN it is written. The real interview path never wrote
+it at either `in_corso` site, so every production session recorded an
+interval with no beginning.)
 
 **WARNING-8 — UNIQUE constraint domain:** each `Participant` row belongs to exactly ONE project
 (a human candidate participating in multiple projects gets a distinct `participant_id` per project,
@@ -69,24 +86,40 @@ a project is blocked at the application layer.
 `status = 'error'` row whose single re-offer bound (Decisions 4 & 5 — see "Bounded single
 re-offer of an `error` competency") is exhausted. A first-occurrence `error` — one still
 eligible for re-offer — is NOT counted as ended; it does not yet consume a competency slot.
-(Previously: `error` was never counted as ended under any condition, which made completion
-permanently unreachable for a participant whose only failure was never resolved.)
 
 `errore` is a TERMINAL participant state: `$allowedTransitions['errore'] = []`.
 
 #### Scenario: Row created on /start
 
-- GIVEN a valid candidate JWT for org O and a project with competency PRS at position 1
+- GIVEN a valid candidate JWT for org O and a project with competency PRS at
+  `position = 0` (the project's first competency)
 - WHEN `POST /api/candidate/interview/start` is called
-- THEN an `InterviewSession` row is persisted with `competency_code = 'PRS'`, `question_index = 0` (= position 1 - 1), `status = 'pending'` initially then `'in_corso'` after provider success, `organization_id = O`, `framework_version_id` copied from the project record, and a non-null `participant.started_at` (set via direct property assignment, NOT mass-assign)
+- THEN an `InterviewSession` row is persisted with `competency_code = 'PRS'`,
+  `question_index = 0` (equal to `position`, not negative), `status = 'pending'`
+  initially with no recorded start, then `'in_corso'` after provider success
+  with its start recorded at that moment (never at insertion), `organization_id = O`,
+  `framework_version_id` copied from the project record, and a non-null
+  `participant.started_at` (set via direct property assignment, NOT mass-assign)
+
+#### Scenario: First competency's question_index is never negative
+
+- GIVEN a project whose first competency (PRS) is at `position = 0` and has no
+  prior session for this participant
+- WHEN `POST /start` resolves and persists that competency's session
+- THEN `question_index` is persisted as `0`, never `-1`
+
+#### Scenario: A session that never leaves pending records no start
+
+- GIVEN a `POST /start` call whose provider request fails before any session
+  reaches `in_corso` (e.g. a `429 provider_busy`, leaving the row `pending`)
+- WHEN that session's recorded start is read
+- THEN it is absent — never a timestamp and never `0`
 
 #### Scenario: Tenant isolation at query level
 
 - GIVEN sessions from org A and org B exist in the DB
 - WHEN any query scoped to org A is executed
 - THEN sessions belonging to org B are never returned (TenantScoped global scope)
-
----
 
 ### Requirement: POST /start question_context — total_competencies (interview-continuous-flow addendum)
 
@@ -363,8 +396,12 @@ endpoint that is reasonable to allow even after completion).
    the second INSERT will raise `Illuminate\Database\UniqueConstraintViolationException`
    (SQLSTATE 23505). The implementation MUST catch this exception and recover by
    re-querying the existing session (→ RESUME path), NOT surface it as a 500.
-2. INSERT `InterviewSession(status='pending', question_index = position - 1,
+2. INSERT `InterviewSession(status='pending', question_index = position,
    framework_version_id copied from project, ...)` in a SHORT DB transaction.
+   `question_index` MUST equal `project_competencies.position` for that competency —
+   never `position - 1`.
+   (Previously: `question_index = position - 1`, which produced `-1` for a project's
+   first competency because `position` is 0-based, not 1-based.)
 3. Call the configured provider (HeyGen or Tavus) REST API server-side using secret
    keys stored only in environment/config — NEVER returned to the client.
    **The provider HTTP call (`ProviderSessionService.issue()`) MUST be outside any DB
@@ -372,7 +409,7 @@ endpoint that is reasonable to allow even after completion).
    starvation and deadlock.
 4. On provider SUCCESS: wrap BOTH of the following writes in ONE short DB transaction (FIX-8):
    - UPDATE session `status='in_corso'`, `provider_session_ref`.
-   - On the **first** competency (position = 1, i.e. `participant.status = 'in_attesa'`):
+   - On the **first** competency (`position = 0`, i.e. `participant.status = 'in_attesa'`):
      set `participant.started_at` via **direct property assignment** (NOT mass-assign,
      because `started_at` is NOT in `$fillable`): `$p->started_at = now(); $p->status = 'in_corso'; $p->save();`
    **FIX-8 rationale:** without a surrounding transaction, a failure between the two writes leaves
@@ -488,6 +525,81 @@ failure for manual cleanup. Do NOT suppress the original DB error.
 - GIVEN all competencies for the project have sessions with status ∈ {completed, timeout, skipped}
 - WHEN `POST /start` is called
 - THEN the response is HTTP 422 (no next competency available)
+
+---
+
+### Requirement: Competency sessions created in project_competencies.position order
+
+`POST /start` MUST select the lowest `position` value among project competencies
+that do not yet have a finalized `InterviewSession` for this participant. The order
+is fixed and deterministic. Selection order MUST NOT be affected by the `question_index`
+correction — `question_index` is a label persisted on the selected row, not an input
+to selection.
+
+#### Scenario: Third /start creates third-position competency
+
+- GIVEN a project with competencies [PRS@0, STG@1, INN@2]; sessions for positions 0
+  and 1 are finalized
+- WHEN `POST /start` is called
+- THEN the new session has `competency_code = 'INN'` and `question_index = 2`
+  (equal to `position`)
+  (Previously: described as `= position 3 - 1` against a 1-based `position` that
+  never existed.)
+
+#### Scenario: Delivery and read order is unchanged by the question_index correction
+
+- GIVEN a participant with 3 finalized sessions, ordered by `question_index` today
+- WHEN the same sessions are read after the corrected `question_index` values are
+  in place
+- THEN they are returned in the identical relative order — the correction is a
+  monotonic relabeling, not a reordering
+
+---
+
+### Requirement: question_index backfill recomputes from position and never shifts
+
+Any migration or maintenance process that corrects a persisted `question_index` MUST
+recompute the value from that session's competency's current
+`project_competencies.position` — joined by project and competency — and MUST NOT
+apply a uniform arithmetic shift (e.g. `+1`) to the existing column. A row whose
+`question_index` already equals its competency's `position` MUST be left
+byte-identical: no column on that row changes value, including timestamps. Running
+the process a second time MUST change nothing.
+
+#### Scenario: An already-correct row is left untouched
+
+- GIVEN an `InterviewSession` row whose `question_index` already equals its
+  competency's `project_competencies.position`
+- WHEN the backfill process runs
+- THEN every column on that row, including `updated_at`, is unchanged
+
+#### Scenario: An incorrect row is corrected to the current position
+
+- GIVEN an `InterviewSession` row whose `question_index` is `-1` for a competency
+  now at `position = 0`
+- WHEN the backfill process runs
+- THEN the row's `question_index` becomes `0`
+
+#### Scenario: Running the backfill twice changes nothing on the second run
+
+- GIVEN the backfill process has already run once against the full dataset
+- WHEN it is run again
+- THEN no row's `question_index` changes on the second run
+
+---
+
+### Requirement: Downstream question numbering derived from question_index starts at 1
+
+Any consumer that renders a 1-based question number from `question_index` (e.g. a
+transcript download) MUST render `1` for the first competency of a project, because
+`question_index = 0` for that competency after the correction. This is a consequence
+of the corrected value, not a new consumer-side rule.
+
+#### Scenario: Transcript download numbers the first competency as 1
+
+- GIVEN a participant whose first competency's session has `question_index = 0`
+- WHEN the transcript download renders that competency's question number
+- THEN it prints question `1`, never `0`
 
 ---
 
@@ -1355,8 +1467,16 @@ scenario in the POST /end requirement.
 ### Requirement: Session cost is derived from stored timings, not recorded
 
 The system MUST derive an avatar-provider cost estimate for a session from its
-`started_at`/`ended_at` duration and a configured per-provider rate, with the
-rates overridable by environment without a code change.
+RECORDED LIVE DURATION — the sum of every closed `interview_session_live_periods`
+row — and a configured per-provider rate, with the rates overridable by
+environment without a code change.
+(Previously: this requirement derived cost from the `started_at`/`ended_at`
+DURATION — the wall-clock span. That span may include an abandonment gap
+across a resume and is no longer read as a duration anywhere; see "Recorded
+duration is accumulated live time, not wall-clock span" below. Archive
+hygiene: this wording supersedes the archived spec's phrasing so it does not
+teach the span again — the exact "the comment outlived the defect" failure
+already paid for once on `question_index`.)
 
 The estimate MUST NOT be persisted on the session. Rates change, and a stored
 figure computed under an old rate becomes a number nobody can reproduce or
@@ -1374,19 +1494,17 @@ change, not a release.
 
 #### Scenario: Cost follows the configured rate
 
-- GIVEN a session of known duration and a configured provider rate
+- GIVEN a session with a known recorded live duration and a configured
+  provider rate
 - WHEN its review is read
-- THEN the returned estimate equals duration × rate for that provider
+- THEN the returned estimate equals that recorded live duration × rate for
+  that provider
 
 #### Scenario: An unfinished session has no cost estimate
 
-- GIVEN a session with no `ended_at`
+- GIVEN a session with no closed live period
 - WHEN its review is read
 - THEN the estimate is absent rather than computed from a partial duration
-
----
-
-## ADDED Requirements (avatar-provider-templates)
 
 ### Requirement: POST /start merges the organization's active avatar template into the provider payload
 
@@ -1616,3 +1734,141 @@ already made false; it now states the invariant instead of counting rows.)
 - GIVEN `interview.heygen.avatar_id` is unset or an empty string
 - WHEN the `/sessions/token` body is built
 - THEN the `avatar_id` key is ABSENT from the body — it is never sent as `""`
+
+### Requirement: A live session records when it became live, at both sites that grant it
+
+`POST /api/candidate/interview/start` MUST record when a session becomes
+live at BOTH sites where the base "POST /start" requirement's step 4 flips a
+session to `in_corso`: the plain issue-pending case, and the RESUME case (the
+"Resume existing in_corso session" scenario, which issues a fresh provider
+session for a row that already carries a prior live stretch). This is an
+addition to step 4's existing writes, not a change to the failure matrix,
+the RESUME token/teardown behavior, or any other write already specified
+there.
+
+#### Scenario: The plain issue-pending case records a start
+
+- GIVEN a session with no prior live stretch
+- WHEN `POST /start` succeeds and the session flips to `in_corso`
+- THEN that moment is recorded as part of the session's live time
+
+#### Scenario: A resume records a new stretch beginning, not a reset
+
+- GIVEN a session already carries a recorded live stretch from a prior
+  `in_corso` period
+- WHEN `POST /start` resumes it — issuing a fresh provider session per the
+  existing RESUME scenario — THEN the moment of the fresh `in_corso` is
+  recorded as the start of a NEW live stretch; the prior stretch's record is
+  preserved, not overwritten
+
+### Requirement: Recorded duration is accumulated live time, not wall-clock span
+
+A session's recorded duration MUST equal the sum of the time it spent live
+with a provider, across every stretch a resume may produce, and MUST NOT
+include any interval during which the session held no live provider
+session. Neither leaving the original stretch's boundary open (which would
+span an abandonment gap) nor discarding a completed stretch on resume
+(which would erase billed time) satisfies this requirement.
+
+The system CANNOT observe the exact moment an abandoned stretch's provider
+session stopped being live — no signal exists between the candidate's last
+activity and the next request the system receives, which may be hours
+later. A stretch that is still open when a resume or an error is detected
+MUST therefore close at the LESSER of the moment of detection and the
+provider's own contractual session ceiling (per-provider, or a lower value
+if the organization's active configuration set one for that provider) —
+never at raw detection time alone, which would record a span that could not
+physically have occurred as billed time. A stretch that closes normally,
+well inside that ceiling, MUST record its real observed duration
+unchanged — the ceiling is a bound on the pathological case, never a floor
+applied to an ordinary one.
+
+A stretch whose recorded length equals the provider ceiling is therefore a
+disclosed UPPER ESTIMATE of an abandoned interval, not a claim that the
+candidate was observed active for that whole span.
+
+#### Scenario: Two live stretches sum; the gap between them does not, and the abandoned stretch is capped at the provider's ceiling
+
+- GIVEN a session live for 4 minutes, then abandoned for 3 hours with no
+  live provider session, then resumed and live for 6 more minutes before
+  ending
+- WHEN the session's recorded duration is read
+- THEN it equals the resolved provider ceiling for the first (abandoned)
+  stretch plus 6 minutes for the second — never approximately 3 hours 10
+  minutes (the full gap counted at raw detection time), and never 6 minutes
+  (the first stretch discarded entirely)
+
+#### Scenario: A stretch closed well inside the provider ceiling records its real duration, uncapped
+
+- GIVEN a session live for 7 minutes, then ended normally through `/end`,
+  with the provider's ceiling far larger than 7 minutes
+- WHEN the session's recorded duration is read
+- THEN it equals exactly 7 minutes — the ceiling never inflates a stretch
+  that closed on its own before ever approaching it
+
+#### Scenario: An interval with no live provider session is never counted
+
+- GIVEN a session with a completed first stretch and a not-yet-started
+  second stretch (candidate has not resumed yet)
+- WHEN the recorded duration is read at that moment
+- THEN it equals exactly the first stretch's length — the elapsed gap since
+  it ended contributes nothing
+
+### Requirement: An absent recorded duration is never coerced to zero
+
+A session that never became live carries no recorded duration, and this
+absence MUST be observable as absent by every consumer — never rendered or
+computed as `0`. This mirrors the already-shipped rule that a participant's
+total elapsed time is absent, not zero, when no session contributes a
+duration (`admin-read-api` — "Participant Detail Summary Fields").
+
+#### Scenario: An unstarted session's duration is absent, not zero
+
+- GIVEN a session with `status = 'pending'` that never became live
+- WHEN any consumer (cost estimate, elapsed-time aggregation, session
+  review) reads its recorded duration
+- THEN the value is absent — never `0`
+
+### Requirement: Ordering by recorded start remains deterministic when the value is absent
+
+Any ordering of `InterviewSession` rows by their recorded start MUST remain
+deterministic even when some or all rows have no recorded start. Rows with
+an absent value MUST fall back to a stable secondary key — the row's own
+identifier — so repeated reads of the same data return the same order.
+
+#### Scenario: Sessions with no recorded start remain in a stable order
+
+- GIVEN two sessions that never became live, both with an absent recorded
+  start
+- WHEN they are ordered by recorded start
+- THEN their relative order is identical across repeated reads
+
+#### Scenario: A mix of recorded and absent starts orders deterministically
+
+- GIVEN three sessions — two with a recorded start, one absent
+- WHEN they are ordered by recorded start
+- THEN the result is fully deterministic across repeated reads, with the
+  absent-start row's position fixed by the identifier tiebreaker
+
+### Requirement: Test fixtures must not synthesize a start production would not write
+
+Any factory or fixture that builds an `InterviewSession` row MUST agree with
+the production write path: it MUST NOT default a recorded start for a
+`pending` (never-live) session, and MUST only supply one for a session
+whose fixture also reflects having gone live. A fixture-provided default
+MUST NOT be the reason a test asserting duration, cost, or ordering passes
+independently of the code path that actually records a start.
+
+#### Scenario: A factory-built pending session has no recorded start
+
+- GIVEN a test builds an `InterviewSession` via its factory in the default
+  `pending` state
+- WHEN the built row is inspected
+- THEN it carries no recorded start, matching production
+
+#### Scenario: A duration assertion cannot pass on the fixture default alone
+
+- GIVEN a test asserts a session's duration, cost, or start-ordering
+- WHEN that session was never taken through the `in_corso` transition
+- THEN the assertion cannot be satisfied by a fixture-injected start value;
+  it MUST exercise the transition that actually records one
