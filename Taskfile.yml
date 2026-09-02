@@ -17,6 +17,15 @@ tasks:
   up:
     desc: "Start local dev infra (postgres, redis, mailpit) in detached mode"
     cmds:
+      # Warned about, never blocked on. This machine keeps Docker's data on an
+      # external volume, so `up` is the moment you find out it is missing or
+      # nearly full — before Postgres is the thing that discovers it. Low disk
+      # is still a legitimate state to start in (the stack fits), so a failing
+      # check must not stand between you and your dev environment: it prints
+      # and gets out of the way. `task doctor:disk` is the same check when you
+      # want the exit code to mean something.
+      - cmd: bash "{{.ROOT_DIR}}/scripts/docker-disk-check.sh"
+        ignore_error: true
       # The service list is NOT redundant with the desc — it is what makes the
       # desc true. Bare `docker compose up -d` starts all EIGHT services in
       # docker-compose.yml, which means building beai-api:local,
@@ -40,6 +49,28 @@ tasks:
     desc: "Stop and remove local dev infra containers (volumes are preserved)"
     cmds:
       - docker compose -f "{{.COMPOSE_FILE}}" down
+
+  test:scripts:
+    desc: "Run the shell-script test suite (no Docker required)"
+    cmds:
+      # Plain bash, no bats: this repo had no shell harness, and adding a
+      # package-manager entry to test one 168-line script would cost more than
+      # it buys. The subject reads its config from a path under $HOME, which
+      # is what makes every branch reachable from a fixture without Docker
+      # installed, mounted or running.
+      - bash "{{.ROOT_DIR}}/scripts/tests/docker-disk-check.test.sh"
+
+  doctor:disk:
+    desc: "Check free space on the volume hosting Docker's data (exits non-zero when low or unmounted)"
+    cmds:
+      # Filesystem-only, so it answers even with the daemon down — which is the
+      # case it exists for. Raise the floor for a session that will do a lot of
+      # building: DOCKER_DISK_MIN_GB=40 task doctor:disk
+      #
+      # `--verbose` because this task IS the report: you ran it to be told the
+      # state, so the over-provisioning figure belongs here. The pre-`up` check
+      # deliberately omits it and stays silent while healthy.
+      - bash "{{.ROOT_DIR}}/scripts/docker-disk-check.sh" --verbose
 
   # ---------------------------------------------------------------------------
   # Submodule management
@@ -122,12 +153,24 @@ tasks:
   test:frontend:
     desc: "Run the frontend Vitest unit suite (host) + Playwright E2E (pinned container)"
     cmds:
+      # The SAME reason as the e2e:* tasks below: this pulls the pinned
+      # Playwright image, 3.45GB, on the volume the guard protects. These are
+      # the tasks a developer runs in the inner loop, so leaving them out
+      # guarded the path taken least.
+      - cmd: bash "{{.ROOT_DIR}}/scripts/docker-disk-check.sh"
+        ignore_error: true
       - (cd frontend && bun run test:unit)
       - bash "{{.ROOT_DIR}}/scripts/e2e-container.sh" frontend
 
   test:backoffice:
     desc: "Run the backoffice Vitest unit suite (host) + Playwright E2E (pinned container)"
     cmds:
+      # The SAME reason as the e2e:* tasks below: this pulls the pinned
+      # Playwright image, 3.45GB, on the volume the guard protects. These are
+      # the tasks a developer runs in the inner loop, so leaving them out
+      # guarded the path taken least.
+      - cmd: bash "{{.ROOT_DIR}}/scripts/docker-disk-check.sh"
+        ignore_error: true
       - (cd backoffice && bun run test:unit)
       - bash "{{.ROOT_DIR}}/scripts/e2e-container.sh" backoffice
 
@@ -136,16 +179,29 @@ tasks:
   e2e:frontend:
     desc: "Run frontend Playwright E2E in the pinned Playwright container (matches CI)"
     cmds:
+      # Checked HERE, not only before `up`. `up` starts three small infra
+      # containers; these tasks pull the pinned Playwright image, which is
+      # 3.45GB — the single largest write this repo asks of a volume the guard
+      # exists to protect. Warning before the cheap path and staying quiet
+      # before the expensive one had it backwards.
+      - cmd: bash "{{.ROOT_DIR}}/scripts/docker-disk-check.sh"
+        ignore_error: true
       - bash "{{.ROOT_DIR}}/scripts/e2e-container.sh" frontend
 
   e2e:backoffice:
     desc: "Run backoffice Playwright E2E in the pinned Playwright container (matches CI)"
     cmds:
+      # Same reason as e2e:frontend — this is where the 3.45GB image lands.
+      - cmd: bash "{{.ROOT_DIR}}/scripts/docker-disk-check.sh"
+        ignore_error: true
       - bash "{{.ROOT_DIR}}/scripts/e2e-container.sh" backoffice
 
   e2e:update:
     desc: "Regenerate ALL Playwright screenshot baselines (both apps) in the pinned container"
     cmds:
+      # Both apps in the pinned image, so the same volume cost applies twice.
+      - cmd: bash "{{.ROOT_DIR}}/scripts/docker-disk-check.sh"
+        ignore_error: true
       - bash "{{.ROOT_DIR}}/scripts/e2e-container.sh" frontend --update-snapshots
       - bash "{{.ROOT_DIR}}/scripts/e2e-container.sh" backoffice --update-snapshots
 

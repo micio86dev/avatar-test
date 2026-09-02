@@ -64,7 +64,7 @@ and a reference for the port, not the final architecture.
 | Object storage | S3-compatible (audio, snapshots, transcripts) |
 | Auth | **JWT (`tymon/jwt-auth`)** — NOT Sanctum. Bearer JWT for the backoffice user auth; short-lived JWT for the candidate magic-link; JWT/API-key for external M2M. **RBAC via `spatie/laravel-permission`** (org-scoped, teams mode) |
 | Tests | **Pest** (api) + **Vitest / Vue Test Utils** (frontend & backoffice) + **Playwright E2E** (both Nuxt apps) |
-| Repos | **Wrapper superproject with 3 git submodules**: `api`, `frontend`, `backoffice`. This repo IS the wrapper (holds `docs/`, `openspec/` SDD, `CLAUDE.md`, docker-compose, submodule pointers). Astro demo lives in `legacy-demo/` (reference, removed once ported). |
+| Repos | **Wrapper superproject with 3 git submodules**: `api`, `frontend`, `backoffice`. This repo IS the wrapper (holds `docs/`, `openspec/` SDD, this file, docker-compose, submodule pointers). `AGENTS.md` is a **symlink** to this file, not a copy: it was a copy, it drifted 103 lines, and the review gate reads `AGENTS.md` — so six rounds of review judged the code against a month-old snapshot that still said BEAI holds no candidate contact data and that white-label was parked, both of which this file had already reversed. Astro demo lives in `legacy-demo/` (reference, removed once ported). |
 
 **API contract:** Scramble publishes `openapi.json`; `frontend` and `backoffice` each
 **generate a typed TS client from it** (e.g. openapi-typescript). Keeps the 3 repos in
@@ -86,7 +86,9 @@ clone/CI with `--recursive`. Keep a wrapper script/Taskfile to sync submodule po
 
 **Containers & runtime:** **Docker everywhere** — local and Railway. Multi-stage
 Dockerfiles per app (`api`, `frontend`, `backoffice`); `docker-compose` for local dev
-(PostgreSQL 17 + pgvector, Redis 8, Mailpit + the 3 apps); Railway builds **via Docker** so the local image
+(PostgreSQL 17 + pgvector, Redis 8, Mailpit, the 3 apps, plus the `worker` and
+`scheduler` that run Laravel's native `queue:work`/`schedule:work` — 8 services,
+the count `CI_EXPECTED_COMPOSE_SERVICES` asserts); Railway builds **via Docker** so the local image
 equals prod. **Bun (hybrid):** Bun for install/dev/**build** of both Nuxt apps (and the
 backoffice SPA static runtime); **Node** for the frontend **SSR production runtime**
 (Nitro `node-server`) and for the **Playwright/Vitest** runners (officially Node-targeted).
@@ -117,9 +119,10 @@ unmet platform requirement) — or a required tool is missing:
   A blocked dependency is an open question, not an implementation choice.
 
 **Required local toolchain** (versions per D25; documented in `docs/dev-setup.md`):
-PHP 8.5 + PCOV + `pdo_pgsql`, Composer 2.4+, Bun 1.3, Node 24 LTS, Docker +
+PHP 8.5 + PCOV + `pdo_pgsql`, Composer 2.4+, Bun 1.4, Node 24 LTS, Docker +
 Docker Compose v2, Playwright browsers (Chromium + WebKit, `--with-deps`),
-go-task, git; k6 for local load tests only. A missing required tool triggers the
+go-task, git, `shellcheck` and `dash` (the shell lint gates); k6 for local load
+tests only. A missing required tool triggers the
 Dependency Resolution Policy above.
 
 **Package manager: Bun only.** Bun is the sole package manager for both Nuxt apps
@@ -149,7 +152,17 @@ owning slices (C2+), **not C1**. Do not install or wire any of them during C1.
 - **Assessment types (mutually exclusive):** `standard` (readiness, role competencies,
   adaptive questions) and `potential` (only MTG/LAT, 4 fixed questions + AI follow-ups).
   Type is **immutable** after go-live.
-- **BARS scoring:** each competency has **N indicators**; each indicator carries
+- **BARS scoring:** each competency has **exactly 3 indicators** — ratified in
+  `openspec/specs/framework-catalog/spec.md` ("MUST have exactly 3 indicators", with
+  per-role row counts: ICO 45 = 15×3, FLL/MLL/SRX 54 = 18×3) and enforced by CI.
+  This line said **N** while the spec, the gate and the data all said 3 — the same
+  two-documents-one-truth drift that made `AGENTS.md` a symlink. Widening it is a
+  spec change first, never a guard edit.
+  **Two counts, kept distinct:** there are **83** role×competency pairs
+  (15+18+18+14+18), which is what CI governs, and **85** anchored competencies in
+  `bars/` — the 83 plus MTG and LAT, which belong to the `potential` type and to no
+  role. Do not collapse them into one number.
+  Each indicator carries
   reference anchors `{5, 3, 1}`. The LLM scores each indicator on the **discrete set
   {1,2,3,4,5,-1}**. Scores `4` and `2` are **residual levels**, legal only when the
   evidence matches neither bounding anchor (AD-1 relational rubric); a genuine tie

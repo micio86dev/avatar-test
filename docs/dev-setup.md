@@ -13,17 +13,28 @@ All versions are pinned per the Version Catalog (design.md D25) and must match e
 
 ## Required Toolchain
 
+`shellcheck` and `dash` became load-bearing when the guard library got its own
+lint step, and they were listed nowhere for a while — two tools the pipeline
+hard-fails without, riding on an assumed `ubuntu-latest` preinstall. They run
+locally too, via `task test:scripts`, so they belong here rather than in CI
+alone. Unpinned deliberately: neither has a version this repo depends on, and
+pinning a linter to a patch only invents a dependency the Resolution Policy
+would then have to stop for.
+
+
 | Tool | Required version | Notes |
 |------|-----------------|-------|
 | PHP | **8.5.x** (8.5.8 target) | Must include `pdo_pgsql` and PCOV extensions |
 | Composer | **2.4+** | Includes `composer audit` built-in |
-| Bun | **1.3.x** | Sole package manager for both Nuxt apps |
+| Bun | **1.4.x** | Sole package manager for both Nuxt apps |
 | Node | **24 LTS** | SSR runtime + Vitest + Playwright runners |
 | Docker | **≥ 29.x** | Docker Engine |
 | Docker Compose | **v2** (`docker compose`, no hyphen) | Minimum v2.24 |
 | go-task | **3.x** | Task runner (`brew install go-task`) |
 | git | any recent | Must support `--recursive` submodule clone |
 | Playwright browsers | **Chromium + WebKit** | Install with `--with-deps` flag |
+| shellcheck | any recent | Lints `scripts/*.sh`; CI hard-fails without it (`brew install shellcheck`) |
+| dash | any recent | Proves `scripts/ci-guards.sh` is really POSIX sh, not bash (`brew install dash`) |
 | k6 | any recent | Local load tests only; never CI on PRs |
 
 ### Host resources (not optional)
@@ -65,6 +76,42 @@ reuses the images already on the machine. Know what that costs: those images
 serve whatever code they were built from, which for a stale image is not the
 working tree.
 
+### Disk, when Docker's data lives on another volume
+
+Docker Desktop lets you move its `DataFolder` off the internal disk, and the
+`DataFolder` key **is** in `settings-store.json` — unlike the memory setting
+above, this one is readable, which is what makes the check below possible.
+
+Relocating it introduces a failure mode the default setup does not have.
+`Docker.raw` is a sparse file provisioned at a virtual size fixed when Docker
+was installed, and that size can exceed the volume now hosting it. Docker sizes
+its internal filesystem against the virtual figure, so it keeps allocating past
+what the host volume can actually deliver. The result is not a slowdown; it is
+an `ENOSPC` in the middle of a write, with `beai_postgres_data` inside that
+file.
+
+```bash
+task doctor:disk                      # report free space and provisioning
+DOCKER_DISK_MIN_GB=40 task doctor:disk # raise the floor (default 20 GB)
+```
+
+It reads the `DataFolder` from Docker Desktop's own settings rather than a
+hardcoded path, and makes **no daemon calls** — so it answers in the situation
+it exists for, when the volume is not mounted and Docker cannot answer anything
+at all. It exits non-zero when space is below the floor or the folder is
+missing, and exits 0 silently on a machine with no relocated folder (Linux, CI,
+colima), which is why it is safe to wire into shared tasks.
+
+`task up` and the `e2e:*` tasks run it automatically and **never block on it**:
+low disk is a legitimate state to work in. The `e2e:*` tasks matter most here —
+they pull the pinned Playwright image, 3.45 GB, the largest single write this
+repo asks of that volume.
+
+**Do not reach for `docker system prune` to make room.** Re-pulling the evicted
+layers is bounded by the external volume's write throughput, which can be an
+order of magnitude below the internal disk's, and the Playwright image alone is
+3.45 GB. Free space by other means and prune deliberately, not reflexively.
+
 ---
 
 ## Installation Guide
@@ -89,10 +136,10 @@ brew install node@24
 brew link node@24 --force --overwrite
 node -v  # v24.x.x
 
-# Bun 1.3
+# Bun 1.4
 curl -fsSL https://bun.sh/install | bash
 # Or: brew install bun
-bun -v  # 1.3.x
+bun -v  # 1.4.x
 
 # Docker Desktop (includes Compose v2)
 # Download from https://www.docker.com/products/docker-desktop/

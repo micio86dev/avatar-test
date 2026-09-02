@@ -366,13 +366,25 @@ compose_declared_images() {
 CI_VERSION_CATALOG_AWK_SCRIPT='
   /^## Docker base images/ { insection = 1; next }
   insection && /^## / { exit }
-  insection {
-    if (match($0, /`[^`]+`/)) {
-      print substr($0, RSTART + 1, RLENGTH - 2)
+  insection && /^\|/ {
+    if ($0 ~ /^\|[[:space:]]*-/) { next }
+    if (split($0, cell, "|") >= 4 && match(cell[3], /`[^`]+`/)) {
+      print substr(cell[3], RSTART + 1, RLENGTH - 2)
     }
   }
 '
 
+# Reads the Tag COLUMN of table ROWS, not the first backticked token on any
+# line of the section — which is what it used to do, and what broke it. A
+# paragraph added between the table and the next heading mentioning
+# `docs/version-catalog.md` was returned as an image tag, and step (h) then
+# reported three images that exist nowhere. The section is prose plus a table;
+# only the table names images, so only the table is read.
+#
+# The header separator row (|---|---|) is skipped by its leading dash, and the
+# Image column is deliberately not read: a name in backticks there must never
+# be mistaken for the tag beside it.
+#
 # Fails closed: a missing file returns 1 with nothing printed. A file that
 # exists but no longer has a "Docker base images" table returns 0 with
 # EMPTY output — the caller in step (h) treats a zero-row result as a
@@ -385,6 +397,248 @@ version_catalog_images() {
     return 1
   fi
   awk "$CI_VERSION_CATALOG_AWK_SCRIPT" "$1"
+}
+
+# Image refs a shell SCRIPT pins for `docker run` — invisible to both a
+# Dockerfile `FROM` and a compose `image:`.
+#
+# Step (h) defined "reality" as three Dockerfiles plus `docker compose config`,
+# which is narrower than the set of image tags this repo actually pins:
+# scripts/e2e-container.sh pulls the 3.45GB Playwright image itself. That pin
+# was therefore invisible in BOTH directions — it could never be reported as
+# uncataloged, and cataloging it fired the stale-row check instead. A guard
+# whose notion of "used" is narrower than the set of pins reports the honest
+# answer as a defect.
+#
+# Matched by CONVENTION, not by shape: the ref must be assigned to a variable
+# named IMAGE. Recognising "things that look like an image ref" in arbitrary
+# shell matches a URL eventually, and this file's whole thesis is that a guard
+# which fires on the wrong thing gets disabled.
+script_pinned_images() {
+  if [ ! -d "$1" ]; then
+    echo "ci-guards: $1 is not a directory." >&2
+    return 1
+  fi
+  find "$1" -type f -name '*.sh' -exec grep -h -E '^[[:space:]]*IMAGE=' {} + 2>/dev/null |
+    sed -E 's/^[[:space:]]*IMAGE=["]?([^"[:space:]]+)["]?.*$/\1/' |
+    grep -v '^$' |
+    sort -u
+}
+
+# The Bun the WRAPPER installs against the Bun the APPS are built with.
+#
+# Prints one line per disagreeing Dockerfile, empty when they agree. Exits 1
+# only when the workflow carries no bun-version at all — a guard that cannot
+# find its own subject has failed to run, and must not read as agreement.
+#
+# This is the drift the `Set up Bun` comment says that pin exists to prevent,
+# and nothing checked it: step (h) reads Dockerfile FROM bases and compose
+# image refs, and `bun-version:` is neither. The comment above that pin has now
+# outlived its fact twice, which is what an unguarded claim does.
+#
+# Each file is read for whichever form it uses to pin Bun: `FROM oven/bun:X`
+# in a Dockerfile, `bash -s bun-vX` where a script runs the official installer.
+# scripts/e2e-container.sh was the third copy of this version and the only one
+# no gate touched, which is exactly how it kept a stale pin.
+#
+# The catalog is deliberately NOT a fourth comparison here. Step (h) already
+# compares docs/version-catalog.md against Dockerfile FROM bases in BOTH
+# directions, so catalog == Dockerfile is gated there; this gates
+# workflow == Dockerfile and installer == Dockerfile. The chain closes, and a
+# redundant guard over the same fact is one more thing to drift.
+bun_version_divergence() {
+  CI_BVD_WF="$1"
+  shift
+  CI_BVD_WANT=$(grep -E '^[[:space:]]*bun-version:' "$CI_BVD_WF" 2>/dev/null |
+    head -1 |
+    sed -E "s/.*bun-version:[[:space:]]*['\"]?([^'\"[:space:]]+).*/\1/")
+  if [ -z "$CI_BVD_WANT" ]; then
+    echo "ci-guards: no bun-version found in $CI_BVD_WF." >&2
+    return 1
+  fi
+  CI_BVD_UNREADABLE=0
+  for CI_BVD_DF in "$@"; do
+    # A file that is not there is NOT a file that agrees. Renaming or moving any
+    # one of the four live subjects used to make this gate go green having
+    # compared nothing — the green-over-no-evidence shape `compose_image_refs_present`
+    # and step (e) both refuse by name. "Declares no Bun stage" and "does not
+    # exist" are different answers and only the first is silence.
+    if [ ! -f "$CI_BVD_DF" ]; then
+      echo "ci-guards: bun_version_divergence: $CI_BVD_DF does not exist." >&2
+      CI_BVD_UNREADABLE=1
+      continue
+    fi
+    CI_BVD_GOT=$(grep -E '^FROM oven/bun:' "$CI_BVD_DF" 2>/dev/null |
+      head -1 |
+      sed -E 's|^FROM oven/bun:([^ ]+).*|\1|')
+    if [ -z "$CI_BVD_GOT" ]; then
+      CI_BVD_GOT=$(grep -oE 'bash -s bun-v[0-9][^"'"'"' ]*' "$CI_BVD_DF" 2>/dev/null |
+        head -1 |
+        sed -E 's|^bash -s bun-v||')
+    fi
+    [ -n "$CI_BVD_GOT" ] || continue
+    [ "$CI_BVD_GOT" = "$CI_BVD_WANT" ] ||
+      echo "$CI_BVD_DF pins Bun $CI_BVD_GOT but the workflow installs bun-version $CI_BVD_WANT"
+  done
+  [ "$CI_BVD_UNREADABLE" -eq 0 ]
+}
+
+# The Bun version the PROSE documents claim, against the one actually pinned.
+#
+# `bun_version_divergence` covers workflow, both Dockerfiles and the installer
+# script; step (h) covers the catalog against Dockerfile FROM bases. That left
+# CLAUDE.md's toolchain line and docs/dev-setup.md — the two documents a human
+# reads FIRST — in no verification chain at all. They are where the last stale
+# Bun version was found, and finding it needed a human reading the file.
+#
+# Prefix comparison, not equality: prose legitimately says "Bun 1.4" or "1.4.x"
+# where the pin says "1.4.0". A doc claiming 1.3 against a 1.4.0 pin still
+# fails, which is the case that matters.
+#
+# Exits 1 when a document names no Bun version at all — a guard that cannot
+# find its subject has failed to run, and must not read as agreement.
+bun_doc_divergence() {
+  CI_BDD_WANT="$1"
+  shift
+  CI_BDD_UNREADABLE=0
+  for CI_BDD_DOC in "$@"; do
+    CI_BDD_FOUND=$(grep -oE 'Bun[^0-9]{0,8}[0-9]+\.[0-9]+(\.[0-9x]+)?' "$CI_BDD_DOC" 2>/dev/null |
+      sed -E 's/^Bun[^0-9]*//' |
+      sort -u)
+    # Accumulated, not returned from inside the loop. Returning here named the
+    # first bad document and left every later one unexamined — so a stale
+    # docs/dev-setup.md could hide behind an unreadable CLAUDE.md.
+    if [ -z "$CI_BDD_FOUND" ]; then
+      echo "ci-guards: no Bun version found in $CI_BDD_DOC." >&2
+      CI_BDD_UNREADABLE=1
+      continue
+    fi
+    for CI_BDD_V in $CI_BDD_FOUND; do
+      CI_BDD_BASE=$(printf '%s' "$CI_BDD_V" | sed -E 's/\.x$//')
+      case "$CI_BDD_WANT" in
+        "$CI_BDD_BASE" | "$CI_BDD_BASE".*) ;;
+        *) echo "$CI_BDD_DOC documents Bun $CI_BDD_V but the pinned version is $CI_BDD_WANT" ;;
+      esac
+    done
+  done
+  [ "$CI_BDD_UNREADABLE" -eq 0 ]
+}
+
+# bars/ files that name neither a declared role nor a declared non-role
+# catalogue. Prints one basename per offender; empty means clean.
+#
+# Every completeness check in this repo runs ONE direction: roles.json declares
+# a role, does bars/<ROLE>.json exist. Nothing ran the mirror, so any .json
+# dropped into bars/ was silently promoted to a role — measured against the
+# leader anchor ceiling, shape-checked for 3 indicators, made a peer in
+# cross-role duplicate detection — while getting zero pair coverage, zero
+# locale-gap tracking and zero role-level accounting.
+#
+# POTENTIAL.json is the real case and the reason this exists: `potential` is an
+# ASSESSMENT TYPE, not a role. It carries MTG and LAT, which no role declares,
+# so its two competencies sit outside the 83 role x competency pairs the rest
+# of the catalogue governs. That is legitimate and it is why the exception is
+# DECLARED here by name rather than inferred from a filename. A file nobody
+# listed is a file nobody decided on.
+# Overridable like CI_KNOWN_GAPS_FILE and CI_COMPETENCY_GAPS_FILE, so a
+# self-test can prove the mechanism against a fixture instead of the
+# committed list. Declared HERE, beside its guard, which is where every
+# other constant in this file lives (CI_EXPECTED_COMPOSE_SERVICES, the
+# gap-file paths, the awk and Bun scripts) — there is no top-of-file
+# cluster to join.
+CI_NON_ROLE_BARS_FILES="${CI_NON_ROLE_BARS_FILES:-POTENTIAL}"
+
+bars_files_without_declared_role() {
+  CI_BFDR_TREE="$1"
+  if [ ! -d "$CI_BFDR_TREE/bars" ]; then
+    echo "ci-guards: $CI_BFDR_TREE/bars is not a directory." >&2
+    return 1
+  fi
+  if ! CI_BFDR_ROLES=$(role_keys "$CI_BFDR_TREE/roles.json"); then
+    echo "ci-guards: bars_files_without_declared_role: could not read roles from $CI_BFDR_TREE." >&2
+    return 1
+  fi
+  for CI_BFDR_FILE in "$CI_BFDR_TREE"/bars/*.json; do
+    [ -e "$CI_BFDR_FILE" ] || continue
+    CI_BFDR_NAME=$(basename "$CI_BFDR_FILE" .json)
+    if printf '%s\n' "$CI_BFDR_ROLES" | grep -qxF "$CI_BFDR_NAME"; then
+      continue
+    fi
+    case " $CI_NON_ROLE_BARS_FILES " in
+      *" $CI_BFDR_NAME "*) continue ;;
+    esac
+    printf '%s\n' "$CI_BFDR_NAME"
+  done
+}
+
+# Locale completeness for the NON-ROLE bars files.
+#
+# Declaring POTENTIAL.json in CI_NON_ROLE_BARS_FILES stops the mirror guard
+# firing. It does NOT give the file coverage, and treating the declaration as
+# the fix would be the same "documented, therefore handled" move this file
+# rejects everywhere else. Every locale and pair guard is keyed on
+# role_competency_pairs, and MTG and LAT are in no role, so nothing checked
+# whether their Italian exists. They are complete today. Clean today is not the
+# same thing as checked.
+#
+# Emits LOCALE:FILE:COMPETENCY per incomplete competency; empty means clean.
+# shellcheck disable=SC2016
+CI_NON_ROLE_LOCALE_SCRIPT='
+  const tree = process.env.CI_TREE;
+  const file = process.env.CI_NRB_FILE;
+  const locale = process.env.CI_NRB_LOCALE;
+  const path = `${tree}/bars/${file}.json`;
+
+  let bars;
+  try {
+    bars = JSON.parse(await Bun.file(path).text());
+  } catch (e) {
+    console.error(`ci-guards: cannot read ${path}: ${e.message}`);
+    process.exit(1);
+  }
+  if (bars === null || typeof bars !== "object" || Array.isArray(bars)) {
+    console.error(`ci-guards: ${path} is not a JSON object.`);
+    process.exit(1);
+  }
+
+  const out = [];
+  for (const comp of Object.keys(bars)) {
+    const entries = bars[comp];
+    if (!Array.isArray(entries) || entries.length === 0) {
+      out.push(`${locale}:${file}:${comp}`);
+      continue;
+    }
+    let complete = true;
+    for (const entry of entries) {
+      if (entry === null || typeof entry !== "object") { complete = false; break; }
+      const values = [entry.indicator, entry.scale?.["5"], entry.scale?.["3"], entry.scale?.["1"]];
+      for (const v of values) {
+        if (v === null || typeof v !== "object" || Array.isArray(v)) { complete = false; break; }
+        const t = v[locale];
+        if (typeof t !== "string" || t.trim() === "") { complete = false; break; }
+      }
+      if (!complete) break;
+    }
+    if (!complete) out.push(`${locale}:${file}:${comp}`);
+  }
+  if (out.length > 0) console.log(out.join("\n"));
+'
+
+non_role_bars_locale_gaps() {
+  CI_NRBLG_TREE="$1"
+  CI_NRBLG_LOCALE="$2"
+  if [ ! -d "$CI_NRBLG_TREE/bars" ]; then
+    echo "ci-guards: $CI_NRBLG_TREE/bars is not a directory." >&2
+    return 1
+  fi
+  for CI_NRBLG_FILE in $CI_NON_ROLE_BARS_FILES; do
+    [ -f "$CI_NRBLG_TREE/bars/$CI_NRBLG_FILE.json" ] || {
+      echo "ci-guards: non_role_bars_locale_gaps: $CI_NRBLG_TREE/bars/$CI_NRBLG_FILE.json is declared in CI_NON_ROLE_BARS_FILES but does not exist." >&2
+      return 1
+    }
+    CI_TREE="$CI_NRBLG_TREE" CI_NRB_FILE="$CI_NRBLG_FILE" CI_NRB_LOCALE="$CI_NRBLG_LOCALE" \
+      bun --eval "$CI_NON_ROLE_LOCALE_SCRIPT" || return 1
+  done
 }
 
 # Lines in set $1 (newline-separated) absent, byte-for-byte, from set $2.
@@ -1272,8 +1526,28 @@ stale_competency_gap_exemption_reason() {
   CI_SCGER_ROLE=${CI_SCGER_PAIR%%:*}
   CI_SCGER_COMP=${CI_SCGER_PAIR#*:}
 
+  # Read roles.json ONCE, up front, and refuse to answer if it cannot be read.
+  #
+  # Both branches below used to run `role_competency_pairs ... 2>/dev/null |
+  # grep -qxF`, where an unparseable roles.json is indistinguishable from "the
+  # pair is not declared". The function then printed `orphaned` with total
+  # confidence and step (d) told the operator to delete an exemption because
+  # "roles.json no longer assigns that competency" — about a file that was
+  # never parsed. An instruction to delete a CORRECT exemption, generated from
+  # nothing. Its own sibling catalog_stale_competency_gap_exemptions already
+  # captures the status explicitly; the two disagreed about the same fact.
+  if ! CI_SCGER_PAIRS=$(role_competency_pairs "$CI_SCGER_TREE"); then
+    echo "ci-guards: stale_competency_gap_exemption_reason: could not read role/competency pairs from $CI_SCGER_TREE." >&2
+    return 2
+  fi
+
   if [ -f "$CI_SCGER_TREE/bars/$CI_SCGER_ROLE.json" ]; then
-    CI_SCGER_COVERED=$(bars_competency_keys "$CI_SCGER_TREE" "$CI_SCGER_ROLE" 2>/dev/null)
+    # Status kept, stderr kept: a malformed-but-present bars file used to yield
+    # an empty coverage list, which reads as "not anchored" — silently.
+    if ! CI_SCGER_COVERED=$(bars_competency_keys "$CI_SCGER_TREE" "$CI_SCGER_ROLE"); then
+      echo "ci-guards: stale_competency_gap_exemption_reason: could not read $CI_SCGER_TREE/bars/$CI_SCGER_ROLE.json." >&2
+      return 2
+    fi
     if printf '%s\n' "$CI_SCGER_COVERED" | grep -qxF "$CI_SCGER_COMP"; then
       echo "anchored"
       return 0
@@ -1284,14 +1558,14 @@ stale_competency_gap_exemption_reason() {
     # unconditionally here broke the contract three lines up ("prints nothing
     # when the pair is not actually stale") and would have told an operator to
     # delete an exemption that is doing its job.
-    if role_competency_pairs "$CI_SCGER_TREE" 2>/dev/null | grep -qxF "$CI_SCGER_PAIR"; then
+    if printf '%s\n' "$CI_SCGER_PAIRS" | grep -qxF "$CI_SCGER_PAIR"; then
       return 1
     fi
     echo "orphaned"
     return 0
   fi
 
-  if role_competency_pairs "$CI_SCGER_TREE" 2>/dev/null | grep -qxF "$CI_SCGER_PAIR"; then
+  if printf '%s\n' "$CI_SCGER_PAIRS" | grep -qxF "$CI_SCGER_PAIR"; then
     echo "role-level"
     return 0
   fi
@@ -1318,7 +1592,11 @@ stale_competency_gap_exemption_reason() {
 # ---------------------------------------------------------------------------
 competency_gaps_role_order_violations() {
   CI_CGRO_FILE=$(mktemp)
-  known_gap_pairs > "$CI_CGRO_FILE"
+  if ! known_gap_pairs > "$CI_CGRO_FILE"; then
+    echo "ci-guards: competency_gaps_role_order_violations: could not read the competency-gaps control file." >&2
+    rm -f "$CI_CGRO_FILE"
+    return 1
+  fi
 
   CI_CGRO_SEEN=""
   CI_CGRO_LAST=""
@@ -1357,7 +1635,12 @@ competency_gaps_role_order_violations() {
 # the scoring-engine's own per-competency hard-fail uses, and the same rule
 # the seeder's `resolveOrRecordTranslationGap` applies to the DB-side gap.
 #
-# Skips (silently) any role with no bars file at all — role-level absence is
+# NOTE: this paragraph described the OLD behaviour and is corrected below.
+# The function now HARD-FAILS on a bars file that exists but does not parse
+# (see the inline comment in the script), because "no bars file" and "bars file
+# corrupt" are different answers and the stale check downstream turned the
+# second one into an instruction to delete correct exemptions. It still skips
+# (silently) any role with no bars file at all — role-level absence is
 # `catalog_missing_bars`'s business — and any role that fails to parse,
 # per the "a guard that cannot read its subject must never pass it" rule;
 # such a role's pairs are simply absent from the output, which the CALLER
@@ -1384,13 +1667,31 @@ CI_LOCALE_COVERAGE_SCRIPT='
 
   for (const role of Object.keys(roles)) {
     const comps = Array.isArray(roles[role]?.competencies) ? roles[role].competencies : [];
+    // "No bars file" and "bars file present but unreadable" are DIFFERENT
+    // answers and used to share one branch. The consequence was not
+    // theoretical: catalog_stale_locale_gap_exemptions reports every listed
+    // entry this function does not re-emit, so a corrupt bars/FLL.json made CI
+    // print, for every tracked pair of that role, "is now fully translated,
+    // delete the entry". An instruction to delete CORRECT exemptions,
+    // generated from a file that was never parsed. A wrong diagnosis costs
+    // more than a missing one.
+    //
+    // No apostrophes in this block on purpose: the whole script is a
+    // single-quoted shell string, and one contraction here terminated it.
+    const barsPath = `${tree}/bars/${role}.json`;
+    const barsFile = Bun.file(barsPath);
+    if (!(await barsFile.exists())) continue; // the role-level gate owns this case
     let bars;
     try {
-      bars = JSON.parse(await Bun.file(`${tree}/bars/${role}.json`).text());
-    } catch {
-      continue; // no bars file at all — role-level gate is responsible, not this one
+      bars = JSON.parse(await barsFile.text());
+    } catch (e) {
+      console.error(`ci-guards: catalog_locale_coverage: ${barsPath} exists but could not be parsed: ${e.message}`);
+      process.exit(1);
     }
-    if (bars === null || typeof bars !== "object" || Array.isArray(bars)) continue;
+    if (bars === null || typeof bars !== "object" || Array.isArray(bars)) {
+      console.error(`ci-guards: catalog_locale_coverage: ${barsPath} is not a JSON object.`);
+      process.exit(1);
+    }
 
     for (const comp of comps) {
       const entries = bars[comp];
@@ -1485,8 +1786,31 @@ catalog_stale_locale_gap_exemptions() {
 # Prints `LOCALE:ROLE:LISTED/FULL` for every violating (locale, role).
 locale_gaps_whole_role_violations() {
   CI_LGWR_TREE="$1"
+
+  # Read the tree ONCE, up front, and refuse to continue if it cannot be read.
+  #
+  # This used to call `role_competency_pairs ... | grep -c` inside the loop with
+  # `|| true`. On a malformed roles.json the pipeline printed 0, `|| true`
+  # swallowed the status, FULL became 0 with LISTED non-zero, and the guard
+  # reported `it:ICO:15/0` — so CI announced "no role may ship half-translated"
+  # about a file it had never parsed. A wrong diagnosis is worse than a missing
+  # one: it sends someone to fix the control file instead of the broken JSON.
+  #
+  # Reading before the loop also matters mechanically: the loop body runs in a
+  # subshell behind a pipe, so a `return` inside it could never reach the
+  # caller — which is why the workflow's `else` branch for this function was
+  # unreachable, as its own comment admitted. Documenting a hole does not close
+  # it.
+  if ! CI_LGWR_PAIRS=$(role_competency_pairs "$CI_LGWR_TREE"); then
+    echo "ci-guards: locale_gaps_whole_role_violations: could not read role/competency pairs from $CI_LGWR_TREE." >&2
+    return 1
+  fi
   CI_LGWR_FILE=$(mktemp)
-  known_locale_gap_pairs > "$CI_LGWR_FILE"
+  if ! known_locale_gap_pairs > "$CI_LGWR_FILE"; then
+    echo "ci-guards: locale_gaps_whole_role_violations: could not read the locale-gaps control file." >&2
+    rm -f "$CI_LGWR_FILE"
+    return 1
+  fi
 
   CI_LGWR_COMBOS=$(cut -d: -f1,2 "$CI_LGWR_FILE" | sort -u)
   printf '%s\n' "$CI_LGWR_COMBOS" | while IFS= read -r CI_LGWR_COMBO; do
@@ -1497,7 +1821,7 @@ locale_gaps_whole_role_violations() {
     # matches — `|| true` keeps that from aborting a caller running under
     # `set -e`, the exact trap this repo's own guards keep tripping on.
     CI_LGWR_LISTED=$(grep -c "^${CI_LGWR_LOCALE}:${CI_LGWR_ROLE}:" "$CI_LGWR_FILE" || true)
-    CI_LGWR_FULL=$(role_competency_pairs "$CI_LGWR_TREE" | grep -c "^${CI_LGWR_ROLE}:" || true)
+    CI_LGWR_FULL=$(printf '%s\n' "$CI_LGWR_PAIRS" | grep -c "^${CI_LGWR_ROLE}:" || true)
     if [ "$CI_LGWR_LISTED" -ne 0 ] && [ "$CI_LGWR_LISTED" -ne "$CI_LGWR_FULL" ]; then
       printf '%s:%s:%s/%s\n' "$CI_LGWR_LOCALE" "$CI_LGWR_ROLE" "$CI_LGWR_LISTED" "$CI_LGWR_FULL"
     fi
@@ -1514,7 +1838,14 @@ locale_gaps_whole_role_violations() {
 # sibling.
 locale_gaps_role_order_violations() {
   CI_LGRO_FILE=$(mktemp)
-  known_locale_gap_pairs > "$CI_LGRO_FILE"
+  # Guarded for the same reason as its sibling above: an unreadable control
+  # file produced an empty list, and an empty list reads as "no interleaving"
+  # — a pass generated from nothing.
+  if ! known_locale_gap_pairs > "$CI_LGRO_FILE"; then
+    echo "ci-guards: locale_gaps_role_order_violations: could not read the locale-gaps control file." >&2
+    rm -f "$CI_LGRO_FILE"
+    return 1
+  fi
 
   CI_LGRO_SEEN=""
   CI_LGRO_LAST=""
@@ -1538,12 +1869,12 @@ locale_gaps_role_order_violations() {
 
 # ---------------------------------------------------------------------------
 # roles.json / competencies.json locale-map shape (framework-catalog-it-
-# translations design D2, row 8). NEW. 46 strings (5 roles × {name,
+# translations design D2, row 8). NEW. 50 strings (5 roles × {name,
 # responsibilities} + 18 competencies × {name, definition}) that NOTHING
 # ELSE reads: `role_keys`/`role_competency_pairs` read only `code` and
 # `competencies`, never `name`/`responsibilities` (see D2 row 2's own "never
 # read" note); `catalog_malformed_bars_entries` reads bars files only.
-# Without this guard, these 46 strings would carry the new locale dimension
+# Without this guard, these 50 strings would carry the new locale dimension
 # under ZERO content guards — Decision 1's failure mode.
 #
 # Prints `COMPETENCIES:<code>:<field>:<reason>` or `ROLES:<code>:<field>:
@@ -1644,7 +1975,7 @@ catalog_meta_locale_shape() {
 #
 # `catalog_meta_locale_shape` asks "is every locale value THAT IS PRESENT
 # well-formed" — `en` is mandatory there, every OTHER key is optional, so
-# `{"en": "..."}` alone passes it. That is exactly the shape 46 strings (18
+# `{"en": "..."}` alone passes it. That is exactly the shape 50 strings (20
 # competencies x {name, definition}, 5 roles x {name, responsibilities})
 # shipped in for an unmeasured period: authored in `en` only, never
 # translated, and invisible to every gate that existed. This function asks
@@ -1659,14 +1990,14 @@ catalog_meta_locale_shape() {
 # `competencies.json` FIELD. Nor is it the same fact as the runtime's global
 # `missing_translation` FrameworkGap, which is scored over the same BARS
 # pairs and reported "it locale: all 83 of 83 role x competency pairs
-# translated" while these 46 strings sat untranslated in production — true
+# translated" while these 50 strings sat untranslated in production — true
 # about its own domain, silent about this one.
 #
 # WHICH LOCALES ARE EXPECTED: read from `CI_LOCALES`, the SAME env var step
 # (d) already exports once ("en it") for `catalog_meta_locale_shape` and the
 # cross-locale/partial-coverage guards beside it — not re-derived here.
 # Deriving "expected" from "present" is circular and would have passed
-# exactly the bug this guard exists to catch: every one of the 46 strings
+# exactly the bug this guard exists to catch: every one of the 50 strings
 # HAD an en key, so a completeness check that inferred its locale set from
 # whatever keys happened to exist would infer {"en"} for every one of them
 # and report the catalogue complete. `CI_LOCALES` is a fact asserted by a
@@ -1683,11 +2014,11 @@ catalog_meta_locale_shape() {
 # several completion phases — so a legitimate "not there yet, tracked
 # on purpose" state exists and needs a place to live without turning CI
 # permanently red. `competencies.json`/`roles.json` metadata is the opposite
-# shape: 46 leaf strings living in exactly TWO files, added only when a
+# shape: 50 leaf strings living in exactly TWO files, added only when a
 # competency or role is added at all (a rare event), and cheap enough for
 # one author to translate in the SAME PR that introduces the English. There
 # is no legitimate half-landed state here to give a name to — either the
-# 46 strings ship translated or the PR that adds them is not done — so an
+# 50 strings ship translated or the PR that adds them is not done — so an
 # exemption file would not relieve real authoring pressure the way its
 # siblings do; it would just be a second, quieter way to reintroduce this
 # exact incident, opt-in, without even a build failure to notice it by.
@@ -1747,7 +2078,7 @@ CI_META_LOCALE_COMPLETENESS_SCRIPT='
     }
     // The documented sentinel: a role whose responsibilities.en is itself
     // blank has not been authored at all yet (FrameworkGap kind=n). No
-    // locale is expected for it, it or otherwise, until en exists.
+    // locale is expected for it, Italian or otherwise, until en exists.
     if (allowBlankEn && value.en === "") return;
     for (const locale of knownLocales) {
       if (isBlank(value[locale])) {
@@ -2435,17 +2766,29 @@ CI_ANCHOR_WORDCOUNT_MAX=18
 CI_ANCHOR_WORDCOUNT_MIN=10
 
 # The Italian ceiling/floor (framework-catalog-it-translations design D3).
-# Deliberately UNSET here — Phase 5 of that change measures a 36-anchor pilot
+#
+# The CEILING is now MEASURED at 26 (see below). The FLOOR is still unset, and
+# that asymmetry is the whole state of this pair: `catalog_overlong_bars_anchors`
+# checks `it` for real, `catalog_short_bars_anchors` returns 2 for it and its
+# caller reports that as a note rather than a failure.
+#
+# This paragraph used to open "Deliberately UNSET here", written when neither
+# had a number, and it stayed after the measurement landed — in the file whose
+# thesis is that a note outliving its fact is how defects survive. It is kept,
+# corrected, rather than deleted, because the reasoning below is still why the
+# floor has no number: Phase 5 of that change measures a 36-anchor pilot
 # (PRS x {FLL,MLL,BUL,SRX}) and derives these from the measured EN/IT length
 # RATIO (R = 90th percentile), the SAME "measured, not guessed" discipline
 # CI_ANCHOR_WORDCOUNT_MAX's own comment claims for English. Reusing the EN
 # number outright, or inventing an IT number without a measurement, is
 # EXACTLY the failure mode this file's own header names ("a check that
-# cannot fail on the thing it claims to cover") — so
-# `catalog_overlong_bars_anchors`/`catalog_short_bars_anchors` FAIL CLOSED
-# (non-zero, explained on stderr) when asked to check `it` before this is
-# set, rather than silently applying the English number or silently passing
-# everything. A self-test may override these via the environment (the same
+# cannot fail on the thing it claims to cover") — so both functions FAIL
+# CLOSED (non-zero, explained on stderr) when asked about a locale whose
+# threshold is unset, rather than silently applying the English number or
+# silently passing everything. That branch is now reached by the FLOOR for
+# `it`, and by either function for a locale nobody has measured at all; the
+# self-test moved its fail-closed row from `it` to `fr` when the ceiling
+# measurement landed, for exactly this reason. A self-test may override these via the environment (the same
 # seam every other constant in this file already exposes) to prove the
 # mechanism without waiting for the real Phase 5 measurement.
 #
@@ -2475,8 +2818,9 @@ CI_ANCHOR_WORDCOUNT_MIN_IT="${CI_ANCHOR_WORDCOUNT_MIN_IT:-}"
 # same "a guard that cannot read its subject must never pass it" rule every
 # other function here obeys. The ICO exemption is checked FIRST and returns
 # success without reading the file at all: an exempt role is not examined,
-# not examined-and-found-clean. An UNCONFIGURED locale ceiling (e.g. `it`
-# before Phase 5's pilot measurement lands) is ALSO a fail-closed condition,
+# not examined-and-found-clean. An UNCONFIGURED locale ceiling (`fr`, `de` —
+# NOT `it`, whose ceiling was measured at 26 on 2026-08-18) is ALSO a
+# fail-closed condition,
 # not a silent pass — see CI_ANCHOR_WORDCOUNT_MAX_IT's own comment.
 catalog_overlong_bars_anchors() {
   CI_COBA_TREE="$1"
@@ -2528,9 +2872,20 @@ catalog_overlong_bars_anchors() {
 # out of its retro-review scope (house-voice-and-anti-hedge-standard.md
 # §Scope). Blocking a floor of 10 today would fail on content this change is
 # not touching, for the sole reason that a later, unrelated PR happened to
-# read it. An unconfigured locale floor (e.g. `it` before Phase 5) returns
+# read it. An unconfigured locale floor (`it`, which has a measured ceiling but
+# no measured floor, and any locale nobody has measured at all) returns
 # non-zero rather than silently reporting nothing, for the same reason the
 # blocking ceiling above fails closed.
+#
+# TWO failure codes, because the caller has to tell them apart:
+#   2 — no measured threshold for this locale. A configuration state, not a
+#       defect. The `it` floor has never been measured (design D3 pilot), and
+#       a floor is measured, never guessed: Italian runs longer than English,
+#       so reusing 10 would report half the catalogue as too short.
+#   1 — the tree could not be read. That IS a defect and must block.
+# Both used to be 1, so a caller looping over CI_LOCALES could only choose
+# between failing the build on an unmeasured locale or ignoring a genuinely
+# unreadable tree. Neither is acceptable, so the function says which happened.
 #
 # No role exemption here, unlike the maximum above — a floor is advisory by
 # construction, so there is nothing for an exemption to protect against.
@@ -2544,13 +2899,13 @@ catalog_short_bars_anchors() {
     it) CI_CSBA_MIN="$CI_ANCHOR_WORDCOUNT_MIN_IT" ;;
     *)
       echo "ci-guards: catalog_short_bars_anchors: unknown locale [$CI_CSBA_LOCALE]." >&2
-      return 1
+      return 2
       ;;
   esac
 
   if [ -z "$CI_CSBA_MIN" ]; then
     echo "ci-guards: catalog_short_bars_anchors: no measured floor configured for locale [$CI_CSBA_LOCALE] (CI_ANCHOR_WORDCOUNT_MIN_IT unset — see design D3 pilot)." >&2
-    return 1
+    return 2
   fi
 
   CI_CSBA_COUNTS=$(bars_anchor_word_counts "$CI_CSBA_TREE" "$CI_CSBA_ROLE") || return 1
