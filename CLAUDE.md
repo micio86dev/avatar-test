@@ -89,10 +89,14 @@ Dockerfiles per app (`api`, `frontend`, `backoffice`); `docker-compose` for loca
 (PostgreSQL 17 + pgvector, Redis 8, Mailpit, the 3 apps, plus the `worker` and
 `scheduler` that run Laravel's native `queue:work`/`schedule:work` — 8 services,
 the count `CI_EXPECTED_COMPOSE_SERVICES` asserts); Railway builds **via Docker** so the local image
-equals prod. **Bun (hybrid):** Bun for install/dev/**build** of both Nuxt apps (and the
-backoffice SPA static runtime); **Node** for the frontend **SSR production runtime**
-(Nitro `node-server`) and for the **Playwright/Vitest** runners (officially Node-targeted).
-Multi-stage Dockerfile: build with Bun → run SSR with Node.
+equals prod. **Bun (hybrid):** Bun for install/dev/**build** of both Nuxt apps; **Node** for the
+frontend **SSR production runtime** (Nitro `node-server`) and for the
+**Playwright/Vitest** runners (officially Node-targeted); **nginx**
+(`nginx:1.27.5-alpine`) serves the backoffice SPA's static output and proxies its
+`/api/`. This line said Bun ran that static runtime — `docs/version-catalog.md` and
+`backoffice/Dockerfile` have both said nginx all along, and "this stack table and D25
+MUST never diverge" is the rule two lines up. Multi-stage Dockerfiles: build with Bun,
+run SSR with Node, serve static with nginx.
 
 **Multi-tenancy:** single shared DB with row-level scoping by `organization_id`
 (global Eloquent scope + `TenantContext` middleware). Composite indexes lead with

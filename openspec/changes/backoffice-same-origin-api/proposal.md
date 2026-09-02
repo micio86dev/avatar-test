@@ -102,6 +102,13 @@ magic link, not a refresh cookie, so it does not have this problem. The API's CO
 configuration stays as it is: other clients still use it, and removing it belongs to whoever
 retires the last cross-origin caller.
 
+> **Amended 2026-09-03.** Still true about COOKIES, and it was read as "the frontend
+> does not need same-origin" — a different claim. The frontend hit the same wall for an
+> unrelated reason: a browser cannot resolve a Docker hostname, so a candidate opening a
+> valid, freshly generated link was shown "session not authorised". See
+> `openspec/changes/frontend-same-origin-api/`. This exclusion is scoped to the
+> third-party-cookie problem, not to same-origin as a shape.
+
 ## Risks
 
 | Risk | Severity | Mitigation |
