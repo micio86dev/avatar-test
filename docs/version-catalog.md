@@ -38,9 +38,24 @@ written for the historical record; **this file is the live one.**
 | Redis | `redis:8.0-alpine` | `docker-compose.yml`, CI services |
 | Mailpit | `axllent/mailpit:v1.22` | `docker-compose.yml` |
 | PHP-FPM | `php:8.5.8-fpm-alpine` | `api/Dockerfile`, both stages |
-| Bun (build) | `oven/bun:1.3.14` | `frontend/Dockerfile` and `backoffice/Dockerfile` build stages |
+| Bun (build) | `oven/bun:1.4.0` | `frontend/Dockerfile` and `backoffice/Dockerfile` build stages |
 | Node (SSR runtime) | `node:24.11-slim` | `frontend/Dockerfile` runtime stage |
 | Nginx (static) | `nginx:1.27.5-alpine` | `backoffice/Dockerfile` runtime stage |
+| Playwright (E2E) | `mcr.microsoft.com/playwright:v1.61.1-jammy` | `scripts/e2e-container.sh`, `frontend` and `backoffice` CI E2E jobs |
+
+The Playwright image is passed to `docker run` by a script rather than written
+as a Dockerfile `FROM` or a compose `image:`, so for a long time no gate read it
+at all: guard (h) compared this file against Dockerfile bases and
+`docker compose config`, and the tag appeared in neither. It is gated now —
+`script_pinned_images` reads `IMAGE=` assignments under `scripts/`, guard (a)
+holds the result to `tag_pinned` and guard (h) counts it as used — so the row
+below is checked in both directions like every other.
+
+(This paragraph said "the one base image no automated gate reads" in the same
+commit that built the gate reading it. Kept as a correction rather than deleted:
+a pin that only scattered files agree on is a pin that drifts the first time
+someone updates two of them, and the screenshot baselines this image exists to
+keep deterministic are exactly what a silent drift breaks.)
 
 The PostgreSQL major version must match the managed database's major version.
 Local, CI and production run the same engine deliberately, because engine
@@ -55,7 +70,7 @@ parity removes an entire class of bug that only appears in production.
 | PostgreSQL | `17` | Via `pgvector/pgvector:0.8.0-pg17` |
 | pgVector | `0.8.x` | Bundled in the image above |
 | Redis | `8.0` | Via `redis:8.0-alpine` |
-| Bun | `1.3.14` | Via `oven/bun:1.3.14`; dependency patches locked in `bun.lock` |
+| Bun | `1.4.0` | Via `oven/bun:1.4.0`; dependency patches locked in `bun.lock` |
 | Node | `24.11` (LTS) | Via `node:24.11-slim`; the SSR runtime and the Vitest/Playwright runner |
 | Nuxt | `^4.4.8` (frontend), `^4.0` (backoffice) | Patch locked in each app's `bun.lock` |
 | Docker Compose | v2 (min v2.24) | `docker compose`, no hyphen |

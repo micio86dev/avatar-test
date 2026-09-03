@@ -12,25 +12,53 @@
 # noticed the openapi gate below had never once run.
 #
 # This workflow validates, in the order the steps run:
+# Two steps run BEFORE the lettered gates and are not part of the sequence:
+# the lint of scripts/ci-guards.sh (the guard mechanism itself, checked before
+# anything sources it) and the lint-and-run of scripts/docker-disk-check.sh
+# with its own test suite. Both are listed here because a step absent from the
+# index is a step nobody renumbers.
+#
 #   (a) docker compose config parses, and every image tag — compose services,
-#       Dockerfile FROM bases and Dockerfile COPY --from= images alike — is
-#       pinned; and this workflow's own `uses:` references are SHA-pinned
+#       Dockerfile FROM bases, Dockerfile COPY --from= images and the images a
+#       script pins for `docker run` alike — is pinned; this workflow's own
+#       `uses:` references are SHA-pinned; and AGENTS.md is a symlink to
+#       CLAUDE.md rather than a second copy of the rules
 #   (b) the committed openapi.json is semantically identical across api/frontend/backoffice
 #   (c) each app's check-client-drift.sh exits 0 (generated TS client matches openapi.json)
-#   (d) the framework catalog matches its authored source, and every declared
-#       role has BARS or a committed entry in scripts/framework-known-gaps.txt,
-#       and every declared role×competency PAIR has BARS or a committed entry
-#       in scripts/framework-competency-gaps.txt
+#   (d) the framework catalog, in full. Parity between the authored source and
+#       the vendored copy; every declared role has BARS or a committed entry in
+#       scripts/framework-known-gaps.txt; every declared role×competency PAIR
+#       has BARS or an entry in scripts/framework-competency-gaps.txt; every
+#       bars file names a declared role or a declared non-role catalogue; shape
+#       completeness (3 indicators, every anchor level present); the anchor
+#       length ceiling, per locale; cross-role anchor identity against its
+#       closed baseline, both directions; roles/competencies locale SHAPE and
+#       locale COMPLETENESS; cross-locale divergence; non-role locale coverage;
+#       and the locale-gaps control file (nothing stale, no partial role, no
+#       interleaving). All build-failing.
+#
+#       This entry listed three of those for a long time while the step ran
+#       thirteen. The rule below binds here or it binds nowhere.
 #   (e) every submodule pointer is reachable from a published remote ref
-#   (f) the self-test: every guard in this file still rejects a known-bad
-#       fixture. NOT "each guard above" — it also covers the five scan_* guards
-#       used by (g), and the docs/version-catalog.md reality-check functions
-#       used by (h), both of which run after it. The index has to be
-#       maintained like a gate, and that includes this line.
+#   (f) the self-test: every guard that DECIDES — each one that can fail a
+#       build — still rejects a known-bad fixture, including the five scan_*
+#       guards used by (g) and the reality-check functions used by (h), both of
+#       which run after it.
+#
+#       Stated narrowly on purpose. This line used to claim "every guard in
+#       this file", which was never true: the control-file PARSERS
+#       (known_gap_roles, known_gap_pairs, known_locale_gap_pairs,
+#       known_crossrole_baseline_entries) and catalog_locale_coverage are
+#       exercised only through the deciders that call them, not by rows of
+#       their own. That is a deliberate boundary, not coverage — and claiming
+#       more than the mechanism delivers is the exact defect this step exists
+#       to catch, so the claim is the part that had to change. The index has to
+#       be maintained like a gate, and that includes this line.
 #   (g) no stale stack tokens (MySQL, Laravel 12, Sanctum, Horizon, npm/pnpm/yarn)
 #   (h) docs/version-catalog.md matches reality, in both directions: every
 #       image tag actually used (Dockerfile FROM bases, compose image:
-#       references) is cataloged, and every cataloged tag is still used
+#       references, and IMAGE= pins in scripts/) is cataloged, and every
+#       cataloged tag is still used
 #
 # That list said "(a) compose (b) openapi (c) drift" long after (d) through (g)
 # were added, and two orphaned banner blocks for (d) and (e) sat stacked above
@@ -115,7 +143,7 @@ jobs:
       # changing this paragraph" — an instruction to a HUMAN, checked by
       # NOTHING in CI. In a file whose entire thesis is that a note outliving
       # its fact is how defects survive, that was the one load-bearing claim
-      # with no gate behind it. Not lettered with (a)-(g) below: those are
+      # with no gate behind it. Not lettered with (a)-(h) below: those are
       # cross-stack consistency checks, this is a lint of the guard mechanism
       # itself, run once, ahead of anything that sources it.
       # -----------------------------------------------------------------------
@@ -123,6 +151,47 @@ jobs:
         run: |
           shellcheck -s sh scripts/ci-guards.sh
           dash -n scripts/ci-guards.sh
+
+      # -----------------------------------------------------------------------
+      # The disk guard, linted and RUN.
+      #
+      # `-s bash` rather than `sh`: the script uses `set -o pipefail`, and the
+      # test file adds `local` and `BASH_SOURCE` — none of them POSIX sh.
+      # Checking them as sh would report style errors for features they are
+      # entitled to use. ci-guards.sh stays POSIX because dash runs it.
+      #
+      # This comment used to say "bash arrays and `[[`". Neither file contains
+      # either, so the justification for a lint dialect named features that
+      # were not the reason — in the file whose thesis is that a note outliving
+      # its fact is how defects survive.
+      #
+      # Running the tests here matters more than linting them. The script's
+      # value is being BELIEVED when it speaks, and three of its guards
+      # (minified JSON, an unreadable df, a du that fails while stat succeeds)
+      # protect against reporting confident nonsense. Each is pinned by a test
+      # that fails against the unguarded version — verified, not assumed — and
+      # a guard nobody runs is a guard that rots.
+      #
+      # No Docker needed: every branch is reachable from a temporary HOME.
+      # -----------------------------------------------------------------------
+      - name: Lint and run the docker disk guard
+        run: |
+          # EVERY bash script under scripts/, discovered rather than listed.
+          # e2e-container.sh was the one that named itself out of coverage by
+          # simply never being added — and it carries the `printf %q` re-quoting
+          # and the Bun installer pin, both exactly what shellcheck catches.
+          # ci-guards.sh is excluded here because it is POSIX sh and gets its own
+          # stricter `-s sh` + `dash -n` step above; checking it as bash would
+          # pass on constructs that step exists to reject.
+          BASH_SCRIPTS=$(find scripts -name '*.sh' ! -name 'ci-guards.sh' | sort)
+          if [ -z "$BASH_SCRIPTS" ]; then
+            echo "ERROR: no shell scripts found under scripts/ — zero files is a lint that FAILED TO RUN."
+            exit 1
+          fi
+          echo "$BASH_SCRIPTS" | sed 's/^/  linting /'
+          # shellcheck disable=SC2086
+          shellcheck -s bash $BASH_SCRIPTS
+          bash scripts/tests/docker-disk-check.test.sh
 
       # -----------------------------------------------------------------------
       # (a) docker compose config — validates the compose file parses cleanly
@@ -184,7 +253,7 @@ jobs:
           # rule ends up with two implementations and only one of them right.
           #
           # The `image:` lines examined are COUNTED, not merely absent-of-
-          # violation. `grep -E '^\s*image:' | while read ...` matching ZERO
+          # violation. `grep -E '^[[:space:]]*image:' | while read ...` matching ZERO
           # lines walks the loop zero times, exits 0, leaves /tmp/unpinned.txt
           # empty, and this step would announce "All compose image tags are
           # pinned" having examined NOTHING — a green gate over no evidence,
@@ -201,7 +270,7 @@ jobs:
           # this guard was added to report. The build would go red with no
           # reason printed, which is the failure the block below exists to
           # prevent. The count itself is the signal; grep's status is not.
-          IMAGE_REFS=$(docker compose config | grep -cE '^\s*image:' || true)
+          IMAGE_REFS=$(docker compose config | grep -cE '^[[:space:]]*image:' || true)
           if ! compose_image_refs_present "$IMAGE_REFS"; then
             echo "ERROR: found 0 'image:' references in \`docker compose config\` output."
             echo "  There is no evidence to check here, so this is a guard that FAILED TO RUN —"
@@ -210,7 +279,7 @@ jobs:
             exit 1
           fi
 
-          docker compose config | grep -E '^\s*image:' | while read -r _ REF; do
+          docker compose config | grep -E '^[[:space:]]*image:' | while read -r _ REF; do
             tag_pinned "$REF" || echo "UNPINNED:$REF"
           done > /tmp/unpinned.txt
           if [ -s /tmp/unpinned.txt ]; then
@@ -248,7 +317,77 @@ jobs:
             fi
           done
 
-          echo "All image tags are pinned — compose services, Dockerfile FROM bases, and Dockerfile COPY --from= images."
+          # And the same rule ONE more place: the images a script pins for
+          # `docker run`. Step (h) was widened to count these as "used" and
+          # this step was not, which meant a floating
+          # `mcr.microsoft.com/playwright:latest` plus a matching catalog row
+          # would have gone green through BOTH gates — over the 3.45GB image
+          # that decides whether screenshot baselines reproduce. A rule that
+          # binds in one step and not the next is a preference, not a rule.
+          if ! SCRIPT_REFS=$(script_pinned_images scripts); then
+            echo "ERROR: could not read scripts/ for the image refs it pins."
+            exit 1
+          fi
+          # Minimum evidence, the same shape `compose_image_refs_present` uses
+          # for compose and `USED_COUNT` uses in step (h). Without it, an empty
+          # result — `find` matching nothing, or the IMAGE= convention moving —
+          # walks the loop zero times and the step announces every script-pinned
+          # image is pinned having examined none. This third source of "used"
+          # images was widened without the guard the other two already had.
+          SCRIPT_REF_COUNT=$(printf '%s\n' "$SCRIPT_REFS" | grep -c . || true)
+          if [ "$SCRIPT_REF_COUNT" -eq 0 ]; then
+            echo "ERROR: no IMAGE= pins found under scripts/ — expected at least the Playwright runner image."
+            echo "  Zero references is a check that FAILED TO RUN, not a tree with nothing to pin."
+            exit 1
+          fi
+          for REF in $SCRIPT_REFS; do
+            if ! tag_pinned "$REF"; then
+              echo "ERROR: a script pins a floating image tag: $REF. Pin it per D24/D25."
+              exit 1
+            fi
+          done
+
+          echo "All image tags are pinned — compose services, Dockerfile FROM bases, Dockerfile COPY --from= images, and script-pinned run images."
+
+          # AGENTS.md must be a SYMLINK to CLAUDE.md, never a second copy.
+          #
+          # It was a copy. It drifted 103 lines over roughly a month, and the
+          # review gate reads AGENTS.md — so reviews were judged against a
+          # snapshot still claiming BEAI holds no candidate contact data and
+          # that white-label was parked, both of which CLAUDE.md had already
+          # reversed. Two files holding one truth is the defect this repo
+          # rejects everywhere else; the rules themselves were the last place
+          # still doing it.
+          if [ ! -L AGENTS.md ]; then
+            echo "ERROR: AGENTS.md is not a symlink. It must point at CLAUDE.md, not duplicate it —"
+            echo "  a copy of the rules drifts, and the review gate reads AGENTS.md."
+            exit 1
+          fi
+          AGENTS_TARGET=$(readlink AGENTS.md)
+          if [ "$AGENTS_TARGET" != "CLAUDE.md" ]; then
+            echo "ERROR: AGENTS.md points at '$AGENTS_TARGET', expected 'CLAUDE.md'."
+            exit 1
+          fi
+          echo "AGENTS.md is a symlink to CLAUDE.md — one file, one truth."
+
+          # Every repo agrees with itself about which version it is.
+          #
+          # The api asserts VERSION == composer.json == openapi.json in its own
+          # CI. The two Nuxt apps asserted nothing and both drifted — patch
+          # releases bumped package.json and left VERSION behind — and the
+          # wrapper drifted the other way. Three repos, one released artifact
+          # each, two answers each. This is the only place that sees all four.
+          if ! VERSION_DRIFT=$(version_manifest_divergence . api backoffice frontend); then
+            echo "ERROR: a repo has a VERSION file with no manifest, or no VERSION file at all."
+            exit 1
+          fi
+          if [ -n "$VERSION_DRIFT" ]; then
+            echo "ERROR: a repo disagrees with itself about its own version:"
+            printf '%s\n' "$VERSION_DRIFT" | sed 's/^/  /'
+            echo "  A release tag names ONE version. Move VERSION and the manifest together."
+            exit 1
+          fi
+          echo "Every repo agrees with itself about its version."
 
           # This workflow's own `uses:` references, held to the same
           # immutability standard as every image tag above: a GitHub Actions
@@ -268,26 +407,34 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           # Pinned to the patch, matching what frontend/Dockerfile and
-          # backoffice/Dockerfile actually build with (`oven/bun:1.3.14`).
+          # backoffice/Dockerfile actually build with (`oven/bun:1.4.0`).
           #
           # Stated carefully, because the obvious argument for this is wrong.
           # '1.3' is NOT a violation of the rule step (a) enforces: `tag_pinned`
-          # accepts a tag starting with a dotted version, so `oven/bun:1.3`
-          # passes it, exactly as `axllent/mailpit:v1.22` does. Nor does it
-          # contradict D25, whose catalog entry is literally `oven/bun:1.3`.
+          # accepts a tag starting with a dotted version, exactly as
+          # `axllent/mailpit:v1.22` does.
           #
-          # The real gap is narrower and is about WHERE the patch gets fixed.
-          # D25 says "exact patch locked in bun.lock" — but bun.lock pins the
-          # app's DEPENDENCIES, not the Bun binary that reads it. So nothing was
-          # fixing the Bun patch in this job, while both Dockerfiles fix theirs
-          # at 1.3.14. The wrapper could therefore install deps and run codegen
-          # under a different Bun than the image the apps are actually built in,
-          # and step (c) — which compares generated TS clients — is precisely
-          # where such a difference would surface, attributed to client drift.
+          # This comment has now outlived its own fact TWICE — first pointing
+          # at the archived D25, then still saying `1.3.14` after the pin moved
+          # to 1.4.0 — in the file whose whole thesis is that a note surviving
+          # its fact is how defects survive. The LIVE catalog is
+          # `docs/version-catalog.md`; it pins `oven/bun:1.4.0` for both
+          # Dockerfile build stages, and every 1.3 reference now survives only
+          # in that file's prose explaining that the ARCHIVED D25 drifted.
+          # There is nothing to reconcile: this line matches the source of
+          # truth. If it stops matching, the fix is the comment AND the pin,
+          # moved together.
+          #
+          # Why the patch is fixed HERE at all: `bun.lock` pins the app's
+          # DEPENDENCIES, not the Bun binary that reads it. Without this the
+          # wrapper could install deps and run codegen under a different Bun
+          # than the image the apps are built in, and step (c) — which compares
+          # generated TS clients — is exactly where that difference would
+          # surface, attributed to client drift.
           #
           # Tightening, never loosening (D37). If Bun moves, move both
-          # Dockerfiles and this line together, and revisit the D25 entry.
-          bun-version: '1.3.14'
+          # Dockerfiles and this line together with docs/version-catalog.md.
+          bun-version: '1.4.0'
 
       # -----------------------------------------------------------------------
       # (b) openapi.json cross-repo consistency check
@@ -630,13 +777,25 @@ jobs:
             fi
             while IFS= read -r PAIR; do
               [ -n "$PAIR" ] || continue
-              # `|| true`: the function returns 1 with no output when the
-              # pair is NOT stale, which is a legitimate answer, not an
-              # error. Unguarded, `bash -e` would kill the step mid-loop
-              # printing nothing at all — the "red with no reason" outcome
-              # this whole file exists to prevent. The output is the signal
-              # here; the status is not.
-              REASON=$(stale_competency_gap_exemption_reason "$TREE" "$PAIR" || true)
+              # Status CAPTURED, not discarded with `|| true`.
+              #
+              # 1 means "not actually stale" — a legitimate answer with no
+              # output. 2 means the tree could not be read, and that used to
+              # land in the `*)` branch below and print "roles.json no longer
+              # assigns that competency" — an instruction to delete a CORRECT
+              # exemption, about a file nobody parsed. `|| true` flattened the
+              # two into one empty string.
+              if REASON=$(stale_competency_gap_exemption_reason "$TREE" "$PAIR"); then
+                REASON_RC=0
+              else
+                REASON_RC=$?
+              fi
+              if [ "$REASON_RC" -eq 2 ]; then
+                echo "ERROR: could not determine why '$PAIR' is exempt in $TREE — roles.json or its bars file could not be read."
+                echo "  This is a guard that FAILED TO RUN, not a stale exemption. Fix the catalogue, do not delete the entry."
+                FAIL=1
+                continue
+              fi
               case "$REASON" in
                 role-level)
                   echo "ERROR: '$PAIR' is listed in scripts/framework-competency-gaps.txt, but its role has no BARS file at all in $TREE."
@@ -648,9 +807,18 @@ jobs:
                   echo "ERROR: '$PAIR' is listed in scripts/framework-competency-gaps.txt, but its BARS anchors now exist in $TREE."
                   echo "  Delete the '$PAIR' entry from scripts/framework-competency-gaps.txt."
                   ;;
-                *)
+                orphaned)
                   echo "ERROR: '$PAIR' is listed in scripts/framework-competency-gaps.txt, but roles.json in $TREE no longer assigns that competency to that role."
                   echo "  Delete the '$PAIR' entry from scripts/framework-competency-gaps.txt."
+                  ;;
+                *)
+                  # Named explicitly rather than folded into `orphaned`, which
+                  # is what the catch-all used to do: an answer this step does
+                  # not recognise is a guard drifting from its caller, and
+                  # reporting it as a stale exemption would send someone to
+                  # delete a correct entry.
+                  echo "ERROR: stale_competency_gap_exemption_reason returned an unrecognised answer for '$PAIR' in $TREE: '$REASON'."
+                  echo "  This is a guard that no longer agrees with its caller, not a verdict about the catalogue."
                   ;;
               esac
               FAIL=1
@@ -703,9 +871,11 @@ jobs:
           # would have shipped clean through every gate that existed then.
           #
           # The ceiling (18) needs no committed baseline the way the
-          # cross-role check below does: measured directly, FLL, MLL, BUL
-          # and SRX (materialised in Phase 6) all already top out at 18
-          # words today.
+          # cross-role check below does: measured directly, every bars file the
+          # loop reads tops out at 18 words today. Written as "FLL, MLL, BUL and
+          # SRX" until POTENTIAL.json joined `bars/*.json` — the loop is a glob,
+          # so enumerating roles in the comment describes a narrower set than the
+          # mechanism reads, and the enumeration is the part that rots.
           #
           # ICO is exempt — see `catalog_overlong_bars_anchors`'s own
           # comment in scripts/ci-guards.sh for why: a documented, different
@@ -725,24 +895,132 @@ jobs:
             for BARS_FILE in "$TREE"/bars/*.json; do
               [ -e "$BARS_FILE" ] || continue
               ROLE=$(basename "$BARS_FILE" .json)
-              if catalog_overlong_bars_anchors "$TREE" "$ROLE" > "$LIST"; then
-                while IFS= read -r ENTRY; do
-                  [ -n "$ENTRY" ] || continue
-                  echo "ERROR: $TREE/bars/$ROLE.json has an anchor over the 18-word ceiling: '$ENTRY' (ROLE:COMP:LEVEL:WORDCOUNT)."
-                  echo "  house-voice-and-anti-hedge-standard.md §1.2: leader anchors run one sentence, 10-18 words."
+              # EVERY locale in CI_LOCALES, not just the default.
+              #
+              # Both functions take the locale as their third argument and
+              # default it to `en`. This loop passed two arguments, so every
+              # Italian anchor ever committed went unmeasured — while the
+              # header above claimed the ceiling was enforced on the committed
+              # anchors, `CI_ANCHOR_WORDCOUNT_MAX_IT` carried a MEASURED
+              # ceiling of its own, and step (f) certified the `it` path
+              # end-to-end against a fixture. A guard proven and never called
+              # is a guard that does not exist, and this one had a self-test
+              # vouching for it.
+              for LOCALE in $CI_LOCALES; do
+                if catalog_overlong_bars_anchors "$TREE" "$ROLE" "$LOCALE" > "$LIST"; then
+                  while IFS= read -r ENTRY; do
+                    [ -n "$ENTRY" ] || continue
+                    echo "ERROR: $TREE/bars/$ROLE.json has a [$LOCALE] anchor over the ceiling: '$ENTRY' (ROLE:COMP:LEVEL:LOCALE:WORDCOUNT)."
+                    echo "  house-voice-and-anti-hedge-standard.md §1.2: leader anchors run one sentence, 10-18 words (the it ceiling is measured separately)."
+                    FAIL=1
+                  done < "$LIST"
+                else
+                  CEILING_RC=$?
+                  # 2 and 1 are different problems and both block, so the
+                  # difference is the MESSAGE. Reporting "could not read
+                  # FLL.json for locale [es]" the day someone adds a desirable
+                  # locale accuses a file that is perfectly fine and sends
+                  # whoever reads it to the wrong place.
+                  if [ "$CEILING_RC" -eq 2 ]; then
+                    echo "ERROR: no measured anchor ceiling for locale [$LOCALE] — $TREE/bars/$ROLE.json was not checked."
+                    echo "  A ceiling is MEASURED, never guessed (see CI_ANCHOR_WORDCOUNT_MAX_IT for how the it one was derived)."
+                    echo "  Measure it before that locale ships, or drop the locale from CI_LOCALES."
+                  else
+                    echo "ERROR: the anchor-length check could not read $TREE/bars/$ROLE.json for locale [$LOCALE]."
+                    echo "  This is a guard that FAILED TO RUN, not a catalog that passed."
+                  fi
                   FAIL=1
-                done < "$LIST"
-              else
-                echo "ERROR: the anchor-length check could not read $TREE/bars/$ROLE.json."
-                echo "  This is a guard that FAILED TO RUN, not a catalog that passed."
-                FAIL=1
-              fi
+                fi
+              done
 
               # Non-blocking report — the floor. Same doctrine as the
               # hedge-rate line: printed for review, never a build failure.
-              SHORT=$(catalog_short_bars_anchors "$TREE" "$ROLE")
-              if [ -n "$SHORT" ]; then
-                echo "NOTE (non-blocking, not a failure): $TREE/bars/$ROLE.json has anchor(s) under the 10-word floor: $SHORT"
+              # Guarded like every sibling, and the distinction matters here:
+              # the FINDINGS are non-blocking, the guard FAILING TO RUN is not.
+              # `catalog_overlong_bars_anchors` returns 0 for an exempt role
+              # WITHOUT reading the file, so a malformed exempt bars file
+              # reaches this line unexamined — and a bare assignment under
+              # `bash -e` would kill the step here, before cross-role, locale
+              # shape, completeness, divergence and interleaving ever run. Red
+              # with no reason is the outcome this step exists to prevent.
+              # The floor is advisory, and its two failure modes are NOT the
+              # same thing: exit 2 means no measured threshold exists for that
+              # locale (a configuration state — the `it` floor is unmeasured
+              # per design D3, and a floor is measured, never guessed), exit 1
+              # means the tree could not be read (a defect). Collapsing them
+              # would force a choice between failing the build on an unmeasured
+              # locale and ignoring an unreadable tree.
+              for LOCALE in $CI_LOCALES; do
+                if SHORT=$(catalog_short_bars_anchors "$TREE" "$ROLE" "$LOCALE"); then
+                  if [ -n "$SHORT" ]; then
+                    echo "NOTE (non-blocking, not a failure): $TREE/bars/$ROLE.json has [$LOCALE] anchor(s) under the floor: $SHORT"
+                  fi
+                else
+                  FLOOR_RC=$?
+                  if [ "$FLOOR_RC" -eq 2 ]; then
+                    echo "NOTE (non-blocking): no measured anchor floor for locale [$LOCALE] — not reported for $ROLE."
+                  else
+                    echo "ERROR: could not read $TREE/bars/$ROLE.json for the [$LOCALE] anchor floor report."
+                    echo "  This is a guard that FAILED TO RUN, not a catalog that passed."
+                    FAIL=1
+                  fi
+                fi
+              done
+            done
+          done
+
+          # ------------------------------------------------------------------
+          # The MIRROR direction: every bars/<X>.json must name a role
+          # roles.json declares, or be a DECLARED non-role catalogue file.
+          #
+          # Every other completeness check runs one way — roles.json declares a
+          # role, does its bars file exist. Nothing ran the reverse, so any
+          # .json dropped into bars/ was silently promoted to a role: shape-
+          # checked for 3 indicators, measured against the leader anchor
+          # ceiling, made a peer in cross-role duplicate detection — while
+          # getting zero pair coverage, zero locale-gap tracking and zero
+          # role-level accounting. POTENTIAL.json is the real case: `potential`
+          # is an ASSESSMENT TYPE carrying MTG and LAT, which no role declares.
+          # Legitimate, and therefore DECLARED by name in ci-guards.sh rather
+          # than inferred from a filename. A file nobody listed is a file
+          # nobody decided on.
+          # ------------------------------------------------------------------
+          for TREE in "$SRC" "$VENDORED"; do
+            if UNDECLARED_BARS=$(bars_files_without_declared_role "$TREE"); then
+              if [ -n "$UNDECLARED_BARS" ]; then
+                printf '%s\n' "$UNDECLARED_BARS" | while IFS= read -r B; do
+                  [ -n "$B" ] || continue
+                  echo "ERROR: $TREE/bars/$B.json names neither a role declared in roles.json nor a declared non-role catalogue file."
+                  echo "  Add the role, or list the file in CI_NON_ROLE_BARS_FILES with a reason."
+                done
+                FAIL=1
+              fi
+            else
+              echo "ERROR: could not check $TREE/bars against roles.json — this is a guard that FAILED TO RUN."
+              FAIL=1
+            fi
+          done
+
+          # ...and the non-role catalogue files get locale coverage of their
+          # own. Declaring POTENTIAL.json stops the mirror guard firing; it does
+          # NOT give the file coverage, and treating the declaration as the fix
+          # would be the "documented, therefore handled" move this file rejects
+          # everywhere else. Every pair guard is keyed on role_competency_pairs,
+          # and MTG and LAT are in no role, so nothing checked whether their
+          # Italian exists. It does. Clean today is not the same as checked.
+          for TREE in "$SRC" "$VENDORED"; do
+            for LOCALE in $CI_LOCALES; do
+              if NRB_GAPS=$(non_role_bars_locale_gaps "$TREE" "$LOCALE"); then
+                if [ -n "$NRB_GAPS" ]; then
+                  printf '%s\n' "$NRB_GAPS" | while IFS= read -r G; do
+                    [ -n "$G" ] || continue
+                    echo "ERROR: $TREE has an incomplete non-role competency: $G (LOCALE:FILE:COMPETENCY)."
+                  done
+                  FAIL=1
+                fi
+              else
+                echo "ERROR: could not check $TREE non-role bars files for locale [$LOCALE] — this is a guard that FAILED TO RUN."
+                FAIL=1
               fi
             done
           done
@@ -755,8 +1033,13 @@ jobs:
           # with the SAME both-direction doctrine as the two known-gaps files:
           # a new duplicate not on the baseline fails the build, and so does a
           # baseline entry whose duplicate is no longer real. The baseline is
-          # closed — see that file's header — so every entry here should be
-          # one of the two pre-existing duplicates it records, never more.
+          # closed — see that file's header — so every entry here should be one
+          # the baseline already records, never a new one. Four entries today:
+          # the two pre-existing English duplicates (BUL/MLL on INF, FLL/MLL on
+          # RES) and their Italian counterparts, which are faithful translations
+          # of duplicated source and therefore duplicated too. This sentence said
+          # "two ... never more" after the Italian landed — the baseline's own
+          # header had PREDICTED four and nobody came back to either.
           # ------------------------------------------------------------------
           for TREE in "$SRC" "$VENDORED"; do
             if [ ! -d "$TREE/bars" ]; then
@@ -802,7 +1085,7 @@ jobs:
 
           # ------------------------------------------------------------------
           # roles.json / competencies.json locale-map SHAPE
-          # (framework-catalog-it-translations design D2 row 8) — 46 strings
+          # (framework-catalog-it-translations design D2 row 8) — 50 strings
           # nothing else reads (role_keys/role_competency_pairs read only
           # `code`/`competencies`; catalog_malformed_bars_entries reads bars
           # files only). Without this check they carry the locale dimension
@@ -828,7 +1111,7 @@ jobs:
           # shape check above deliberately leaves open. `catalog_meta_locale_
           # shape` only requires `en`; every other locale key is optional, so
           # a field authored `{"en": "..."}` alone passes it. That is exactly
-          # how 46 strings (18 competencies x {name, definition}, 5 roles x
+          # how 50 strings (20 competencies x {name, definition}, 5 roles x
           # {name, responsibilities}) shipped to production with no `it`
           # value at all: `scripts/framework-locale-gaps.txt` and its four
           # guards track role x competency BARS PAIRS only and had nothing to
@@ -844,7 +1127,7 @@ jobs:
           # happens to be present, which would have passed the exact bug
           # this guard exists to catch) and the argument against giving this
           # a fourth control file the way scripts/framework-locale-gaps.txt
-          # has one: 46 strings in two files, authored atomically whenever a
+          # has one: 50 strings in two files, authored atomically whenever a
           # competency or role is added at all, have no legitimate half-
           # landed state to name — unlike the incrementally-authored BARS
           # catalog its siblings track. Blocking, unconditionally.
@@ -871,10 +1154,20 @@ jobs:
           # design D2a) — the one mechanical fidelity check that exists: an
           # Italian pair diverging where the English is byte-identical (or
           # converging where English differs) means the "translation" changed
-          # the source. Blocking. Empty today (no `it` content lands until a
-          # later, content-only PR) — this check is wired NOW so the first
-          # content PR is covered from its first commit, not from whenever
-          # someone remembers to add the gate.
+          # the source. Blocking, and empty today because the catalogue IS
+          # fully translated: all 83 role x competency pairs carry `it` on every
+          # indicator and every anchor, and scripts/framework-locale-gaps.txt
+          # legitimately lists nothing.
+          #
+          # This comment has been wrong twice in opposite directions — first
+          # "no `it` content" flatly, then "no `it` ANCHOR content", both
+          # written while the anchors were in fact translated. Measured before
+          # writing it a third time: 162 `:it:` anchor measurements on FLL
+          # alone, 0 incomplete pairs in either tree, 0 exemptions listed.
+          # An empty control file here means DONE, not NOT STARTED — and the
+          # check stays wired either way, so the next content PR is covered from
+          # its first commit rather than from whenever someone remembers to add
+          # a gate for it.
           # ------------------------------------------------------------------
           for TREE in "$SRC" "$VENDORED"; do
             if [ ! -d "$TREE/bars" ]; then
@@ -931,17 +1224,36 @@ jobs:
             done
           done
 
-          if VIOLATIONS=$(locale_gaps_whole_role_violations "$SRC"); then
-            if [ -n "$VIOLATIONS" ]; then
-              echo "$VIOLATIONS" | while IFS= read -r V; do
-                [ -n "$V" ] || continue
-                echo "ERROR: scripts/framework-locale-gaps.txt lists a PARTIAL role: '$V' (LOCALE:ROLE:LISTED/FULL) — no role may ship half-translated."
-              done
+          # `else` for the same reason every sibling in this step has one: a
+          # guard that could not RUN must not read as a catalogue that passed.
+          # This branch used to be unreachable — the function ended on `rm -f`
+          # and could not return non-zero, so it had no way to say it could not
+          # read the tree, and reported `it:ICO:15/0` instead. It has two
+          # `return 1` paths now, one per unreadable input, and this branch is
+          # live.
+          # Both trees, like every sibling in this step. Parity is proven
+          # earlier here, so one tree would be sufficient in fact — but an
+          # asymmetry with no stated reason reads as deliberate to the next
+          # person, and checking the second tree costs nothing.
+          for TREE in "$SRC" "$VENDORED"; do
+            if VIOLATIONS=$(locale_gaps_whole_role_violations "$TREE"); then
+              if [ -n "$VIOLATIONS" ]; then
+                echo "$VIOLATIONS" | while IFS= read -r V; do
+                  [ -n "$V" ] || continue
+                  echo "ERROR: scripts/framework-locale-gaps.txt lists a PARTIAL role against $TREE: '$V' (LOCALE:ROLE:LISTED/FULL) — no role may ship half-translated."
+                done
+                FAIL=1
+              fi
+            else
+              echo "ERROR: locale_gaps_whole_role_violations could not run against $TREE — this is a guard that FAILED TO RUN, not a catalog that passed."
               FAIL=1
             fi
-          fi
+          done
 
-          INTERLEAVED=$(locale_gaps_role_order_violations)
+          if ! INTERLEAVED=$(locale_gaps_role_order_violations); then
+            echo "ERROR: locale_gaps_role_order_violations could not run — this is a guard that FAILED TO RUN, not a catalog that passed."
+            FAIL=1
+          fi
           if [ -n "$INTERLEAVED" ]; then
             echo "ERROR: scripts/framework-locale-gaps.txt interleaves role '$INTERLEAVED' with another role's entries."
             FAIL=1
@@ -1149,7 +1461,7 @@ jobs:
           # Dockerfiles ARE the install and build path for both Nuxt apps, and
           # they were not in the file list at all while the comment beside the
           # real gate read "No carve-outs."
-          printf 'FROM oven/bun:1.3.14 AS builder\nRUN npm ci\n' > "$FIXTURE/bun-docker/Dockerfile"
+          printf 'FROM oven/bun:1.4.0 AS builder\nRUN npm ci\n' > "$FIXTURE/bun-docker/Dockerfile"
           expect_caught "Bun-only (Dockerfile)" "$(scan_bun_only "$FIXTURE/bun-docker")"
 
           # Bun-only must NOT reject prose that merely NAMES the banned tools.
@@ -1588,7 +1900,7 @@ jobs:
           # in it or it will be deleted rather than obeyed.
           printf '{"ICO":{"name":"Contributor"},"SRX":{"name":"Senior Executive"}}' \
             > "$FIXTURE/cat-incomplete/roles.json"
-          UNEXEMPTED=$(catalog_unexpected_missing_bars "$FIXTURE/cat-incomplete")
+          UNEXEMPTED=$(catalog_unexpected_missing_bars "$FIXTURE/cat-incomplete") || { echo "SELF-TEST FAILED: catalog_unexpected_missing_bars could not run."; FAILED=1; }
           if [ -n "$UNEXEMPTED" ]; then
             echo "SELF-TEST FAILED: the completeness check rejected a role covered by the known-gaps list: $UNEXEMPTED"
             FAILED=1
@@ -1623,7 +1935,7 @@ jobs:
           # reported by the step whose job is proving guards work, not only by
           # the gate it would turn red.
           for TREE in docs/app_description/02-domain/framework api/database/framework; do
-            STALE=$(catalog_stale_gap_exemptions "$TREE")
+            STALE=$(catalog_stale_gap_exemptions "$TREE") || { echo "SELF-TEST FAILED: catalog_stale_gap_exemptions could not run."; FAILED=1; }
             if [ -n "$STALE" ]; then
               echo "SELF-TEST FAILED: scripts/framework-known-gaps.txt exempts $STALE, but $TREE/bars/ now has the file."
               FAILED=1
@@ -1662,7 +1974,7 @@ jobs:
           CI_COMPETENCY_GAPS_FILE="$FIXTURE/pair-gaps.txt"
           export CI_COMPETENCY_GAPS_FILE
 
-          UNEXEMPTED=$(catalog_unexpected_missing_bars_pairs "$FIXTURE/pair-incomplete")
+          UNEXEMPTED=$(catalog_unexpected_missing_bars_pairs "$FIXTURE/pair-incomplete") || { echo "SELF-TEST FAILED: catalog_unexpected_missing_bars_pairs could not run."; FAILED=1; }
           if [ -n "$UNEXEMPTED" ]; then
             echo "SELF-TEST FAILED: the pair gate rejected a pair covered by the per-pair known-gaps list: $UNEXEMPTED"
             FAILED=1
@@ -1742,7 +2054,7 @@ jobs:
           printf '{"SRX":{"name":"Senior Executive","competencies":["PRS"]}}' \
             > "$FIXTURE/pair-role-no-file-exemption/roles.json"
           printf 'SRX:PRS\nZZZ:PRS\nFLL\n' > "$FIXTURE/pair-gaps.txt"
-          SRX_SHAPE_STALE=$(catalog_stale_competency_gap_exemptions "$FIXTURE/pair-role-no-file-exemption")
+          SRX_SHAPE_STALE=$(catalog_stale_competency_gap_exemptions "$FIXTURE/pair-role-no-file-exemption") || { echo "SELF-TEST FAILED: catalog_stale_competency_gap_exemptions could not run."; FAILED=1; }
           if printf '%s\n' "$SRX_SHAPE_STALE" | grep -qxF 'SRX:PRS' \
             && printf '%s\n' "$SRX_SHAPE_STALE" | grep -qxF 'ZZZ:PRS' \
             && printf '%s\n' "$SRX_SHAPE_STALE" | grep -qxF 'FLL'; then
@@ -1754,7 +2066,7 @@ jobs:
           fi
           # ...and the pair-level MISSING gate must still stay silent on it —
           # this is a STALE-exemption defect, not an undeclared-gap one.
-          SRX_SHAPE_UNEXPECTED=$(catalog_unexpected_missing_bars_pairs "$FIXTURE/pair-role-no-file-exemption")
+          SRX_SHAPE_UNEXPECTED=$(catalog_unexpected_missing_bars_pairs "$FIXTURE/pair-role-no-file-exemption") || { echo "SELF-TEST FAILED: catalog_unexpected_missing_bars_pairs could not run."; FAILED=1; }
           if [ -n "$SRX_SHAPE_UNEXPECTED" ]; then
             echo "SELF-TEST FAILED: the pair-level missing-bars gate reported a role with no bars file at all: $SRX_SHAPE_UNEXPECTED"
             FAILED=1
@@ -1764,20 +2076,23 @@ jobs:
           expect_caught "stale_competency_gap_exemption_reason names the role-level shape" \
             "$(stale_competency_gap_exemption_reason "$FIXTURE/pair-role-no-file-exemption" 'SRX:PRS' 2>/dev/null | grep -x 'role-level')"
 
-          # The FOURTH contract, and the one the guard's caller in step (d)
-          # now depends on directly (`REASON=$(... || true)`): for a pair
+          # The FOURTH contract, and the one step (d) branches on: for a pair
           # that is NOT actually stale — the `pair-incomplete` fixture above,
           # where FLL:PRS is a live, uncovered gap — the function must return
-          # 1 AND print nothing. Both halves are asserted, not just one:
-          # printing something on a "not stale" answer would tell an operator
-          # to delete an exemption that is doing its job, and returning 0
-          # would make step (d)'s `|| true` mask a real "not stale" signal as
-          # if it were a read failure. Captured as `if VAR=$(cmd); then ...
-          # else ...`, the same shape (d) itself uses at its json_canonical_equal
-          # call sites — a bare `VAR=$(cmd)` here would abort THIS script
-          # under `set -e` the instant the function legitimately returns 1,
-          # printing nothing and explaining nothing, which is the exact
-          # failure step (d)'s `|| true` exists to prevent.
+          # 1 AND print nothing. Both halves are asserted: printing something on
+          # a "not stale" answer would tell an operator to delete an exemption
+          # that is doing its job, and returning 0 would report a live gap as a
+          # stale entry.
+          #
+          # Step (d) reads exit 1 as "not stale" and exit 2 as "could not read",
+          # which is why 1 has to mean exactly one thing here. It used to
+          # capture with `|| true`, flattening both into an empty string — and
+          # this comment described that call site for a while after it was gone.
+          #
+          # Captured as `if VAR=$(cmd); then ... else ...`, the same shape (d)
+          # itself uses: a bare `VAR=$(cmd)` would abort THIS script under
+          # `set -e` the instant the function legitimately returns 1, printing
+          # nothing and explaining nothing.
           if CI_SCGER_LIVE_OUT=$(stale_competency_gap_exemption_reason "$FIXTURE/pair-incomplete" 'FLL:PRS' 2>/dev/null); then
             CI_SCGER_LIVE_STATUS=0
           else
@@ -1798,7 +2113,7 @@ jobs:
           printf '{"SRX":{"name":"Senior Executive","competencies":["STG"]}}' \
             > "$FIXTURE/pair-no-file/roles.json"
           printf '# empty\n' > "$FIXTURE/pair-gaps.txt"
-          NOFILE=$(catalog_missing_bars_pairs "$FIXTURE/pair-no-file")
+          NOFILE=$(catalog_missing_bars_pairs "$FIXTURE/pair-no-file") || { echo "SELF-TEST FAILED: catalog_missing_bars_pairs could not run."; FAILED=1; }
           if [ -n "$NOFILE" ]; then
             echo "SELF-TEST FAILED: the pair gate reported pairs for a role with no bars file at all: $NOFILE"
             echo "  That absence is the role-level gate's question, not this one's."
@@ -1936,7 +2251,7 @@ jobs:
              "$GOOD_ENTRY" "$GOOD_ENTRY" "$GOOD_ENTRY" "$GOOD_ENTRY" "$GOOD_ENTRY" "$GOOD_ENTRY" "$GOOD_ENTRY" \
              > "$FIXTURE/shape-bad/bars/TST.json"
 
-          SHAPE_BAD=$(catalog_malformed_bars_entries "$FIXTURE/shape-bad" TST)
+          SHAPE_BAD=$(catalog_malformed_bars_entries "$FIXTURE/shape-bad" TST) || { echo "SELF-TEST FAILED: catalog_malformed_bars_entries could not run."; FAILED=1; }
           SHAPE_OK=1
           for REASON in "TST:WRONGCOUNT:count-2" "TST:EMPTYIND:missing-en" \
                         "TST:WHITESPACE:missing-en" "TST:MISSINGLEVEL:malformed-entry" \
@@ -1962,7 +2277,7 @@ jobs:
           [ "$SHAPE_OK" -eq 1 ] && echo "  ok — shape guard catches wrong-count, empty-indicator, leading-whitespace, missing-level, extra-level, the pre-migration bare-string shape, a missing 'en' key and an unknown locale key — and leaves well-formed entries and coverage stubs alone"
 
           printf '{"OK": [%s, %s, %s]}' "$GOOD_ENTRY" "$GOOD_ENTRY" "$GOOD_ENTRY" > "$FIXTURE/shape-good/bars/TST.json"
-          FALSE=$(catalog_malformed_bars_entries "$FIXTURE/shape-good" TST)
+          FALSE=$(catalog_malformed_bars_entries "$FIXTURE/shape-good" TST) || { echo "SELF-TEST FAILED: catalog_malformed_bars_entries could not run."; FAILED=1; }
           if [ -n "$FALSE" ]; then
             echo "SELF-TEST FAILED: the shape guard flagged a fully well-formed bars file: $FALSE"
             FAILED=1
@@ -1983,7 +2298,7 @@ jobs:
             for BARS_FILE in "$TREE"/bars/*.json; do
               [ -e "$BARS_FILE" ] || continue
               ROLE=$(basename "$BARS_FILE" .json)
-              MALFORMED=$(catalog_malformed_bars_entries "$TREE" "$ROLE")
+              MALFORMED=$(catalog_malformed_bars_entries "$TREE" "$ROLE") || { echo "SELF-TEST FAILED: catalog_malformed_bars_entries could not run."; FAILED=1; }
               if [ -n "$MALFORMED" ]; then
                 echo "SELF-TEST FAILED: $TREE/bars/$ROLE.json has malformed entries: $MALFORMED"
                 FAILED=1
@@ -2013,7 +2328,7 @@ jobs:
 
           expect_caught "anchor word-count ceiling (19-word fixture)" \
             "$(catalog_overlong_bars_anchors "$FIXTURE/wc-long" TST en)"
-          WC_LONG_LINE=$(catalog_overlong_bars_anchors "$FIXTURE/wc-long" TST en)
+          WC_LONG_LINE=$(catalog_overlong_bars_anchors "$FIXTURE/wc-long" TST en) || { echo "SELF-TEST FAILED: catalog_overlong_bars_anchors could not run."; FAILED=1; }
           if [ "$WC_LONG_LINE" != "TST:PRS:5:en:19" ]; then
             echo "SELF-TEST FAILED: expected 'TST:PRS:5:en:19' from the 19-word fixture, got: $WC_LONG_LINE"
             FAILED=1
@@ -2032,7 +2347,7 @@ jobs:
           WC_ICO_ANCHOR="Recognizes symptoms that indicate underlying problems across multiple areas and consistently investigates root causes before proposing any corrective action for the team"
           printf '{"PRS": [{"indicator":{"en":"Do the thing"},"scale":{"5":{"en":"%s","it":"%s"},"3":{"en":"%s"},"1":{"en":"%s"}}}]}' \
             "$WC_ICO_ANCHOR" "$WC_ICO_ANCHOR" "$WC_ICO_ANCHOR" "$WC_ICO_ANCHOR" > "$FIXTURE/wc-ico/bars/ICO.json"
-          FALSE=$(catalog_overlong_bars_anchors "$FIXTURE/wc-ico" ICO en)
+          FALSE=$(catalog_overlong_bars_anchors "$FIXTURE/wc-ico" ICO en) || { echo "SELF-TEST FAILED: catalog_overlong_bars_anchors could not run."; FAILED=1; }
           if [ -n "$FALSE" ]; then
             echo "SELF-TEST FAILED: the max-18 guard fired on ICO, which is exempt (documented, different two-sentence register): $FALSE"
             FAILED=1
@@ -2105,7 +2420,7 @@ jobs:
             "$WC_OK_ANCHOR" "$WC_OK_ANCHOR" "$WC_SHORT_ANCHOR" > "$FIXTURE/wc-short/bars/TST.json"
           expect_caught "anchor word-count floor (non-blocking report)" \
             "$(catalog_short_bars_anchors "$FIXTURE/wc-short" TST en)"
-          WC_SHORT_LINE=$(catalog_short_bars_anchors "$FIXTURE/wc-short" TST en)
+          WC_SHORT_LINE=$(catalog_short_bars_anchors "$FIXTURE/wc-short" TST en) || { echo "SELF-TEST FAILED: catalog_short_bars_anchors could not run."; FAILED=1; }
           if [ "$WC_SHORT_LINE" != "TST:PRS:1:en:4" ]; then
             echo "SELF-TEST FAILED: expected 'TST:PRS:1:en:4' from the 4-word fixture, got: $WC_SHORT_LINE"
             FAILED=1
@@ -2120,16 +2435,17 @@ jobs:
             echo "  ok — floor report fails closed on a missing bars file"
           fi
 
-          # ...and the committed catalogue's leader files (FLL, MLL, BUL, and
-          # SRX — materialised into both trees in bars-catalogue-completion
-          # Phase 6 and no longer staged or exempt from any gate) must be
+          # ...and every bars file the glob reads (the leader files FLL, MLL,
+          # BUL and SRX, materialised in bars-catalogue-completion Phase 6, plus
+          # any declared non-role catalogue such as POTENTIAL.json — none staged,
+          # none exempt from any gate) must be
           # clean against the blocking ceiling. ICO is skipped by the guard's
           # own exemption, not by this loop.
           for TREE in docs/app_description/02-domain/framework api/database/framework; do
             for BARS_FILE in "$TREE"/bars/*.json; do
               [ -e "$BARS_FILE" ] || continue
               ROLE=$(basename "$BARS_FILE" .json)
-              OVERLONG=$(catalog_overlong_bars_anchors "$TREE" "$ROLE")
+              OVERLONG=$(catalog_overlong_bars_anchors "$TREE" "$ROLE") || { echo "SELF-TEST FAILED: could not read $TREE/bars/$ROLE.json for the anchor ceiling."; FAILED=1; }
               if [ -n "$OVERLONG" ]; then
                 echo "SELF-TEST FAILED: $TREE/bars/$ROLE.json has anchor(s) over the 18-word ceiling: $OVERLONG"
                 FAILED=1
@@ -2152,7 +2468,7 @@ jobs:
           printf '{"PRS": [{"indicator":{"en":"Shared sentence"},"scale":{"5":{"en":"d"},"3":{"en":"e"},"1":{"en":"f"}}}]}' \
             > "$FIXTURE/xrole-dup/bars/BBB.json"
           expect_caught "cross-role anchor identity" "$(catalog_crossrole_duplicates "$FIXTURE/xrole-dup")"
-          DUP_LINE=$(catalog_crossrole_duplicates "$FIXTURE/xrole-dup")
+          DUP_LINE=$(catalog_crossrole_duplicates "$FIXTURE/xrole-dup") || { echo "SELF-TEST FAILED: catalog_crossrole_duplicates could not run."; FAILED=1; }
           if [ "$DUP_LINE" != "AAA:BBB:PRS:en:indicator" ]; then
             echo "SELF-TEST FAILED: expected 'AAA:BBB:PRS:en:indicator', got: $DUP_LINE"
             FAILED=1
@@ -2166,7 +2482,7 @@ jobs:
             > "$FIXTURE/xrole-clean/bars/AAA.json"
           printf '{"STG": [{"indicator":{"en":"Shared sentence"},"scale":{"5":{"en":"d"},"3":{"en":"e"},"1":{"en":"f"}}}]}' \
             > "$FIXTURE/xrole-clean/bars/BBB.json"
-          FALSE=$(catalog_crossrole_duplicates "$FIXTURE/xrole-clean")
+          FALSE=$(catalog_crossrole_duplicates "$FIXTURE/xrole-clean") || { echo "SELF-TEST FAILED: catalog_crossrole_duplicates could not run."; FAILED=1; }
           if [ -n "$FALSE" ]; then
             echo "SELF-TEST FAILED: the cross-role guard fired on the same string under DIFFERENT competencies: $FALSE"
             FAILED=1
@@ -2198,7 +2514,7 @@ jobs:
           mkdir -p "$FIXTURE/xrole-within/bars"
           printf '{"PRS": [{"indicator":{"en":"Same sentence twice"},"scale":{"5":{"en":"a"},"3":{"en":"b"},"1":{"en":"c"}}},{"indicator":{"en":"Same sentence twice"},"scale":{"5":{"en":"d"},"3":{"en":"e"},"1":{"en":"f"}}}]}' \
             > "$FIXTURE/xrole-within/bars/AAA.json"
-          FALSE=$(catalog_crossrole_duplicates "$FIXTURE/xrole-within")
+          FALSE=$(catalog_crossrole_duplicates "$FIXTURE/xrole-within") || { echo "SELF-TEST FAILED: catalog_crossrole_duplicates could not run."; FAILED=1; }
           if [ -n "$FALSE" ]; then
             echo "SELF-TEST FAILED: the cross-role guard fired on a string repeated within a single role's own file: $FALSE"
             FAILED=1
@@ -2221,7 +2537,7 @@ jobs:
           CI_CROSSROLE_BASELINE_FILE="$FIXTURE/xrole-baseline.txt"
           export CI_CROSSROLE_BASELINE_FILE
 
-          UNEXPECTED=$(catalog_unexpected_crossrole_duplicates "$FIXTURE/xrole-dup")
+          UNEXPECTED=$(catalog_unexpected_crossrole_duplicates "$FIXTURE/xrole-dup") || { echo "SELF-TEST FAILED: catalog_unexpected_crossrole_duplicates could not run."; FAILED=1; }
           if [ -n "$UNEXPECTED" ]; then
             echo "SELF-TEST FAILED: the cross-role guard rejected a duplicate covered by the baseline: $UNEXPECTED"
             FAILED=1
@@ -2287,7 +2603,7 @@ jobs:
             > "$FIXTURE/xlocale-diverge/bars/BBB.json"
           expect_caught "cross-locale divergence (EN identical, IT diverges)" \
             "$(catalog_crosslocale_duplicate_divergence "$FIXTURE/xlocale-diverge")"
-          DIVERGE_LINE=$(catalog_crosslocale_duplicate_divergence "$FIXTURE/xlocale-diverge")
+          DIVERGE_LINE=$(catalog_crosslocale_duplicate_divergence "$FIXTURE/xlocale-diverge") || { echo "SELF-TEST FAILED: catalog_crosslocale_duplicate_divergence could not run."; FAILED=1; }
           if [ "$DIVERGE_LINE" != "AAA:BBB:INF:indicator:diverges-though-en-identical" ]; then
             echo "SELF-TEST FAILED: expected 'AAA:BBB:INF:indicator:diverges-though-en-identical', got: $DIVERGE_LINE"
             FAILED=1
@@ -2299,7 +2615,7 @@ jobs:
             > "$FIXTURE/xlocale-converge/bars/AAA.json"
           printf '{"RES": [{"indicator":{"en":"A completely different English sentence","it":"Gestire gli errori in modo costruttivo"},"scale":{"5":{"en":"a5b"},"3":{"en":"a3b"},"1":{"en":"a1b"}}}]}' \
             > "$FIXTURE/xlocale-converge/bars/BBB.json"
-          CONVERGE_LINE=$(catalog_crosslocale_duplicate_divergence "$FIXTURE/xlocale-converge")
+          CONVERGE_LINE=$(catalog_crosslocale_duplicate_divergence "$FIXTURE/xlocale-converge") || { echo "SELF-TEST FAILED: catalog_crosslocale_duplicate_divergence could not run."; FAILED=1; }
           if [ "$CONVERGE_LINE" != "AAA:BBB:RES:indicator:converges-though-en-differs" ]; then
             echo "SELF-TEST FAILED: expected 'AAA:BBB:RES:indicator:converges-though-en-differs', got: $CONVERGE_LINE"
             FAILED=1
@@ -2311,7 +2627,7 @@ jobs:
             > "$FIXTURE/xlocale-clean/bars/AAA.json"
           printf '{"INF": [{"indicator":{"en":"Identify the motives and objectives","it":"Individuare i motivi e gli obiettivi"},"scale":{"5":{"en":"a5b"},"3":{"en":"a3b"},"1":{"en":"a1b"}}}]}' \
             > "$FIXTURE/xlocale-clean/bars/BBB.json"
-          FALSE=$(catalog_crosslocale_duplicate_divergence "$FIXTURE/xlocale-clean")
+          FALSE=$(catalog_crosslocale_duplicate_divergence "$FIXTURE/xlocale-clean") || { echo "SELF-TEST FAILED: catalog_crosslocale_duplicate_divergence could not run."; FAILED=1; }
           if [ -n "$FALSE" ]; then
             echo "SELF-TEST FAILED: the cross-locale guard fired on a faithful translation of an identical EN pair: $FALSE"
             FAILED=1
@@ -2319,16 +2635,16 @@ jobs:
             echo "  ok — cross-locale guard does not fire on a faithful translation (IT identical where EN is identical)"
           fi
 
-          # ...and the committed catalogue (no IT content authored yet in this
+          # ...and the committed catalogue (fully translated: metadata and anchors alike, in this
           # change) must be clean — empty output is the correct, current state.
           for TREE in docs/app_description/02-domain/framework api/database/framework; do
-            DIVERGENCE=$(catalog_crosslocale_duplicate_divergence "$TREE")
+            DIVERGENCE=$(catalog_crosslocale_duplicate_divergence "$TREE") || { echo "SELF-TEST FAILED: catalog_crosslocale_duplicate_divergence could not run."; FAILED=1; }
             if [ -n "$DIVERGENCE" ]; then
               echo "SELF-TEST FAILED: $TREE has a cross-locale divergence: $DIVERGENCE"
               FAILED=1
             fi
           done
-          echo "  ok — the committed catalogue has no cross-locale divergence (no IT content authored yet)"
+          echo "  ok — the committed catalogue has no cross-locale divergence (metadata and anchors are both fully translated)"
 
           # ------------------------------------------------------------------
           # roles.json / competencies.json locale-map shape
@@ -2339,7 +2655,7 @@ jobs:
             > "$FIXTURE/meta-shape-bad/competencies.json"
           printf '{"ICO": {"name": {"en":"Individual Contributor"}, "responsibilities": {"en":""}, "competencies": ["PRS","STG"]}, "FLL": {"name": {"en":"  "}, "responsibilities": {"en":"ok"}, "competencies": ["PRS"]}}' \
             > "$FIXTURE/meta-shape-bad/roles.json"
-          META_BAD=$(catalog_meta_locale_shape "$FIXTURE/meta-shape-bad")
+          META_BAD=$(catalog_meta_locale_shape "$FIXTURE/meta-shape-bad") || { echo "SELF-TEST FAILED: catalog_meta_locale_shape could not run."; FAILED=1; }
           META_OK=1
           for REASON in "COMPETENCIES:PRS:name:not-a-locale-map" "COMPETENCIES:STG:definition:unknown-locale-es" "ROLES:FLL:name:missing-en"; do
             if ! printf '%s\n' "$META_BAD" | grep -qxF "$REASON"; then
@@ -2356,7 +2672,7 @@ jobs:
           [ "$META_OK" -eq 1 ] && echo "  ok — meta-locale-shape guard catches a bare-string field, an unknown locale key and a whitespace-only name — and allows a blank EN responsibilities (the documented fill-empty sentinel) alone"
 
           for TREE in docs/app_description/02-domain/framework api/database/framework; do
-            SHAPE=$(catalog_meta_locale_shape "$TREE")
+            SHAPE=$(catalog_meta_locale_shape "$TREE") || { echo "SELF-TEST FAILED: catalog_meta_locale_shape could not run."; FAILED=1; }
             if [ -n "$SHAPE" ]; then
               echo "SELF-TEST FAILED: $TREE has a malformed roles.json/competencies.json locale field: $SHAPE"
               FAILED=1
@@ -2365,7 +2681,7 @@ jobs:
           echo "  ok — the committed roles.json/competencies.json are locale-shape-clean in both trees"
 
           # ------------------------------------------------------------------
-          # roles.json / competencies.json locale COMPLETENESS — the 46-
+          # roles.json / competencies.json locale COMPLETENESS — the 50-
           # string gap. Two directions: the guard must CATCH a field missing
           # a locale CI_LOCALES expects (while still honoring the
           # responsibilities blank-en sentinel, not contradicting it), and
@@ -2381,7 +2697,7 @@ jobs:
             > "$FIXTURE/meta-completeness-bad/competencies.json"
           printf '{"ICO": {"name": {"en":"Individual Contributor","it":"Collaboratore individuale"}, "responsibilities": {"en":""}, "competencies": ["PRS"]}, "FLL": {"name": {"en":"Front Line Leader"}, "responsibilities": {"en":"x","it":"x"}, "competencies": ["PRS"]}, "MLL": {"name": {"en":"x","it":"x"}, "responsibilities": {"en":"authored, no it yet"}, "competencies": ["PRS"]}}' \
             > "$FIXTURE/meta-completeness-bad/roles.json"
-          COMPLETE_BAD=$(catalog_meta_locale_completeness "$FIXTURE/meta-completeness-bad")
+          COMPLETE_BAD=$(catalog_meta_locale_completeness "$FIXTURE/meta-completeness-bad") || { echo "SELF-TEST FAILED: catalog_meta_locale_completeness could not run."; FAILED=1; }
           COMPLETE_OK=1
           for REASON in "COMPETENCIES:PRS:name:missing-it" "COMPETENCIES:STG:definition:missing-it" "ROLES:FLL:name:missing-it" "ROLES:MLL:responsibilities:missing-it"; do
             if ! printf '%s\n' "$COMPLETE_BAD" | grep -qxF "$REASON"; then
@@ -2403,24 +2719,26 @@ jobs:
             > "$FIXTURE/meta-completeness-notobject/competencies.json"
           printf '{"ICO": {"name": {"en":"x","it":"x"}, "responsibilities": {"en":"x","it":"x"}, "competencies": []}}' \
             > "$FIXTURE/meta-completeness-notobject/roles.json"
-          if catalog_meta_locale_completeness "$FIXTURE/meta-completeness-notobject" >/tmp/meta-completeness-notobject.out 2>/tmp/meta-completeness-notobject.err; then
+          if catalog_meta_locale_completeness "$FIXTURE/meta-completeness-notobject" >"$FIXTURE/meta-completeness-notobject.out" 2>"$FIXTURE/meta-completeness-notobject.err"; then
             echo "SELF-TEST FAILED: the meta-locale-completeness guard returned SUCCESS on a translatable field that is a bare string, not a locale-map object. It must fail closed instead of reading malformed input as complete. stdout was:"
-            cat /tmp/meta-completeness-notobject.out
+            cat "$FIXTURE/meta-completeness-notobject.out"
+            FAILED=1
           else
             echo "  ok — meta-locale-completeness guard fails closed (nonzero exit) on a translatable field that is not an object:"
-            sed 's/^/    /' /tmp/meta-completeness-notobject.err
+            sed 's/^/    /' "$FIXTURE/meta-completeness-notobject.err"
           fi
 
           printf '{"PRS": {"name": {"en":"Problem Solving","it":"x"}, "definition": {"en":"d","it":"d"}}}' \
             > "$FIXTURE/meta-completeness-noen/competencies.json"
           printf '{"ICO": {"name": {"en":"x","it":"x"}, "responsibilities": {"it":"present but en is entirely absent"}, "competencies": []}}' \
             > "$FIXTURE/meta-completeness-noen/roles.json"
-          if catalog_meta_locale_completeness "$FIXTURE/meta-completeness-noen" >/tmp/meta-completeness-noen.out 2>/tmp/meta-completeness-noen.err; then
+          if catalog_meta_locale_completeness "$FIXTURE/meta-completeness-noen" >"$FIXTURE/meta-completeness-noen.out" 2>"$FIXTURE/meta-completeness-noen.err"; then
             echo "SELF-TEST FAILED: the meta-locale-completeness guard returned SUCCESS on a responsibilities field with no 'en' key at all (not even a blank one — the sentinel requires en to be PRESENT and empty, not absent). It must fail closed. stdout was:"
-            cat /tmp/meta-completeness-noen.out
+            cat "$FIXTURE/meta-completeness-noen.out"
+            FAILED=1
           else
             echo "  ok — meta-locale-completeness guard fails closed (nonzero exit) on a field whose 'en' is absent rather than blank:"
-            sed 's/^/    /' /tmp/meta-completeness-noen.err
+            sed 's/^/    /' "$FIXTURE/meta-completeness-noen.err"
           fi
 
           for TREE in docs/app_description/02-domain/framework api/database/framework; do
@@ -2463,7 +2781,7 @@ jobs:
           printf 'it:ICO:PRS\n' > "$FIXTURE/locale-gaps-partial.txt"
           CI_LOCALE_GAPS_FILE="$FIXTURE/locale-gaps-partial.txt"
           export CI_LOCALE_GAPS_FILE
-          UNDECLARED=$(catalog_unexpected_locale_gaps "$FIXTURE/locale-undeclared" it)
+          UNDECLARED=$(catalog_unexpected_locale_gaps "$FIXTURE/locale-undeclared" it) || { echo "SELF-TEST FAILED: catalog_unexpected_locale_gaps could not run."; FAILED=1; }
           if ! printf '%s\n' "$UNDECLARED" | grep -qxF 'it:ICO:STG'; then
             echo "SELF-TEST FAILED: catalog_unexpected_locale_gaps did not catch the fixture's incomplete, undeclared pair it:ICO:STG. Got: $UNDECLARED"
             FAILED=1
@@ -2474,7 +2792,10 @@ jobs:
           printf 'it:ICO:PRS\nit:ZZZ:NOPE\n' > "$FIXTURE/locale-gaps-stale.txt"
           CI_LOCALE_GAPS_FILE="$FIXTURE/locale-gaps-stale.txt"
           export CI_LOCALE_GAPS_FILE
-          STALE=$(catalog_stale_locale_gap_exemptions docs/app_description/02-domain/framework it)
+          # The FIXTURE tree, not the live catalogue. Same rule the row above
+          # states and these three rows then broke: manufacture the
+          # precondition, never borrow it from the tree under test.
+          STALE=$(catalog_stale_locale_gap_exemptions "$FIXTURE/locale-undeclared" it) || { echo "SELF-TEST FAILED: catalog_stale_locale_gap_exemptions could not run."; FAILED=1; }
           if ! printf '%s\n' "$STALE" | grep -qxF 'it:ZZZ:NOPE'; then
             echo "SELF-TEST FAILED: catalog_stale_locale_gap_exemptions did not catch an exemption for a pair that no longer exists: $STALE"
             FAILED=1
@@ -2482,12 +2803,18 @@ jobs:
             echo "  ok — catalog_stale_locale_gap_exemptions catches an exemption for a nonexistent/now-complete pair"
           fi
 
-          printf 'it:ICO:PRS\nit:ICO:STG\n' > "$FIXTURE/locale-gaps-partial-role.txt"
+          # ICO has exactly two competencies in the fixture, and only one is
+          # listed — a partial role, manufactured here rather than borrowed.
+          # The expectation used to read `it:ICO:2/15`, which hardcoded the LIVE
+          # catalogue's competency count into a self-test: correct today, and a
+          # false failure attributed to the guard the day the catalogue
+          # legitimately changes.
+          printf 'it:ICO:PRS\n' > "$FIXTURE/locale-gaps-partial-role.txt"
           CI_LOCALE_GAPS_FILE="$FIXTURE/locale-gaps-partial-role.txt"
           export CI_LOCALE_GAPS_FILE
-          WHOLE_ROLE=$(locale_gaps_whole_role_violations docs/app_description/02-domain/framework)
-          if [ "$WHOLE_ROLE" != "it:ICO:2/15" ]; then
-            echo "SELF-TEST FAILED: expected 'it:ICO:2/15' from a role listed with 2 of its 15 pairs, got: $WHOLE_ROLE"
+          WHOLE_ROLE=$(locale_gaps_whole_role_violations "$FIXTURE/locale-undeclared") || { echo "SELF-TEST FAILED: locale_gaps_whole_role_violations could not run."; FAILED=1; }
+          if [ "$WHOLE_ROLE" != "it:ICO:1/2" ]; then
+            echo "SELF-TEST FAILED: expected 'it:ICO:1/2' from a role listed with 1 of its 2 pairs, got: $WHOLE_ROLE"
             FAILED=1
           else
             echo "  ok — locale_gaps_whole_role_violations catches a role listed with neither 0 nor its full pair count (no role may ship half-translated)"
@@ -2496,7 +2823,7 @@ jobs:
           printf 'it:ICO:PRS\nit:FLL:PRS\nit:ICO:STG\n' > "$FIXTURE/locale-gaps-interleaved.txt"
           CI_LOCALE_GAPS_FILE="$FIXTURE/locale-gaps-interleaved.txt"
           export CI_LOCALE_GAPS_FILE
-          INTERLEAVED=$(locale_gaps_role_order_violations)
+          INTERLEAVED=$(locale_gaps_role_order_violations) || { echo "SELF-TEST FAILED: locale_gaps_role_order_violations could not run."; FAILED=1; }
           if [ "$INTERLEAVED" != "ICO" ]; then
             echo "SELF-TEST FAILED: expected 'ICO' from an interleaved fixture, got: $INTERLEAVED"
             FAILED=1
@@ -2522,17 +2849,24 @@ jobs:
               FAILED=1
             fi
           done
-          WHOLE_ROLE=$(locale_gaps_whole_role_violations docs/app_description/02-domain/framework)
+          WHOLE_ROLE=$(locale_gaps_whole_role_violations docs/app_description/02-domain/framework) || { echo "SELF-TEST FAILED: locale_gaps_whole_role_violations could not run against the committed tree."; FAILED=1; }
           if [ -n "$WHOLE_ROLE" ]; then
             echo "SELF-TEST FAILED: scripts/framework-locale-gaps.txt lists a partial role: $WHOLE_ROLE"
             FAILED=1
           fi
-          INTERLEAVED=$(locale_gaps_role_order_violations)
+          INTERLEAVED=$(locale_gaps_role_order_violations) || { echo "SELF-TEST FAILED: locale_gaps_role_order_violations could not run."; FAILED=1; }
           if [ -n "$INTERLEAVED" ]; then
             echo "SELF-TEST FAILED: scripts/framework-locale-gaps.txt interleaves role '$INTERLEAVED' with another role's entries."
             FAILED=1
           fi
-          echo "  ok — the committed scripts/framework-locale-gaps.txt round-trips cleanly: all 83 pairs listed (none translated yet), none stale, no role partially listed, no interleaving"
+          # DERIVED, not typed. This line used to read "all 83 pairs listed
+          # (no IT anchors translated yet)" while the control file listed ZERO
+          # and every pair WAS translated — a hardcoded number and a hardcoded
+          # claim, both false, printed by the step whose job is proving that
+          # claims are backed by mechanism.
+          LG_DECLARED=$(role_competency_pairs docs/app_description/02-domain/framework | grep -c . || true)
+          LG_LISTED=$(known_locale_gap_pairs | grep -c . || true)
+          echo "  ok — the committed scripts/framework-locale-gaps.txt round-trips cleanly: $LG_LISTED of $LG_DECLARED role x competency pairs listed as untranslated, none stale, no role partially listed, no interleaving"
 
           # ------------------------------------------------------------------
           # Guard (e): submodule pointer reachability.
@@ -2688,7 +3022,7 @@ jobs:
           # asserting the LIST of image refs rather than pass/fail.
           printf 'FROM node:24.11-slim AS builder\nFROM builder AS runtime\nFROM scratch AS scratch2\n' \
             > "$FIXTURE/vc-good/Dockerfile.multistage"
-          GOT=$(catalog_dockerfile_images "$FIXTURE/vc-good/Dockerfile.multistage")
+          GOT=$(catalog_dockerfile_images "$FIXTURE/vc-good/Dockerfile.multistage") || { echo "SELF-TEST FAILED: catalog_dockerfile_images could not run."; FAILED=1; }
           if [ "$GOT" = "node:24.11-slim" ]; then
             echo "  ok — catalog_dockerfile_images returns only the real image, not the stage reference or scratch"
           else
@@ -2705,7 +3039,7 @@ jobs:
           # compose_declared_images: a real tag is kept; the :local
           # build-only convention is excluded.
           COMPOSE_FIXTURE=$(printf 'services:\n  postgres:\n    image: pgvector/pgvector:0.8.0-pg17\n  api:\n    image: beai-api:local\n  worker:\n    image: beai-api:local\n')
-          GOT=$(compose_declared_images "$COMPOSE_FIXTURE")
+          GOT=$(compose_declared_images "$COMPOSE_FIXTURE") || { echo "SELF-TEST FAILED: compose_declared_images could not run."; FAILED=1; }
           if [ "$GOT" = "pgvector/pgvector:0.8.0-pg17" ]; then
             echo "  ok — compose_declared_images keeps a real tag and excludes local build-only tags"
           else
@@ -2719,9 +3053,17 @@ jobs:
           # because the opening heading itself starts with "## " and would
           # close the range on its own line (see the function's own comment
           # in scripts/ci-guards.sh).
-          printf '# Version Catalog\n\n## Docker base images\n\n| Image | Tag | Used in |\n|-------|-----|---------|\n| Redis | `redis:8.0-alpine` | compose |\n| Postgres | `pgvector/pgvector:0.8.0-pg17` | compose |\n\nSome prose, no backticks.\n\n## Runtimes and frameworks\n\n| Component | Version |\n|-----------|---------|\n| PHP | `^8.5` |\n' \
+          #
+          # The fixture carries a prose line WITH backticks on purpose. The
+          # earlier one had none, so the single behaviour that can break the
+          # real catalog was the one the fixture was built to avoid — and it
+          # did break it: a paragraph mentioning `docs/version-catalog.md`
+          # was read as an image tag, and step (h) reported three images
+          # that do not exist. The parser reads the Tag COLUMN of table
+          # rows, which is what its name has always claimed.
+          printf '# Version Catalog\n\n## Docker base images\n\n| Image | Tag | Used in |\n|-------|-----|---------|\n| Redis | `redis:8.0-alpine` | compose |\n| Postgres | `pgvector/pgvector:0.8.0-pg17` | compose |\n\nSome prose, no backticks.\n\nProse that DOES carry backticks: `docs/version-catalog.md` names `docker compose config`.\n\n## Runtimes and frameworks\n\n| Component | Version |\n|-----------|---------|\n| PHP | `^8.5` |\n' \
             > "$FIXTURE/vc-good/version-catalog.md"
-          GOT=$(version_catalog_images "$FIXTURE/vc-good/version-catalog.md")
+          GOT=$(version_catalog_images "$FIXTURE/vc-good/version-catalog.md") || { echo "SELF-TEST FAILED: version_catalog_images could not run."; FAILED=1; }
           EXPECTED=$(printf 'redis:8.0-alpine\npgvector/pgvector:0.8.0-pg17')
           if [ "$GOT" = "$EXPECTED" ]; then
             echo "  ok — version_catalog_images reads exactly the Docker base images table, stopping at the next heading"
@@ -2758,8 +3100,8 @@ jobs:
           printf 'FROM node:24.99-slim AS runtime\n' > "$FIXTURE/vc-bad/Dockerfile"
           printf '## Docker base images\n\n| Image | Tag | Used in |\n|-------|-----|---------|\n| Node | `node:24.11-slim` | frontend/Dockerfile |\n' \
             > "$FIXTURE/vc-bad/catalog-stale-dockerfile.md"
-          USED=$(catalog_dockerfile_images "$FIXTURE/vc-bad/Dockerfile")
-          CATALOG=$(version_catalog_images "$FIXTURE/vc-bad/catalog-stale-dockerfile.md")
+          USED=$(catalog_dockerfile_images "$FIXTURE/vc-bad/Dockerfile") || { echo "SELF-TEST FAILED: catalog_dockerfile_images could not run."; FAILED=1; }
+          CATALOG=$(version_catalog_images "$FIXTURE/vc-bad/catalog-stale-dockerfile.md") || { echo "SELF-TEST FAILED: version_catalog_images could not run."; FAILED=1; }
           expect_caught "version-catalog direction 1 (used tag bumped, catalog row not updated)" \
             "$(image_set_difference "$USED" "$CATALOG")"
 
@@ -2768,8 +3110,8 @@ jobs:
           printf 'FROM node:24.11-slim AS runtime\n' > "$FIXTURE/vc-bad/Dockerfile"
           printf '## Docker base images\n\n| Image | Tag | Used in |\n|-------|-----|---------|\n| Node | `node:24.11-slim` | frontend/Dockerfile |\n| Ghost | `ghost:1.0.0-old` | nowhere anymore |\n' \
             > "$FIXTURE/vc-bad/catalog-stale-row.md"
-          USED=$(catalog_dockerfile_images "$FIXTURE/vc-bad/Dockerfile")
-          CATALOG=$(version_catalog_images "$FIXTURE/vc-bad/catalog-stale-row.md")
+          USED=$(catalog_dockerfile_images "$FIXTURE/vc-bad/Dockerfile") || { echo "SELF-TEST FAILED: catalog_dockerfile_images could not run."; FAILED=1; }
+          CATALOG=$(version_catalog_images "$FIXTURE/vc-bad/catalog-stale-row.md") || { echo "SELF-TEST FAILED: version_catalog_images could not run."; FAILED=1; }
           expect_caught "version-catalog direction 2 (catalog row no longer used anywhere)" \
             "$(image_set_difference "$CATALOG" "$USED")"
 
@@ -2777,8 +3119,8 @@ jobs:
           # both directions at once.
           printf '## Docker base images\n\n| Image | Tag | Used in |\n|-------|-----|---------|\n| Node | `node:24.11-slim` | frontend/Dockerfile |\n' \
             > "$FIXTURE/vc-bad/catalog-clean.md"
-          USED=$(catalog_dockerfile_images "$FIXTURE/vc-bad/Dockerfile")
-          CATALOG=$(version_catalog_images "$FIXTURE/vc-bad/catalog-clean.md")
+          USED=$(catalog_dockerfile_images "$FIXTURE/vc-bad/Dockerfile") || { echo "SELF-TEST FAILED: catalog_dockerfile_images could not run."; FAILED=1; }
+          CATALOG=$(version_catalog_images "$FIXTURE/vc-bad/catalog-clean.md") || { echo "SELF-TEST FAILED: version_catalog_images could not run."; FAILED=1; }
           CLEAN="$(image_set_difference "$USED" "$CATALOG")$(image_set_difference "$CATALOG" "$USED")"
           if [ -n "$CLEAN" ]; then
             echo "SELF-TEST FAILED: the version-catalog guard flagged a Dockerfile and catalog that agree: $CLEAN"
@@ -2794,14 +3136,31 @@ jobs:
           for DF in api/Dockerfile frontend/Dockerfile backoffice/Dockerfile; do
             REAL_USED=$(printf '%s\n%s' "$REAL_USED" "$(catalog_dockerfile_images "$DF")")
           done
-          if REAL_COMPOSE_CONFIG=$(docker compose config 2>&1); then
+          # stderr to a file, not merged into stdout — the same shape step (h)
+          # uses. Merging it fed `compose_declared_images` a string with
+          # compose warnings interleaved, so this row proved the mechanism
+          # against an input the real gate never produces. Harmless in practice
+          # (a WARN line does not match `^[[:space:]]*image:`) and exactly the
+          # defect this step is named after.
+          if REAL_COMPOSE_CONFIG=$(docker compose config 2>"$FIXTURE/compose-config.err"); then
             REAL_USED=$(printf '%s\n%s' "$REAL_USED" "$(compose_declared_images "$REAL_COMPOSE_CONFIG")")
           else
             echo "SELF-TEST FAILED: 'docker compose config' failed while proving the committed catalog against reality."
             FAILED=1
           fi
+          # ...and the images a SCRIPT pins for `docker run`. Without this the
+          # catalog's "reality" was three Dockerfiles and compose, while the
+          # repo also pins the 3.45GB Playwright image from
+          # scripts/e2e-container.sh — so that pin could never be reported as
+          # uncataloged, and cataloging it fired the stale-row check instead.
+          if REAL_SCRIPTS=$(script_pinned_images scripts); then
+            REAL_USED=$(printf '%s\n%s' "$REAL_USED" "$REAL_SCRIPTS")
+          else
+            echo "SELF-TEST FAILED: could not read scripts/ for the image refs it pins."
+            FAILED=1
+          fi
           REAL_USED=$(printf '%s\n' "$REAL_USED" | grep -v '^$' | sort -u)
-          REAL_CATALOG=$(version_catalog_images docs/version-catalog.md)
+          REAL_CATALOG=$(version_catalog_images docs/version-catalog.md) || { echo "SELF-TEST FAILED: version_catalog_images could not run."; FAILED=1; }
           REAL_MISSING=$(image_set_difference "$REAL_USED" "$REAL_CATALOG")
           REAL_STALE=$(image_set_difference "$REAL_CATALOG" "$REAL_USED")
           if [ -n "$REAL_MISSING$REAL_STALE" ]; then
@@ -2817,6 +3176,322 @@ jobs:
             FAILED=1
           else
             echo "  ok — the committed docs/version-catalog.md matches reality in both directions"
+          fi
+
+          # The floor's two failure codes are load-bearing for step (d): 2 is
+          # "no measured threshold for this locale", 1 is "could not read".
+          # Asserted, because the caller now branches on the difference and a
+          # silent collapse back to 1 would turn every unmeasured locale into a
+          # build failure.
+          # Captured through `if`, not as a bare call followed by `$?`. This
+          # step sets `set -e`, and the first call returns 2 BY DESIGN — a bare
+          # call would kill the step right here, before script_pinned_images,
+          # bun_version_divergence and `rm -rf "$FIXTURE"` ever ran, and the job
+          # would go red with no diagnostic at all. Which is the outcome this
+          # file exists to prevent, committed inside the assertion proving it.
+          if catalog_short_bars_anchors docs/app_description/02-domain/framework FLL it >/dev/null 2>&1; then
+            FLOOR_UNMEASURED_RC=0
+          else
+            FLOOR_UNMEASURED_RC=$?
+          fi
+          if catalog_short_bars_anchors "$FIXTURE/definitely-not-a-tree" FLL en >/dev/null 2>&1; then
+            FLOOR_UNREADABLE_RC=0
+          else
+            FLOOR_UNREADABLE_RC=$?
+          fi
+          if [ "$FLOOR_UNMEASURED_RC" -eq 2 ] && [ "$FLOOR_UNREADABLE_RC" -eq 1 ]; then
+            echo "  ok — catalog_short_bars_anchors separates an unmeasured locale (2) from an unreadable tree (1)"
+          else
+            echo "SELF-TEST FAILED: expected exit 2 for an unmeasured locale floor and 1 for an unreadable tree, got $FLOOR_UNMEASURED_RC and $FLOOR_UNREADABLE_RC."
+            FAILED=1
+          fi
+
+          # The MISSING-FILE / NO-SUBJECT paths. Step (f) header claims it proves
+          # "every guard in this file" against a known-bad fixture, and three
+          # live `return 1` branches had no row: a guard that cannot find its
+          # subject must not read as agreement, and until now nothing checked
+          # that it does not. A header promising coverage the mechanism does not
+          # deliver is the defect this whole step is named after.
+          if compose_pins_pgsql "$FIXTURE/definitely-not-a-compose-file.yml" >/dev/null 2>&1; then
+            echo "SELF-TEST FAILED: compose_pins_pgsql returned SUCCESS for a file that does not exist."
+            FAILED=1
+          else
+            echo "  ok — compose_pins_pgsql fails closed on a missing file"
+          fi
+          if catalog_meta_locale_shape "$FIXTURE/definitely-not-a-tree" >/dev/null 2>&1; then
+            echo "SELF-TEST FAILED: catalog_meta_locale_shape returned SUCCESS for a tree that does not exist."
+            FAILED=1
+          else
+            echo "  ok — catalog_meta_locale_shape fails closed on an unreadable tree"
+          fi
+          printf 'This document names no runtime version at all.\n' > "$FIXTURE/no-bun-version.md"
+          if bun_doc_divergence 1.4.0 "$FIXTURE/no-bun-version.md" >/dev/null 2>&1; then
+            echo "SELF-TEST FAILED: bun_doc_divergence returned SUCCESS for a document naming no Bun version — silence there would read as agreement."
+            FAILED=1
+          else
+            echo "  ok — bun_doc_divergence fails closed on a document naming no Bun version"
+          fi
+
+          # stale_competency_gap_exemption_reason: the UNREADABLE answer, which
+          # is a fourth shape beside anchored/orphaned/role-level and used to be
+          # indistinguishable from "orphaned" — so step (d) told an operator to
+          # delete a correct exemption about a file nobody parsed.
+          mkdir -p "$FIXTURE/reason-unreadable/bars"
+          printf 'not json at all' > "$FIXTURE/reason-unreadable/roles.json"
+          printf '{}' > "$FIXTURE/reason-unreadable/bars/FLL.json"
+          if REASON_OUT=$(stale_competency_gap_exemption_reason "$FIXTURE/reason-unreadable" 'FLL:PRS' 2>/dev/null); then
+            REASON_UNREADABLE_RC=0
+          else
+            REASON_UNREADABLE_RC=$?
+          fi
+          if [ "$REASON_UNREADABLE_RC" -eq 2 ] && [ -z "$REASON_OUT" ]; then
+            echo "  ok — stale_competency_gap_exemption_reason returns 2 with NO verdict when roles.json cannot be read"
+          else
+            echo "SELF-TEST FAILED: expected exit 2 and no output for an unreadable roles.json, got rc=$REASON_UNREADABLE_RC out='$REASON_OUT'."
+            FAILED=1
+          fi
+
+          # catalog_crosslocale_duplicate_divergence on the pre-migration shape.
+          # Its docblock promised it failed closed here; it returned clean over a
+          # tree it had never examined, while its cross-role sibling went red on
+          # the identical input.
+          mkdir -p "$FIXTURE/xlocale-bare/bars"
+          printf '{"ICO":{"name":{"en":"x","it":"x"},"responsibilities":{"en":"x","it":"x"},"competencies":["PRS"]}}' \
+            > "$FIXTURE/xlocale-bare/roles.json"
+          printf '{"PRS":{"name":{"en":"x","it":"x"},"definition":{"en":"d","it":"d"}}}' \
+            > "$FIXTURE/xlocale-bare/competencies.json"
+          printf '{"PRS":[{"indicator":"bare string, pre-migration shape","scale":{"5":"bare","3":"bare","1":"bare"}}]}' \
+            > "$FIXTURE/xlocale-bare/bars/ICO.json"
+          if catalog_crosslocale_duplicate_divergence "$FIXTURE/xlocale-bare" >/dev/null 2>&1; then
+            echo "SELF-TEST FAILED: catalog_crosslocale_duplicate_divergence returned SUCCESS on a bare-string bars file — the shape its own docblock says it fails closed on."
+            FAILED=1
+          else
+            echo "  ok — catalog_crosslocale_duplicate_divergence fails closed on the pre-migration bare-string shape"
+          fi
+
+          # The anchor CEILING separates an unmeasured locale (2) from an
+          # unreadable tree (1), the same split the floor already made. Without
+          # it, adding a desirable locale to CI_LOCALES produced "could not read
+          # FLL.json for locale [es]" — a red build accusing a healthy file.
+          # Captured through `if`, for the reason spelled out at the floor
+          # assertion ninety lines above — and broken here in the very next
+          # assertion after writing it down. `es` returns 2 BY DESIGN, and under
+          # this step's `set -e` a bare call would have killed the step at this
+          # line: no assignment, no assertion, no `rm -rf "$FIXTURE"`, and a red
+          # job with zero explanation. A rule written and then not applied one
+          # screen later is a preference, which is this file's own phrase for it.
+          if catalog_overlong_bars_anchors docs/app_description/02-domain/framework FLL es >/dev/null 2>&1; then
+            CEILING_UNMEASURED_RC=0
+          else
+            CEILING_UNMEASURED_RC=$?
+          fi
+          if catalog_overlong_bars_anchors "$FIXTURE/definitely-not-a-tree" FLL en >/dev/null 2>&1; then
+            CEILING_UNREADABLE_RC=0
+          else
+            CEILING_UNREADABLE_RC=$?
+          fi
+          if [ "$CEILING_UNMEASURED_RC" -eq 2 ] && [ "$CEILING_UNREADABLE_RC" -eq 1 ]; then
+            echo "  ok — catalog_overlong_bars_anchors separates an unmeasured locale (2) from an unreadable tree (1)"
+          else
+            echo "SELF-TEST FAILED: expected 2 for an unmeasured locale and 1 for an unreadable tree, got $CEILING_UNMEASURED_RC and $CEILING_UNREADABLE_RC."
+            FAILED=1
+          fi
+
+          # The control-file readers separate ABSENT from UNREADABLE. Both
+          # returned 0, which made every caller's "could not read the control
+          # file" branch dead code — delete the file and the interleaving check
+          # reported clean, exactly as before the guard added to stop that.
+          printf 'ICO:PRS\n' > "$FIXTURE/unreadable-gaps.txt"
+          chmod 000 "$FIXTURE/unreadable-gaps.txt"
+          if CI_COMPETENCY_GAPS_FILE="$FIXTURE/unreadable-gaps.txt" known_gap_pairs >/dev/null 2>&1; then
+            echo "SELF-TEST FAILED: known_gap_pairs returned SUCCESS for a control file it cannot read."
+            FAILED=1
+          else
+            echo "  ok — known_gap_pairs fails closed on an unreadable control file"
+          fi
+          # ...and that a CONSUMER acts on it. Proving the reader alone would
+          # have left the fix half-done: four callers discarded the status
+          # through command substitution and four more through a pipeline,
+          # which reports its LAST command — so the loop ran zero times over
+          # nothing and the caller read that as "no entries". Silently green
+          # over a file nobody could open.
+          if CI_COMPETENCY_GAPS_FILE="$FIXTURE/unreadable-gaps.txt" \
+             catalog_stale_competency_gap_exemptions docs/app_description/02-domain/framework >/dev/null 2>&1; then
+            echo "SELF-TEST FAILED: catalog_stale_competency_gap_exemptions reported clean over a control file it could not read."
+            FAILED=1
+          else
+            echo "  ok — a stale-exemption consumer stops when its control file cannot be read"
+          fi
+          chmod 644 "$FIXTURE/unreadable-gaps.txt"
+          if CI_COMPETENCY_GAPS_FILE="$FIXTURE/definitely-absent.txt" known_gap_pairs >/dev/null 2>&1; then
+            echo "  ok — an ABSENT control file is still a legitimate empty list"
+          else
+            echo "SELF-TEST FAILED: known_gap_pairs must treat an absent control file as an empty list, not a failure."
+            FAILED=1
+          fi
+
+          # version_manifest_divergence: red fixture, because the committed tree
+          # is about to be made green and a guard proven only against green
+          # proves nothing.
+          mkdir -p "$FIXTURE/verdrift"
+          printf '1.2.3\n' > "$FIXTURE/verdrift/VERSION"
+          printf '{"name": "x", "version": "9.9.9"}' > "$FIXTURE/verdrift/package.json"
+          VDRIFT=$(version_manifest_divergence "$FIXTURE/verdrift") || { echo "SELF-TEST FAILED: version_manifest_divergence could not run."; FAILED=1; }
+          case "$VDRIFT" in
+            *"says 9.9.9"*"says 1.2.3"*)
+              echo "  ok — version_manifest_divergence catches a manifest disagreeing with VERSION" ;;
+            *)
+              echo "SELF-TEST FAILED: expected a 9.9.9-vs-1.2.3 divergence, got: $VDRIFT"
+              FAILED=1 ;;
+          esac
+          mkdir -p "$FIXTURE/vernomanifest"
+          printf '1.2.3\n' > "$FIXTURE/vernomanifest/VERSION"
+          if version_manifest_divergence "$FIXTURE/vernomanifest" >/dev/null 2>&1; then
+            echo "SELF-TEST FAILED: version_manifest_divergence returned SUCCESS for a repo with no manifest to compare — a version check that finds no version has not passed."
+            FAILED=1
+          else
+            echo "  ok — version_manifest_divergence fails closed when there is nothing to compare against"
+          fi
+
+          # non_role_bars_locale_gaps: the coverage MTG and LAT had none of.
+          mkdir -p "$FIXTURE/nonrole/bars"
+          printf '{"MTG":[{"indicator":{"en":"a","it":"a"},"scale":{"5":{"en":"a"},"3":{"en":"a","it":"a"},"1":{"en":"a","it":"a"}}}]}' \
+            > "$FIXTURE/nonrole/bars/POTENTIAL.json"
+          NRB=$(non_role_bars_locale_gaps "$FIXTURE/nonrole" it) || { echo "SELF-TEST FAILED: non_role_bars_locale_gaps could not run."; FAILED=1; }
+          if [ "$NRB" = "it:POTENTIAL:MTG" ]; then
+            echo "  ok — non_role_bars_locale_gaps catches a non-role competency missing an anchor translation"
+          else
+            echo "SELF-TEST FAILED: expected 'it:POTENTIAL:MTG', got: $NRB"
+            FAILED=1
+          fi
+          if non_role_bars_locale_gaps "$FIXTURE/definitely-not-a-tree" it >/dev/null 2>&1; then
+            echo "SELF-TEST FAILED: non_role_bars_locale_gaps returned SUCCESS for a tree that does not exist."
+            FAILED=1
+          else
+            echo "  ok — non_role_bars_locale_gaps fails closed on an unreadable tree"
+          fi
+
+          # bars_files_without_declared_role: a red fixture, because the guard
+          # passes on the committed tree only while POTENTIAL stays declared.
+          mkdir -p "$FIXTURE/mirror/bars"
+          printf '{"ICO":{"name":{"en":"x","it":"x"},"responsibilities":{"en":"x","it":"x"},"competencies":["PRS"]}}' \
+            > "$FIXTURE/mirror/roles.json"
+          printf '{}' > "$FIXTURE/mirror/bars/ICO.json"
+          printf '{}' > "$FIXTURE/mirror/bars/POTENTIAL.json"
+          printf '{}' > "$FIXTURE/mirror/bars/SCRATCH.json"
+          MIRROR=$(bars_files_without_declared_role "$FIXTURE/mirror") || { echo "SELF-TEST FAILED: bars_files_without_declared_role could not run."; FAILED=1; }
+          if [ "$MIRROR" = "SCRATCH" ]; then
+            echo "  ok — bars_files_without_declared_role catches an undeclared bars file, and leaves a declared role and a declared non-role catalogue alone"
+          else
+            echo "SELF-TEST FAILED: expected exactly 'SCRATCH', got: $MIRROR"
+            FAILED=1
+          fi
+
+          # script_pinned_images: a red fixture, because a guard whose only
+          # evidence is the committed tree passes for the wrong reason the day
+          # the convention it relies on is broken.
+          mkdir -p "$FIXTURE/scriptpins"
+          printf '#!/usr/bin/env bash\nIMAGE="example.com/thing:1.2.3"\ndocker run "$IMAGE"\n' \
+            > "$FIXTURE/scriptpins/run.sh"
+          printf '#!/usr/bin/env bash\n# mentions example.com/decoy:9 in prose, assigned to nothing\nOTHER=example.com/decoy:9\n' \
+            > "$FIXTURE/scriptpins/decoy.sh"
+          PINS=$(script_pinned_images "$FIXTURE/scriptpins") || { echo "SELF-TEST FAILED: script_pinned_images could not run."; FAILED=1; }
+          if [ "$PINS" = "example.com/thing:1.2.3" ]; then
+            echo "  ok — script_pinned_images reads an IMAGE= pin and ignores a ref that is merely mentioned"
+          else
+            echo "SELF-TEST FAILED: script_pinned_images expected exactly 'example.com/thing:1.2.3', got: $PINS"
+            FAILED=1
+          fi
+
+          # bun_version_divergence: red fixture, then the live tree.
+          mkdir -p "$FIXTURE/bunver"
+          printf 'jobs:\n  x:\n    steps:\n      - with:\n          bun-version: %s\n' "'9.9.9'" \
+            > "$FIXTURE/bunver/wf.yml"
+          printf 'FROM oven/bun:1.4.0 AS builder\n' > "$FIXTURE/bunver/Dockerfile"
+          DIVERGED=$(bun_version_divergence "$FIXTURE/bunver/wf.yml" "$FIXTURE/bunver/Dockerfile") || { echo "SELF-TEST FAILED: bun_version_divergence could not run."; FAILED=1; }
+          if [ -n "$DIVERGED" ]; then
+            echo "  ok — bun_version_divergence catches a workflow installing a different Bun than the image builds on"
+          else
+            echo "SELF-TEST FAILED: bun_version_divergence stayed silent on 9.9.9 vs oven/bun:1.4.0."
+            FAILED=1
+          fi
+          # ...and the installer form, not only `FROM oven/bun:`.
+          printf 'curl -fsSL https://bun.sh/install | bash -s bun-v1.2.9 >/dev/null\n' \
+            > "$FIXTURE/bunver/installer.sh"
+          DIVERGED_INSTALLER=$(bun_version_divergence "$FIXTURE/bunver/wf.yml" "$FIXTURE/bunver/installer.sh")
+          if [ -n "$DIVERGED_INSTALLER" ]; then
+            echo "  ok — bun_version_divergence reads the official-installer pin, not only a Dockerfile FROM"
+          else
+            echo "SELF-TEST FAILED: bun_version_divergence stayed silent on a script installing bun-v1.2.9 against bun-version 9.9.9."
+            FAILED=1
+          fi
+
+          # TWO rows, because these are two different answers and the previous
+          # single row conflated them: a file that declares no Bun stage is
+          # silence, a file that does not exist is a failure. Rename any of the
+          # four live subjects and the old shape went green having compared
+          # nothing.
+          printf 'FROM alpine:3.20\n' > "$FIXTURE/bunver/no-bun-stage.Dockerfile"
+          if bun_version_divergence "$FIXTURE/bunver/wf.yml" "$FIXTURE/bunver/no-bun-stage.Dockerfile" >/dev/null 2>&1; then
+            echo "  ok — bun_version_divergence is silent on a file that declares no Bun stage"
+          else
+            echo "SELF-TEST FAILED: bun_version_divergence must stay silent for a file with no oven/bun stage and no installer pin."
+            FAILED=1
+          fi
+          if bun_version_divergence "$FIXTURE/bunver/wf.yml" "$FIXTURE/bunver/nonexistent" >/dev/null 2>&1; then
+            echo "SELF-TEST FAILED: bun_version_divergence returned SUCCESS for a file that does not exist — a green gate over no evidence."
+            FAILED=1
+          else
+            echo "  ok — bun_version_divergence fails closed on a missing subject"
+          fi
+
+          # ...and the committed tree, which is what the `Set up Bun` comment
+          # has been asserting with nothing behind it.
+          # ...and the PROSE documents, which were in no chain at all. CLAUDE.md's
+          # toolchain line and docs/dev-setup.md are what a human reads first,
+          # and both carried a stale Bun long after every machine-read pin had
+          # moved. Finding that needed someone to notice; now it does not.
+          printf 'Bun 1.4\n' > "$FIXTURE/bunver/doc-ok.md"
+          printf 'Bun 1.3\n' > "$FIXTURE/bunver/doc-stale.md"
+          if [ -n "$(bun_doc_divergence 1.4.0 "$FIXTURE/bunver/doc-stale.md")" ] \
+            && [ -z "$(bun_doc_divergence 1.4.0 "$FIXTURE/bunver/doc-ok.md")" ]; then
+            echo "  ok — bun_doc_divergence catches a stale prose version and accepts a shorter-but-compatible one"
+          else
+            echo "SELF-TEST FAILED: bun_doc_divergence did not separate 'Bun 1.3' from 'Bun 1.4' against a 1.4.0 pin."
+            FAILED=1
+          fi
+          if BUN_PIN=$(grep -E "^[[:space:]]*bun-version:" .github/workflows/wrapper-ci.yml | head -1 | sed -E "s/.*bun-version:[[:space:]]*['\"]?([^'\"[:space:]]+).*/\1/"); then
+            if DOC_BUN=$(bun_doc_divergence "$BUN_PIN" CLAUDE.md docs/dev-setup.md); then
+              if [ -n "$DOC_BUN" ]; then
+                echo "SELF-TEST FAILED: a prose document names a Bun version the repo does not pin:"
+                printf '%s\n' "$DOC_BUN" | sed 's/^/    /'
+                FAILED=1
+              else
+                echo "  ok — CLAUDE.md and docs/dev-setup.md name the Bun version the repo actually pins"
+              fi
+            else
+              echo "SELF-TEST FAILED: bun_doc_divergence could not find a Bun version in CLAUDE.md or docs/dev-setup.md."
+              FAILED=1
+            fi
+          else
+            echo "SELF-TEST FAILED: could not read bun-version from the workflow."
+            FAILED=1
+          fi
+
+          # scripts/e2e-container.sh included: it is the THIRD place this
+          # version is written and was the only one no gate read, which is how
+          # it kept an `npm install -g bun@^1.3` long after the pin moved.
+          if LIVE_BUN=$(bun_version_divergence .github/workflows/wrapper-ci.yml frontend/Dockerfile backoffice/Dockerfile scripts/e2e-container.sh); then
+            if [ -n "$LIVE_BUN" ]; then
+              echo "SELF-TEST FAILED: the Bun the wrapper installs is not the Bun the apps are built with:"
+              printf '%s\n' "$LIVE_BUN" | sed 's/^/    /'
+              FAILED=1
+            else
+              echo "  ok — setup-bun and both Dockerfile build stages pin the same Bun"
+            fi
+          else
+            echo "SELF-TEST FAILED: bun_version_divergence could not run against the committed tree."
+            FAILED=1
           fi
 
           rm -rf "$FIXTURE"
@@ -2914,7 +3589,7 @@ jobs:
           # submodules' own CI, and the right answer was to fix that — they now
           # use oven-sh/setup-bun@v2, as this workflow already did. Excluding a
           # violation by name protects nothing and leaves a hole open.
-          HITS=$(scan_bun_only frontend/ backoffice/)
+          HITS=$(scan_bun_only frontend/ backoffice/ scripts/)
           if [ -n "$HITS" ]; then
             echo "ERROR: non-Bun package manager command in frontend/backoffice (Bun-only projects):"
             echo "$HITS"
@@ -3011,6 +3686,22 @@ jobs:
           # USED, side 2 — compose image: references, local build tags
           # excluded by `compose_declared_images`.
           USED_IMAGES=$(printf '%s\n%s' "$USED_IMAGES" "$(compose_declared_images "$COMPOSE_CONFIG")")
+
+          # USED, side 3 — images a SCRIPT pins for `docker run`.
+          #
+          # Without this the gate's "reality" is three Dockerfiles and compose,
+          # while the repo also pins the 3.45GB Playwright image from
+          # scripts/e2e-container.sh. That left the tag in a state where BOTH
+          # directions fail: catalogued, Direction 2 reports it as no longer
+          # used; uncatalogued, Direction 1 reports it as uncatalogued. The
+          # self-test in (f) was widened first and this gate was not — a check
+          # proven against a definition the real gate does not share, which is
+          # the same defect one level up.
+          if ! SCRIPT_IMAGES=$(script_pinned_images scripts); then
+            echo "ERROR: could not read scripts/ for the image refs it pins."
+            exit 1
+          fi
+          USED_IMAGES=$(printf '%s\n%s' "$USED_IMAGES" "$SCRIPT_IMAGES")
 
           # Deduplicated, non-blank, one per line. `worker` and `scheduler`
           # build the same image as `api` (beai-api:local, already

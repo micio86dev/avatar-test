@@ -419,19 +419,49 @@ services:
       - path: ./frontend/.env
         required: false
     environment:
-      # SSR fetches run INSIDE the network, so this must be the api service's real
-      # listening port. It said 9000 — an fpm convention the image does not follow —
-      # so every server-side fetch pointed at a port nothing listens on.
-      NUXT_PUBLIC_API_BASE: http://api:8000/api
+      # RELATIVE, and that is the fix rather than a tidy-up.
+      #
+      # This was `http://api:8000/api` — right for SSR, which runs inside the
+      # network, and wrong for the browser, which runs on the developer's
+      # machine where `api` does not resolve. `pages/interview/[token].vue` is
+      # `ssr: false`, so the BROWSER made that call, it failed on DNS, and
+      # `[token].vue` routes every non-401 failure to `reason=403` — telling a
+      # candidate their interview had expired when the fetch never left the
+      # laptop.
+      #
+      # A NUXT_PUBLIC_* value is shipped to the browser by definition, so it
+      # must be browser-reachable; inside the container `localhost` is the
+      # container itself. One value cannot serve both, which is why the app now
+      # proxies `/api` on its own origin (server/routes/api/[...].ts) exactly
+      # as the backoffice already does through nginx. The browser makes no
+      # cross-origin request at all.
+      NUXT_PUBLIC_API_BASE: /api
+      # Server-side only: where that proxy forwards. Never shipped to the
+      # browser — doing so is the bug above.
+      #
+      # `NUXT_API_ORIGIN`, not `BEAI_API_ORIGIN`: Nuxt populates
+      # `runtimeConfig.apiOrigin` from `NUXT_` + the upper-snake key AT RUNTIME,
+      # and only from that name. The backoffice's nginx reads BEAI_API_ORIGIN
+      # because nginx has no such convention — the two differ because the
+      # runtimes differ, not by oversight. Verified: with the wrong name the
+      # proxy answers 500 "BEAI_API_ORIGIN is not configured", which is exactly
+      # the loud failure that guard exists to produce.
+      NUXT_API_ORIGIN: "${BEAI_API_ORIGIN:-http://api:8000}"
       NUXT_PUBLIC_APP_ENV: local
     ports:
       - "${FRONTEND_PORT:-3000}:3000"
     # Depends on `api`, not on postgres/redis. It previously gated on both
     # databases and on neither the API — but it holds no DB or Redis credential
-    # and cannot be talking to either, while its SSR fetches go straight to
-    # `api:8000` (see NUXT_PUBLIC_API_BASE above). The graph waited on what it
-    # does not use and not on what it does, so SSR could render against an API
-    # that was not listening yet.
+    # and cannot be talking to either, while every request it makes ends up at
+    # `api:8000`. The graph waited on what it does not use and not on what it
+    # does, so SSR could render against an API that was not listening yet.
+    #
+    # The route to `api:8000` is NUXT_API_ORIGIN, not NUXT_PUBLIC_API_BASE: this
+    # comment used to name the latter, which is now `/api` and holds no origin at
+    # all. SSR resolves that relative path against its own origin, reaches
+    # `server/routes/api/[...].ts`, and the proxy forwards. The conclusion —
+    # depend on `api` — is unchanged; only the reason had gone stale, ninety
+    # lines from the comment that made it stale.
     depends_on:
       api:
         condition: service_healthy
@@ -508,8 +538,13 @@ services:
     environment:
       # Inert for this service: the SPA is statically generated and bakes its API
       # base at build time (see build.args above). Kept correct anyway so it cannot
-      # be copied elsewhere as if it were authoritative.
-      NUXT_PUBLIC_API_BASE: http://api:8000/api
+      # be copied elsewhere as if it were authoritative — and it was NOT correct:
+      # it held an absolute URL that this app's own Dockerfile rejects outright
+      # ("NUXT_PUBLIC_API_BASE must be RELATIVE"), because an absolute base makes
+      # the api a different SITE on Railway, the refresh cookie third-party, and
+      # Safari unusable. Inert at runtime is exactly why nothing caught it, and
+      # "kept correct so nobody copies it" is a promise the value was breaking.
+      NUXT_PUBLIC_API_BASE: /api
     ports:
       - "${BACKOFFICE_PORT:-3001}:80"
     # Same correction as `frontend`: it held no DB or Redis credential and was

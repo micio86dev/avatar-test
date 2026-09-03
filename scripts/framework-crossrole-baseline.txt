@@ -39,11 +39,14 @@
 # duplicate is a real defect in the new content and must be fixed by
 # rewording, not exempted by editing this file.
 #
-# CURRENT STATE (framework-catalog-it-translations Phase 2 — shape migration
-# only, no Italian content authored yet): 2 entries, both English. The
-# companion `it:indicator` line for each pair lands in a LATER, content-only
-# PR, the moment BUL/MLL's INF pair and FLL/MLL's RES pair are translated —
-# see design D2a's own worked example (4 entries once both are translated).
+# CURRENT STATE: 4 entries — BUL/MLL on INF and FLL/MLL on RES, each in `en`
+# and `it`. The Italian lines are faithful translations of duplicated source,
+# so they are duplicated too, exactly as design D2a's worked example predicted.
+#
+# This header said "2 entries, both English ... no Italian content authored
+# yet" long after the Italian landed. Its own next sentence had forecast four.
+# A note that predicts a state and then survives that state arriving is the
+# defect this control file exists to prevent, one level up.
 # Adding those two lines is NOT this PR's job (no Italian content is
 # authored by the shape-migration change) and MUST NOT be anticipated here:
 # an entry for a translation that does not yet exist is itself a stale
