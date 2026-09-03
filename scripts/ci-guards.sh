@@ -641,6 +641,54 @@ non_role_bars_locale_gaps() {
   done
 }
 
+# A repo whose VERSION file and manifest disagree about its own version.
+#
+# Prints one line per disagreeing repo; empty means clean. Exits 1 when a repo
+# it was asked about has neither file, because a version check that finds no
+# version has not passed, it has failed to run.
+#
+# The api already asserts VERSION == composer.json == openapi.json in its own
+# CI. The two Nuxt apps asserted nothing, and both drifted: patch releases
+# bumped package.json and left VERSION behind (backoffice 0.24.0 vs 0.25.1,
+# frontend 0.11.0 vs 0.11.2), and the wrapper did the same in the other
+# direction (VERSION 0.27.0, package.json 0.28.0). Three repos, one released
+# artifact each, two answers each about which version it is.
+#
+# Checked HERE rather than in each app because this is the only place that can
+# see all four at once — and because a guard living in the repo it guards is a
+# guard that ships with the mistake.
+version_manifest_divergence() {
+  CI_VMD_FAILED=0
+  for CI_VMD_DIR in "$@"; do
+    CI_VMD_VFILE="$CI_VMD_DIR/VERSION"
+    if [ ! -f "$CI_VMD_VFILE" ]; then
+      echo "ci-guards: $CI_VMD_VFILE does not exist." >&2
+      CI_VMD_FAILED=1
+      continue
+    fi
+    CI_VMD_VERSION=$(tr -d ' \t\n\r' < "$CI_VMD_VFILE")
+    if [ -z "$CI_VMD_VERSION" ]; then
+      echo "ci-guards: $CI_VMD_VFILE is empty." >&2
+      CI_VMD_FAILED=1
+      continue
+    fi
+    CI_VMD_SEEN=0
+    for CI_VMD_MANIFEST in "$CI_VMD_DIR/package.json" "$CI_VMD_DIR/composer.json"; do
+      [ -f "$CI_VMD_MANIFEST" ] || continue
+      CI_VMD_MVERSION=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$CI_VMD_MANIFEST" | head -1)
+      [ -n "$CI_VMD_MVERSION" ] || continue
+      CI_VMD_SEEN=1
+      [ "$CI_VMD_MVERSION" = "$CI_VMD_VERSION" ] ||
+        echo "$CI_VMD_MANIFEST says $CI_VMD_MVERSION but $CI_VMD_VFILE says $CI_VMD_VERSION"
+    done
+    if [ "$CI_VMD_SEEN" -eq 0 ]; then
+      echo "ci-guards: $CI_VMD_DIR has a VERSION file but no manifest declaring a version." >&2
+      CI_VMD_FAILED=1
+    fi
+  done
+  [ "$CI_VMD_FAILED" -eq 0 ]
+}
+
 # Lines in set $1 (newline-separated) absent, byte-for-byte, from set $2.
 # Shared by BOTH directions of the catalog check: "used but not cataloged"
 # is this called as (used, catalog); "cataloged but no longer used" is the
@@ -1163,7 +1211,17 @@ CI_KNOWN_GAPS_FILE="${CI_KNOWN_GAPS_FILE:-scripts/framework-known-gaps.txt}"
 # only the first whitespace-delimited field of a line is read, so an entry can
 # carry a trailing comment without being parsed as one.
 known_gap_roles() {
-  [ -f "$CI_KNOWN_GAPS_FILE" ] || return 0
+  # ABSENT is a legitimate empty list; UNREADABLE is not. Both used to
+  # return 0, which made every caller's "could not read the control file"
+  # branch dead code: delete the file and the interleaving check reported
+  # clean, exactly as before the guard that was added to stop it.
+  if [ ! -f "$CI_KNOWN_GAPS_FILE" ]; then
+    return 0
+  fi
+  if [ ! -r "$CI_KNOWN_GAPS_FILE" ]; then
+    echo "ci-guards: $CI_KNOWN_GAPS_FILE exists but cannot be read." >&2
+    return 1
+  fi
   sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]].*$//' "$CI_KNOWN_GAPS_FILE" \
     | grep -v '^$' || true
 }
@@ -1175,7 +1233,13 @@ known_gap_roles() {
 # propagated from catalog_missing_bars rather than absorbed, so the caller can
 # tell "nothing missing" from "could not look".
 catalog_unexpected_missing_bars() {
-  CI_KNOWN=$(known_gap_roles)
+  # Status kept. An UNREADABLE control file used to arrive here as an
+  # empty list, and an empty list reads as "nothing exempt" — silently
+  # green over a file nobody could open.
+  if ! CI_KNOWN=$(known_gap_roles); then
+    echo "ci-guards: known_gap_roles: could not read the control file." >&2
+    return 1
+  fi
   CI_MISSING=$(catalog_missing_bars "$1") || return 1
   printf '%s\n' "$CI_MISSING" | while IFS= read -r CI_ROLE; do
     [ -n "$CI_ROLE" ] || continue
@@ -1191,7 +1255,15 @@ catalog_unexpected_missing_bars() {
 # permanent entries excusing gaps that no longer exist — a note outliving its
 # fact, which is the failure this workflow exists to prevent.
 catalog_stale_gap_exemptions() {
-  known_gap_roles | while IFS= read -r CI_ROLE; do
+  # Read to a variable FIRST. A pipeline reports its LAST command, so
+  # `known_gap_roles | while ...` returned the loop's status and the reader's
+  # "could not read" was discarded — the loop simply ran zero times over
+  # nothing and the caller read that as "no entries".
+  if ! CI_SGE_LIST=$(known_gap_roles); then
+    echo "ci-guards: known_gap_roles: could not read the control file." >&2
+    return 1
+  fi
+  printf '%s\n' "$CI_SGE_LIST" | while IFS= read -r CI_ROLE; do
     [ -n "$CI_ROLE" ] || continue
     if [ -f "$1/bars/$CI_ROLE.json" ]; then
       printf '%s\n' "$CI_ROLE"
@@ -1227,7 +1299,17 @@ CI_COMPETENCY_GAPS_FILE="${CI_COMPETENCY_GAPS_FILE:-scripts/framework-competency
 # known_gap_roles: '#' to end of line is a comment, blank lines dropped, only
 # the first whitespace field is read so a trailing comment cannot corrupt it.
 known_gap_pairs() {
-  [ -f "$CI_COMPETENCY_GAPS_FILE" ] || return 0
+  # ABSENT is a legitimate empty list; UNREADABLE is not. Both used to
+  # return 0, which made every caller's "could not read the control file"
+  # branch dead code: delete the file and the interleaving check reported
+  # clean, exactly as before the guard that was added to stop it.
+  if [ ! -f "$CI_COMPETENCY_GAPS_FILE" ]; then
+    return 0
+  fi
+  if [ ! -r "$CI_COMPETENCY_GAPS_FILE" ]; then
+    echo "ci-guards: $CI_COMPETENCY_GAPS_FILE exists but cannot be read." >&2
+    return 1
+  fi
   sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]].*$//' "$CI_COMPETENCY_GAPS_FILE" \
     | grep -v '^$' || true
 }
@@ -1420,7 +1502,13 @@ catalog_missing_bars_pairs() {
 # pair-malformed self-test row: a bars file that is the wrong shape must
 # reach THIS function's exit status, not be swallowed one layer up.
 catalog_unexpected_missing_bars_pairs() {
-  CI_CUMBP_KNOWN=$(known_gap_pairs)
+  # Status kept. An UNREADABLE control file used to arrive here as an
+  # empty list, and an empty list reads as "nothing exempt" — silently
+  # green over a file nobody could open.
+  if ! CI_CUMBP_KNOWN=$(known_gap_pairs); then
+    echo "ci-guards: known_gap_pairs: could not read the control file." >&2
+    return 1
+  fi
   CI_CUMBP_MISSING=$(catalog_missing_bars_pairs "$1") || return 1
   printf '%s\n' "$CI_CUMBP_MISSING" | while IFS= read -r CI_CUMBP_PAIR; do
     [ -n "$CI_CUMBP_PAIR" ] || continue
@@ -1473,7 +1561,15 @@ catalog_stale_competency_gap_exemptions() {
     CI_CSCGE_STATUS=$?
   fi
 
-  known_gap_pairs | while IFS= read -r CI_CSCGE_PAIR; do
+  # Read to a variable FIRST. A pipeline reports its LAST command, so
+  # `known_gap_pairs | while ...` returned the loop's status and the reader's
+  # "could not read" was discarded — the loop simply ran zero times over
+  # nothing and the caller read that as "no entries".
+  if ! CI_CSCGE_LIST=$(known_gap_pairs); then
+    echo "ci-guards: known_gap_pairs: could not read the control file." >&2
+    return 1
+  fi
+  printf '%s\n' "$CI_CSCGE_LIST" | while IFS= read -r CI_CSCGE_PAIR; do
     [ -n "$CI_CSCGE_PAIR" ] || continue
     CI_CSCGE_ROLE=${CI_CSCGE_PAIR%%:*}
     CI_CSCGE_COMP=${CI_CSCGE_PAIR#*:}
@@ -1737,7 +1833,17 @@ CI_LOCALE_GAPS_FILE="${CI_LOCALE_GAPS_FILE:-scripts/framework-locale-gaps.txt}"
 # discipline as every sibling control file: '#' to end of line is a
 # comment, blank lines dropped, only the first whitespace field read.
 known_locale_gap_pairs() {
-  [ -f "$CI_LOCALE_GAPS_FILE" ] || return 0
+  # ABSENT is a legitimate empty list; UNREADABLE is not. Both used to
+  # return 0, which made every caller's "could not read the control file"
+  # branch dead code: delete the file and the interleaving check reported
+  # clean, exactly as before the guard that was added to stop it.
+  if [ ! -f "$CI_LOCALE_GAPS_FILE" ]; then
+    return 0
+  fi
+  if [ ! -r "$CI_LOCALE_GAPS_FILE" ]; then
+    echo "ci-guards: $CI_LOCALE_GAPS_FILE exists but cannot be read." >&2
+    return 1
+  fi
   sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]].*$//' "$CI_LOCALE_GAPS_FILE" \
     | grep -v '^$' || true
 }
@@ -1748,7 +1854,13 @@ known_locale_gap_pairs() {
 catalog_unexpected_locale_gaps() {
   CI_CULG_TREE="$1"
   CI_CULG_LOCALE="$2"
-  CI_CULG_KNOWN=$(known_locale_gap_pairs)
+  # Status kept. An UNREADABLE control file used to arrive here as an
+  # empty list, and an empty list reads as "nothing exempt" — silently
+  # green over a file nobody could open.
+  if ! CI_CULG_KNOWN=$(known_locale_gap_pairs); then
+    echo "ci-guards: known_locale_gap_pairs: could not read the control file." >&2
+    return 1
+  fi
   CI_CULG_FOUND=$(catalog_locale_coverage "$CI_CULG_TREE" "$CI_CULG_LOCALE") || return 1
   printf '%s\n' "$CI_CULG_FOUND" | while IFS= read -r CI_CULG_PAIR; do
     [ -n "$CI_CULG_PAIR" ] || continue
@@ -1767,7 +1879,15 @@ catalog_stale_locale_gap_exemptions() {
   CI_CSLG_TREE="$1"
   CI_CSLG_LOCALE="$2"
   CI_CSLG_FOUND=$(catalog_locale_coverage "$CI_CSLG_TREE" "$CI_CSLG_LOCALE") || return 1
-  known_locale_gap_pairs | while IFS= read -r CI_CSLG_PAIR; do
+  # Read to a variable FIRST. A pipeline reports its LAST command, so
+  # `known_locale_gap_pairs | while ...` returned the loop's status and the reader's
+  # "could not read" was discarded — the loop simply ran zero times over
+  # nothing and the caller read that as "no entries".
+  if ! CI_CSLG_LIST=$(known_locale_gap_pairs); then
+    echo "ci-guards: known_locale_gap_pairs: could not read the control file." >&2
+    return 1
+  fi
+  printf '%s\n' "$CI_CSLG_LIST" | while IFS= read -r CI_CSLG_PAIR; do
     [ -n "$CI_CSLG_PAIR" ] || continue
     CI_CSLG_PAIR_LOCALE=${CI_CSLG_PAIR%%:*}
     [ "$CI_CSLG_PAIR_LOCALE" = "$CI_CSLG_LOCALE" ] || continue
@@ -1870,7 +1990,7 @@ locale_gaps_role_order_violations() {
 # ---------------------------------------------------------------------------
 # roles.json / competencies.json locale-map shape (framework-catalog-it-
 # translations design D2, row 8). NEW. 50 strings (5 roles × {name,
-# responsibilities} + 18 competencies × {name, definition}) that NOTHING
+# responsibilities} + 20 competencies × {name, definition}) that NOTHING
 # ELSE reads: `role_keys`/`role_competency_pairs` read only `code` and
 # `competencies`, never `name`/`responsibilities` (see D2 row 2's own "never
 # read" note); `catalog_malformed_bars_entries` reads bars files only.
@@ -2434,7 +2554,17 @@ CI_CROSSROLE_BASELINE_FILE="${CI_CROSSROLE_BASELINE_FILE:-scripts/framework-cros
 # known_gap_roles/known_gap_pairs: '#' to end of line is a comment, blank
 # lines dropped, only the first whitespace-delimited field is read.
 known_crossrole_baseline_entries() {
-  [ -f "$CI_CROSSROLE_BASELINE_FILE" ] || return 0
+  # ABSENT is a legitimate empty list; UNREADABLE is not. Both used to
+  # return 0, which made every caller's "could not read the control file"
+  # branch dead code: delete the file and the interleaving check reported
+  # clean, exactly as before the guard that was added to stop it.
+  if [ ! -f "$CI_CROSSROLE_BASELINE_FILE" ]; then
+    return 0
+  fi
+  if [ ! -r "$CI_CROSSROLE_BASELINE_FILE" ]; then
+    echo "ci-guards: $CI_CROSSROLE_BASELINE_FILE exists but cannot be read." >&2
+    return 1
+  fi
   sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]].*$//' "$CI_CROSSROLE_BASELINE_FILE" \
     | grep -v '^$' || true
 }
@@ -2448,7 +2578,13 @@ known_crossrole_baseline_entries() {
 # — the same "a guard that cannot read its subject must never pass it" rule
 # every other function in this file obeys.
 catalog_unexpected_crossrole_duplicates() {
-  CI_CUCD_KNOWN=$(known_crossrole_baseline_entries)
+  # Status kept. An UNREADABLE control file used to arrive here as an
+  # empty list, and an empty list reads as "nothing exempt" — silently
+  # green over a file nobody could open.
+  if ! CI_CUCD_KNOWN=$(known_crossrole_baseline_entries); then
+    echo "ci-guards: known_crossrole_baseline_entries: could not read the control file." >&2
+    return 1
+  fi
   CI_CUCD_FOUND=$(catalog_crossrole_duplicates "$1") || return 1
   printf '%s\n' "$CI_CUCD_FOUND" | while IFS= read -r CI_CUCD_ENTRY; do
     [ -n "$CI_CUCD_ENTRY" ] || continue
@@ -2465,7 +2601,15 @@ catalog_unexpected_crossrole_duplicates() {
 # exist to prevent, applied to this third control file.
 catalog_stale_crossrole_baseline_entries() {
   CI_SCBE_FOUND=$(catalog_crossrole_duplicates "$1") || return 1
-  known_crossrole_baseline_entries | while IFS= read -r CI_SCBE_ENTRY; do
+  # Read to a variable FIRST. A pipeline reports its LAST command, so
+  # `known_crossrole_baseline_entries | while ...` returned the loop's status and the reader's
+  # "could not read" was discarded — the loop simply ran zero times over
+  # nothing and the caller read that as "no entries".
+  if ! CI_SCBE_LIST=$(known_crossrole_baseline_entries); then
+    echo "ci-guards: known_crossrole_baseline_entries: could not read the control file." >&2
+    return 1
+  fi
+  printf '%s\n' "$CI_SCBE_LIST" | while IFS= read -r CI_SCBE_ENTRY; do
     [ -n "$CI_SCBE_ENTRY" ] || continue
     printf '%s\n' "$CI_SCBE_FOUND" | grep -qxF "$CI_SCBE_ENTRY" && continue
     printf '%s\n' "$CI_SCBE_ENTRY"
@@ -2555,7 +2699,16 @@ CI_CROSSLOCALE_DIVERGENCE_SCRIPT='
         };
         for (const field of FIELDS) {
           const map = localeMaps[field];
-          if (map === null || typeof map !== "object" || Array.isArray(map)) continue;
+          // HARD FAIL, matching catalog_crossrole_duplicates on the identical
+          // shape. This used to `continue`, so reverting one bars file to the
+          // pre-migration bare-string shape made the cross-role guard go red
+          // while this one reported zero divergences over a tree it had never
+          // examined — the docblock above promised it failed closed on exactly
+          // this, and it failed open instead.
+          if (map === null || typeof map !== "object" || Array.isArray(map)) {
+            console.error(`ci-guards: ${barsDir}/${role}.json ${comp} ${field} is not a locale-map object (got ${typeof map}); expected {"en":...,"it":...}.`);
+            process.exit(1);
+          }
           const en = typeof map.en === "string" ? map.en : undefined;
           const it = typeof map.it === "string" && map.it.length > 0 ? map.it : undefined;
           perPosition[comp] ??= {};
@@ -2832,14 +2985,20 @@ catalog_overlong_bars_anchors() {
     en) CI_COBA_MAX="$CI_ANCHOR_WORDCOUNT_MAX" ;;
     it) CI_COBA_MAX="$CI_ANCHOR_WORDCOUNT_MAX_IT" ;;
     *)
-      echo "ci-guards: catalog_overlong_bars_anchors: unknown locale [$CI_COBA_LOCALE]." >&2
-      return 1
+      # 2, not 1 — the same split catalog_short_bars_anchors already makes, and
+      # for the same reason. CLAUDE.md calls es/fr/de/pt desirable, and the day
+      # one of them joins CI_LOCALES this returned 1 and step (d) printed "the
+      # anchor-length check could not read <TREE>/bars/FLL.json for locale
+      # [es]" — a red build accusing a file that is perfectly fine. The floor
+      # got this right; the ceiling did not.
+      echo "ci-guards: catalog_overlong_bars_anchors: no measured ceiling configured for locale [$CI_COBA_LOCALE]." >&2
+      return 2
       ;;
   esac
 
   if [ -z "$CI_COBA_MAX" ]; then
     echo "ci-guards: catalog_overlong_bars_anchors: no measured ceiling configured for locale [$CI_COBA_LOCALE] (CI_ANCHOR_WORDCOUNT_MAX_IT unset — see design D3 pilot)." >&2
-    return 1
+    return 2
   fi
 
   CI_COBA_COUNTS=$(bars_anchor_word_counts "$CI_COBA_TREE" "$CI_COBA_ROLE") || return 1

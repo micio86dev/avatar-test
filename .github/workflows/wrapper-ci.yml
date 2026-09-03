@@ -370,6 +370,25 @@ jobs:
           fi
           echo "AGENTS.md is a symlink to CLAUDE.md — one file, one truth."
 
+          # Every repo agrees with itself about which version it is.
+          #
+          # The api asserts VERSION == composer.json == openapi.json in its own
+          # CI. The two Nuxt apps asserted nothing and both drifted — patch
+          # releases bumped package.json and left VERSION behind — and the
+          # wrapper drifted the other way. Three repos, one released artifact
+          # each, two answers each. This is the only place that sees all four.
+          if ! VERSION_DRIFT=$(version_manifest_divergence . api backoffice frontend); then
+            echo "ERROR: a repo has a VERSION file with no manifest, or no VERSION file at all."
+            exit 1
+          fi
+          if [ -n "$VERSION_DRIFT" ]; then
+            echo "ERROR: a repo disagrees with itself about its own version:"
+            printf '%s\n' "$VERSION_DRIFT" | sed 's/^/  /'
+            echo "  A release tag names ONE version. Move VERSION and the manifest together."
+            exit 1
+          fi
+          echo "Every repo agrees with itself about its version."
+
           # This workflow's own `uses:` references, held to the same
           # immutability standard as every image tag above: a GitHub Actions
           # tag (`@v4`) is exactly as movable as a floating Docker tag, and
@@ -758,12 +777,6 @@ jobs:
             fi
             while IFS= read -r PAIR; do
               [ -n "$PAIR" ] || continue
-              # `|| true`: the function returns 1 with no output when the
-              # pair is NOT stale, which is a legitimate answer, not an
-              # error. Unguarded, `bash -e` would kill the step mid-loop
-              # printing nothing at all — the "red with no reason" outcome
-              # this whole file exists to prevent. The output is the signal
-              # here; the status is not.
               # Status CAPTURED, not discarded with `|| true`.
               #
               # 1 means "not actually stale" — a legitimate answer with no
@@ -902,8 +915,20 @@ jobs:
                     FAIL=1
                   done < "$LIST"
                 else
-                  echo "ERROR: the anchor-length check could not read $TREE/bars/$ROLE.json for locale [$LOCALE]."
-                  echo "  This is a guard that FAILED TO RUN, not a catalog that passed."
+                  CEILING_RC=$?
+                  # 2 and 1 are different problems and both block, so the
+                  # difference is the MESSAGE. Reporting "could not read
+                  # FLL.json for locale [es]" the day someone adds a desirable
+                  # locale accuses a file that is perfectly fine and sends
+                  # whoever reads it to the wrong place.
+                  if [ "$CEILING_RC" -eq 2 ]; then
+                    echo "ERROR: no measured anchor ceiling for locale [$LOCALE] — $TREE/bars/$ROLE.json was not checked."
+                    echo "  A ceiling is MEASURED, never guessed (see CI_ANCHOR_WORDCOUNT_MAX_IT for how the it one was derived)."
+                    echo "  Measure it before that locale ships, or drop the locale from CI_LOCALES."
+                  else
+                    echo "ERROR: the anchor-length check could not read $TREE/bars/$ROLE.json for locale [$LOCALE]."
+                    echo "  This is a guard that FAILED TO RUN, not a catalog that passed."
+                  fi
                   FAIL=1
                 fi
               done
@@ -1436,7 +1461,7 @@ jobs:
           # Dockerfiles ARE the install and build path for both Nuxt apps, and
           # they were not in the file list at all while the comment beside the
           # real gate read "No carve-outs."
-          printf 'FROM oven/bun:1.3.14 AS builder\nRUN npm ci\n' > "$FIXTURE/bun-docker/Dockerfile"
+          printf 'FROM oven/bun:1.4.0 AS builder\nRUN npm ci\n' > "$FIXTURE/bun-docker/Dockerfile"
           expect_caught "Bun-only (Dockerfile)" "$(scan_bun_only "$FIXTURE/bun-docker")"
 
           # Bun-only must NOT reject prose that merely NAMES the banned tools.
@@ -2051,20 +2076,23 @@ jobs:
           expect_caught "stale_competency_gap_exemption_reason names the role-level shape" \
             "$(stale_competency_gap_exemption_reason "$FIXTURE/pair-role-no-file-exemption" 'SRX:PRS' 2>/dev/null | grep -x 'role-level')"
 
-          # The FOURTH contract, and the one the guard's caller in step (d)
-          # now depends on directly (`REASON=$(... || true)`): for a pair
+          # The FOURTH contract, and the one step (d) branches on: for a pair
           # that is NOT actually stale — the `pair-incomplete` fixture above,
           # where FLL:PRS is a live, uncovered gap — the function must return
-          # 1 AND print nothing. Both halves are asserted, not just one:
-          # printing something on a "not stale" answer would tell an operator
-          # to delete an exemption that is doing its job, and returning 0
-          # would make step (d)'s `|| true` mask a real "not stale" signal as
-          # if it were a read failure. Captured as `if VAR=$(cmd); then ...
-          # else ...`, the same shape (d) itself uses at its json_canonical_equal
-          # call sites — a bare `VAR=$(cmd)` here would abort THIS script
-          # under `set -e` the instant the function legitimately returns 1,
-          # printing nothing and explaining nothing, which is the exact
-          # failure step (d)'s `|| true` exists to prevent.
+          # 1 AND print nothing. Both halves are asserted: printing something on
+          # a "not stale" answer would tell an operator to delete an exemption
+          # that is doing its job, and returning 0 would report a live gap as a
+          # stale entry.
+          #
+          # Step (d) reads exit 1 as "not stale" and exit 2 as "could not read",
+          # which is why 1 has to mean exactly one thing here. It used to
+          # capture with `|| true`, flattening both into an empty string — and
+          # this comment described that call site for a while after it was gone.
+          #
+          # Captured as `if VAR=$(cmd); then ... else ...`, the same shape (d)
+          # itself uses: a bare `VAR=$(cmd)` would abort THIS script under
+          # `set -e` the instant the function legitimately returns 1, printing
+          # nothing and explaining nothing.
           if CI_SCGER_LIVE_OUT=$(stale_competency_gap_exemption_reason "$FIXTURE/pair-incomplete" 'FLL:PRS' 2>/dev/null); then
             CI_SCGER_LIVE_STATUS=0
           else
@@ -3221,6 +3249,108 @@ jobs:
           else
             echo "SELF-TEST FAILED: expected exit 2 and no output for an unreadable roles.json, got rc=$REASON_UNREADABLE_RC out='$REASON_OUT'."
             FAILED=1
+          fi
+
+          # catalog_crosslocale_duplicate_divergence on the pre-migration shape.
+          # Its docblock promised it failed closed here; it returned clean over a
+          # tree it had never examined, while its cross-role sibling went red on
+          # the identical input.
+          mkdir -p "$FIXTURE/xlocale-bare/bars"
+          printf '{"ICO":{"name":{"en":"x","it":"x"},"responsibilities":{"en":"x","it":"x"},"competencies":["PRS"]}}' \
+            > "$FIXTURE/xlocale-bare/roles.json"
+          printf '{"PRS":{"name":{"en":"x","it":"x"},"definition":{"en":"d","it":"d"}}}' \
+            > "$FIXTURE/xlocale-bare/competencies.json"
+          printf '{"PRS":[{"indicator":"bare string, pre-migration shape","scale":{"5":"bare","3":"bare","1":"bare"}}]}' \
+            > "$FIXTURE/xlocale-bare/bars/ICO.json"
+          if catalog_crosslocale_duplicate_divergence "$FIXTURE/xlocale-bare" >/dev/null 2>&1; then
+            echo "SELF-TEST FAILED: catalog_crosslocale_duplicate_divergence returned SUCCESS on a bare-string bars file — the shape its own docblock says it fails closed on."
+            FAILED=1
+          else
+            echo "  ok — catalog_crosslocale_duplicate_divergence fails closed on the pre-migration bare-string shape"
+          fi
+
+          # The anchor CEILING separates an unmeasured locale (2) from an
+          # unreadable tree (1), the same split the floor already made. Without
+          # it, adding a desirable locale to CI_LOCALES produced "could not read
+          # FLL.json for locale [es]" — a red build accusing a healthy file.
+          # Captured through `if`, for the reason spelled out at the floor
+          # assertion ninety lines above — and broken here in the very next
+          # assertion after writing it down. `es` returns 2 BY DESIGN, and under
+          # this step's `set -e` a bare call would have killed the step at this
+          # line: no assignment, no assertion, no `rm -rf "$FIXTURE"`, and a red
+          # job with zero explanation. A rule written and then not applied one
+          # screen later is a preference, which is this file's own phrase for it.
+          if catalog_overlong_bars_anchors docs/app_description/02-domain/framework FLL es >/dev/null 2>&1; then
+            CEILING_UNMEASURED_RC=0
+          else
+            CEILING_UNMEASURED_RC=$?
+          fi
+          if catalog_overlong_bars_anchors "$FIXTURE/definitely-not-a-tree" FLL en >/dev/null 2>&1; then
+            CEILING_UNREADABLE_RC=0
+          else
+            CEILING_UNREADABLE_RC=$?
+          fi
+          if [ "$CEILING_UNMEASURED_RC" -eq 2 ] && [ "$CEILING_UNREADABLE_RC" -eq 1 ]; then
+            echo "  ok — catalog_overlong_bars_anchors separates an unmeasured locale (2) from an unreadable tree (1)"
+          else
+            echo "SELF-TEST FAILED: expected 2 for an unmeasured locale and 1 for an unreadable tree, got $CEILING_UNMEASURED_RC and $CEILING_UNREADABLE_RC."
+            FAILED=1
+          fi
+
+          # The control-file readers separate ABSENT from UNREADABLE. Both
+          # returned 0, which made every caller's "could not read the control
+          # file" branch dead code — delete the file and the interleaving check
+          # reported clean, exactly as before the guard added to stop that.
+          printf 'ICO:PRS\n' > "$FIXTURE/unreadable-gaps.txt"
+          chmod 000 "$FIXTURE/unreadable-gaps.txt"
+          if CI_COMPETENCY_GAPS_FILE="$FIXTURE/unreadable-gaps.txt" known_gap_pairs >/dev/null 2>&1; then
+            echo "SELF-TEST FAILED: known_gap_pairs returned SUCCESS for a control file it cannot read."
+            FAILED=1
+          else
+            echo "  ok — known_gap_pairs fails closed on an unreadable control file"
+          fi
+          # ...and that a CONSUMER acts on it. Proving the reader alone would
+          # have left the fix half-done: four callers discarded the status
+          # through command substitution and four more through a pipeline,
+          # which reports its LAST command — so the loop ran zero times over
+          # nothing and the caller read that as "no entries". Silently green
+          # over a file nobody could open.
+          if CI_COMPETENCY_GAPS_FILE="$FIXTURE/unreadable-gaps.txt" \
+             catalog_stale_competency_gap_exemptions docs/app_description/02-domain/framework >/dev/null 2>&1; then
+            echo "SELF-TEST FAILED: catalog_stale_competency_gap_exemptions reported clean over a control file it could not read."
+            FAILED=1
+          else
+            echo "  ok — a stale-exemption consumer stops when its control file cannot be read"
+          fi
+          chmod 644 "$FIXTURE/unreadable-gaps.txt"
+          if CI_COMPETENCY_GAPS_FILE="$FIXTURE/definitely-absent.txt" known_gap_pairs >/dev/null 2>&1; then
+            echo "  ok — an ABSENT control file is still a legitimate empty list"
+          else
+            echo "SELF-TEST FAILED: known_gap_pairs must treat an absent control file as an empty list, not a failure."
+            FAILED=1
+          fi
+
+          # version_manifest_divergence: red fixture, because the committed tree
+          # is about to be made green and a guard proven only against green
+          # proves nothing.
+          mkdir -p "$FIXTURE/verdrift"
+          printf '1.2.3\n' > "$FIXTURE/verdrift/VERSION"
+          printf '{"name": "x", "version": "9.9.9"}' > "$FIXTURE/verdrift/package.json"
+          VDRIFT=$(version_manifest_divergence "$FIXTURE/verdrift") || { echo "SELF-TEST FAILED: version_manifest_divergence could not run."; FAILED=1; }
+          case "$VDRIFT" in
+            *"says 9.9.9"*"says 1.2.3"*)
+              echo "  ok — version_manifest_divergence catches a manifest disagreeing with VERSION" ;;
+            *)
+              echo "SELF-TEST FAILED: expected a 9.9.9-vs-1.2.3 divergence, got: $VDRIFT"
+              FAILED=1 ;;
+          esac
+          mkdir -p "$FIXTURE/vernomanifest"
+          printf '1.2.3\n' > "$FIXTURE/vernomanifest/VERSION"
+          if version_manifest_divergence "$FIXTURE/vernomanifest" >/dev/null 2>&1; then
+            echo "SELF-TEST FAILED: version_manifest_divergence returned SUCCESS for a repo with no manifest to compare — a version check that finds no version has not passed."
+            FAILED=1
+          else
+            echo "  ok — version_manifest_divergence fails closed when there is nothing to compare against"
           fi
 
           # non_role_bars_locale_gaps: the coverage MTG and LAT had none of.
