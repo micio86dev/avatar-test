@@ -498,6 +498,59 @@ The interview view is immersive and minimal:
 - Background: `--color-avatar-bg` (dark, immersive).
 - Avatar panel: centered, `--shadow-avatar`.
 - Question card: `--color-neutral-100` background, `--radius-lg`.
+
+#### 7.3.1 Voice-only variant
+
+A template may be configured **audio-only** (`avatar_templates.config.audioOnly`);
+`POST /candidate/interview/start` reports it as `audio_only`. The provider then
+sends a stream with **no video track**, so the avatar panel renders a **voice
+visualizer** in place of the video.
+
+The media element stays mounted and audible — it owns playback, and a second
+sink for the same stream would play every word twice — and is taken out of
+sight rather than unmounted.
+
+```
+┌─────────────────────────────────┐
+│                                 │
+│   ────╮╭─╮  ╭──╮ ╭╮  ╭───────   │  ← waveform ribbon, symmetric
+│   ────╯╰─╯  ╰──╯ ╰╯  ╰───────   │     about the centreline
+│                                 │
+└─────────────────────────────────┘
+```
+
+**Form.** One continuous filled shape: per-column peak amplitude, mirrored
+about the centre, corners smoothed with quadratic midpoints. Deliberately NOT a
+bar equaliser (reads as a music player, wrong promise in an assessment) and not
+a pulsing orb (belongs to voice assistants).
+
+**Resting state is a line, never nothing.** In silence the ribbon collapses to a
+hairline rather than disappearing, so *"not speaking"* and *"not working"* are
+never the same picture. This is the property the whole surface exists to have.
+
+**Colour and contrast** — measured against `--color-avatar-bg` (`#0f172a`),
+never estimated (§9.1):
+
+| Mark | Token | Ratio |
+|---|---|---|
+| Ribbon centre | `--color-lavender` | 4.55:1 |
+| Ribbon edge | `--color-primary-light` | 3.79:1 |
+| Resting baseline (85% alpha) | `--color-lavender` | 3.64:1 |
+
+The brand purple `--color-primary` is NOT used here: at `#771aaf` it sits too
+close to the panel background to carry a thin stroke. Tokens are read from the
+stylesheet at paint time, never restated as literals in the canvas code.
+
+**Motion is state.** The ribbon moves only because the voice does. Under
+`prefers-reduced-motion` the animation loop never starts; the panel repaints
+four times a second instead — the cadence of a status line, not of animation.
+A reduced-motion preference asks not to animate, and does not ask the interface
+to stop reporting whether anyone is talking.
+
+**Accessibility.** `role="img"` with a static label, never a live region: the
+interviewer's speech already reaches assistive technology as live text through
+`<InterviewCaption>` (WCAG 1.2.4), and announcing every amplitude change would
+bury it.
 - Recording indicator: pulsing red dot (`--color-recording`), always visible.
 - Timer: amber warning when < 30 s (`--color-warning`), red when < 10 s (`--color-error`).
 - All text i18n-keyed, zero hardcoded strings.
