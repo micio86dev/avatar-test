@@ -13,10 +13,13 @@
 #
 # This workflow validates, in the order the steps run:
 # Two steps run BEFORE the lettered gates and are not part of the sequence:
-# the lint of scripts/ci-guards.sh (the guard mechanism itself, checked before
-# anything sources it) and the lint-and-run of scripts/docker-disk-check.sh
-# with its own test suite. Both are listed here because a step absent from the
-# index is a step nobody renumbers.
+# the lint of the POSIX sh guards — scripts/ci-guards.sh (the guard mechanism
+# itself, checked before anything sources it) AND
+# scripts/verify-openapi-parity.sh, which step (b) below now calls — and the
+# lint of every bash script under scripts/ with the docker-disk-check suite.
+# The openapi-parity fixture suite runs LATER, immediately before step (b),
+# because it needs Bun and `Set up Bun` comes after these two. All are listed
+# here because a step absent from the index is a step nobody renumbers.
 #
 #   (a) docker compose config parses, and every image tag — compose services,
 #       Dockerfile FROM bases, Dockerfile COPY --from= images and the images a
@@ -147,10 +150,15 @@ jobs:
       # cross-stack consistency checks, this is a lint of the guard mechanism
       # itself, run once, ahead of anything that sources it.
       # -----------------------------------------------------------------------
-      - name: Lint scripts/ci-guards.sh (shellcheck -s sh, dash -n)
+      - name: Lint the POSIX sh guards (shellcheck -s sh, dash -n)
+        # verify-openapi-parity.sh is held to the same bar as the file it
+        # sources — it runs under `sh` in step (b) and under `task
+        # verify:openapi` locally, so a bashism in it breaks the gate in CI and
+        # nowhere else, which is the least useful place to find out.
         run: |
-          shellcheck -s sh scripts/ci-guards.sh
+          shellcheck -s sh scripts/ci-guards.sh scripts/verify-openapi-parity.sh
           dash -n scripts/ci-guards.sh
+          dash -n scripts/verify-openapi-parity.sh
 
       # -----------------------------------------------------------------------
       # The disk guard, linted and RUN.
@@ -174,16 +182,19 @@ jobs:
       #
       # No Docker needed: every branch is reachable from a temporary HOME.
       # -----------------------------------------------------------------------
-      - name: Lint and run the docker disk guard
+      - name: Lint every bash script; run the disk-guard suite
         run: |
           # EVERY bash script under scripts/, discovered rather than listed.
           # e2e-container.sh was the one that named itself out of coverage by
           # simply never being added — and it carries the `printf %q` re-quoting
           # and the Bun installer pin, both exactly what shellcheck catches.
-          # ci-guards.sh is excluded here because it is POSIX sh and gets its own
-          # stricter `-s sh` + `dash -n` step above; checking it as bash would
-          # pass on constructs that step exists to reject.
-          BASH_SCRIPTS=$(find scripts -name '*.sh' ! -name 'ci-guards.sh' | sort)
+          # The POSIX sh scripts are excluded here because they get their own
+          # stricter `-s sh` + `dash -n` step above; checking them as bash would
+          # pass on constructs that step exists to reject. Both of them:
+          # verify-openapi-parity.sh is sh for the same reason ci-guards.sh is
+          # (it sources it and runs under `sh` in step (b)), and a rule that
+          # binds one file and not its twin is a preference, not a rule.
+          BASH_SCRIPTS=$(find scripts -name '*.sh' ! -name 'ci-guards.sh' ! -name 'verify-openapi-parity.sh' | sort)
           if [ -z "$BASH_SCRIPTS" ]; then
             echo "ERROR: no shell scripts found under scripts/ — zero files is a lint that FAILED TO RUN."
             exit 1
@@ -454,71 +465,27 @@ jobs:
       #     once — this job does not attempt to, and should not be read as if
       #     it does.
       # -----------------------------------------------------------------------
+      # Runs HERE, not in the bash-lint step above, and the reason is the whole
+      # point of this suite: `json_canonical_equal` is a `bun --eval` wrapper,
+      # `ubuntu-latest` ships no Bun, and `Set up Bun` runs above this point.
+      # Placed earlier, the harness ran without Bun — exit 127, mapped to "could
+      # not read" — and FOUR rows failed while two others went green for the WRONG
+      # REASON: "drift is rejected" is satisfied by any exit 1, including one
+      # that was never drift. The exact defect this file exists to prevent,
+      # committed inside the test written to prevent it.
+      - name: Run the openapi parity fixture suite
+        run: bash scripts/tests/verify-openapi-parity.test.sh
+
       - name: Verify openapi.json is identical across api/frontend/backoffice
-        run: |
-          . ./scripts/ci-guards.sh
-
-          # `json_canonical_equal` from scripts/ci-guards.sh — one canonicaliser,
-          # shared with the catalog gate in (d) and exercised by the self-test in
-          # (f). Compared pairwise against api/, which is the producer: the two
-          # consumers are copies of it, so naming it as the reference makes the
-          # failure message point at the file that has to change.
-          FAIL=0
-          # "Cannot read" and "differs" are separated here for the same reason
-          # (a), (d) and (e) separate them: a missing frontend/openapi.json
-          # otherwise prints "differs from api/openapi.json" and sends whoever
-          # is on call hunting for drift in a file that is not there. Still
-          # red either way — but red pointing at the right thing.
-          #
-          # That separation used to stop at "missing". A file that EXISTS but
-          # is not valid JSON fell through to the `elif json_canonical_equal`
-          # branch, which could not tell "unreadable" from "differs" either —
-          # both exited 1 — so it printed the same "differs from
-          # api/openapi.json" wording for a file the guard never actually
-          # compared. `json_canonical_equal` now exits 2 (not 1) for that
-          # case specifically so this step can point at the right fact; the
-          # exit code has to be captured explicitly ($?), because a plain
-          # `if cmd; then ... else ...` only distinguishes zero from nonzero.
-          JSON_CMP_ERR=$(mktemp)
-          for APP in frontend backoffice; do
-            if [ ! -f "$APP/openapi.json" ]; then
-              echo "  ERROR: $APP/openapi.json does not exist."
-              echo "    This is a file that could not be READ, not a snapshot that drifted."
-              FAIL=1
-              continue
-            fi
-            # Captured via if/else, not `cmd; STATUS=$?` on separate lines —
-            # every `run:` block in this workflow executes under `bash -e`
-            # (Actions' default, and explicit in step (f)), and a bare
-            # nonzero-exiting command not inside an `if` condition aborts the
-            # step right there, before its exit status is ever read.
-            if json_canonical_equal api/openapi.json "$APP/openapi.json" 2>"$JSON_CMP_ERR"; then
-              JSON_CMP_STATUS=0
-            else
-              JSON_CMP_STATUS=$?
-            fi
-            if [ "$JSON_CMP_STATUS" -eq 0 ]; then
-              echo "  ok — $APP/openapi.json is semantically identical to api/openapi.json"
-            elif [ "$JSON_CMP_STATUS" -eq 2 ]; then
-              echo "  ERROR: could not compare $APP/openapi.json against api/openapi.json."
-              echo "    This is a file the guard could NOT READ (missing or not valid JSON), not a snapshot that drifted."
-              sed 's/^/    /' "$JSON_CMP_ERR"
-              FAIL=1
-            else
-              echo "  $APP/openapi.json differs from api/openapi.json"
-              FAIL=1
-            fi
-          done
-          rm -f "$JSON_CMP_ERR"
-
-          if [ "$FAIL" -ne 0 ]; then
-            echo "ERROR: openapi.json cross-repo drift detected!"
-            echo "The committed openapi.json must be identical in api/, frontend/, and backoffice/."
-            echo "To fix: re-export from api (php artisan scramble:export), copy to frontend/ and backoffice/, regenerate typed clients, run full test suites green, commit."
-            exit 1
-          fi
-
-          echo "openapi.json is semantically identical across all 3 repos."
+        # Calls scripts/verify-openapi-parity.sh rather than carrying the loop
+        # inline, so `task verify:openapi` and this step run the SAME code. The
+        # loop used to live only here, which meant the check could not be run
+        # before pushing — and on 2026-09-07 a four-repo release shipped with
+        # backoffice's spec one info.version behind, discovered only when main
+        # went red. One definition, two consumers, nowhere for a copy to drift:
+        # the same reason scripts/ci-guards.sh (which that script sources for
+        # `json_canonical_equal`) exists at all.
+        run: sh ./scripts/verify-openapi-parity.sh
 
       # -----------------------------------------------------------------------
       # (c) TS client drift check — each app's check-client-drift.sh must exit 0.

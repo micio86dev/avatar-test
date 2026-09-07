@@ -51,14 +51,21 @@ tasks:
       - docker compose -f "{{.COMPOSE_FILE}}" down
 
   test:scripts:
-    desc: "Run the shell-script test suite (no Docker required)"
+    desc: "Run the shell-script test suites (no Docker required)"
     cmds:
       # Plain bash, no bats: this repo had no shell harness, and adding a
-      # package-manager entry to test one 168-line script would cost more than
-      # it buys. The subject reads its config from a path under $HOME, which
-      # is what makes every branch reachable from a fixture without Docker
+      # package-manager entry to test a couple of scripts would cost more than
+      # it buys. Each subject is testable from a fixture — the disk guard reads
+      # its config from a path under $HOME, and the parity guard takes its repo
+      # root as an argument — so every branch is reachable with no Docker
       # installed, mounted or running.
+      #
+      # EVERY suite in scripts/tests/ belongs here. The list said "the shell
+      # test suite", singular, and ran one file while a second subject already
+      # sat beside it: a task whose name promises coverage it does not deliver
+      # is how the next harness gets written and never run.
       - bash "{{.ROOT_DIR}}/scripts/tests/docker-disk-check.test.sh"
+      - bash "{{.ROOT_DIR}}/scripts/tests/verify-openapi-parity.test.sh"
 
   doctor:disk:
     desc: "Check free space on the volume hosting Docker's data (exits non-zero when low or unmounted)"
@@ -274,6 +281,19 @@ tasks:
       - cp "{{.ROOT_DIR}}/api/openapi.json" "{{.ROOT_DIR}}/backoffice/openapi.json"
       - (cd "{{.ROOT_DIR}}/frontend" && bun run codegen)
       - (cd "{{.ROOT_DIR}}/backoffice" && bun run codegen)
+
+  verify:openapi:
+    desc: "Check the committed openapi.json is identical across api, frontend and backoffice — the same gate wrapper CI runs"
+    # Runnable BEFORE pushing, which is the whole point. This check lived only
+    # inside .github/workflows/wrapper-ci.yml, so the first time anyone learned
+    # the three snapshots had drifted was after main went red — which is what
+    # happened on 2026-09-07, on a one-line info.version difference with no
+    # contract change at all.
+    #
+    # `openapi:sync` above PREVENTS that by construction; this DETECTS it. Run
+    # the sync, then this, then push.
+    cmds:
+      - sh "{{.ROOT_DIR}}/scripts/verify-openapi-parity.sh" "{{.ROOT_DIR}}"
 
   test:load:
     desc: "Run K6 load tests against local docker-compose stack (never Railway). Prereq: task up"

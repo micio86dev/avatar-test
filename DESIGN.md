@@ -569,18 +569,37 @@ After the last answer is submitted:
 ### 8.1 Layout
 
 ```
-┌──────────────┬────────────────────────────────────────────┐
-│              │  Top nav (global search, user menu)         │
-│   Sidebar    ├────────────────────────────────────────────┤
-│  (256 px)    │                                            │
-│              │   Main content area                        │
-│  Projects    │   (fluid, max-width 1 200 px, centered)    │
-│  Candidates  │                                            │
-│  Reports     │                                            │
-│  Settings    │                                            │
-│              │                                            │
-└──────────────┴────────────────────────────────────────────┘
+┌──────────────────┬────────────────────────────────────────┐
+│                  │  Top nav (client switcher, user menu)  │
+│   Sidebar        ├────────────────────────────────────────┤
+│  (256 px)        │                                        │
+│                  │   Main content area                    │
+│  Dashboard    ·c │   (fluid, max-width 1 200 px, centered)│
+│  Projects     ·c │                                        │
+│  Candidates   ·c │                                        │
+│  Reports      ·c │                                        │
+│  ─────────────── │                                        │
+│  Clients      ·p │                                        │
+│  Avatar tmpl. ·p │                                        │
+│  Settings     ·p │                                        │
+└──────────────────┴────────────────────────────────────────┘
+
+·c = client scope   ·p = platform scope
 ```
+
+**The two scopes are not a permission, and the distinction is load-bearing.**
+A `client` page reads ONE tenant's data; a `platform` page sits above the
+tenants. A superadmin passes every ability gate, so abilities alone cannot
+decide what to show them — the question a client page cannot answer is *whose*.
+`visibleNavItemsFor` (`app/utils/nav-visibility.ts`) therefore hides every
+client-scope entry from a superadmin who has selected no client, and the product
+agrees underneath: `TenantScoped` throws `MissingTenantContextException` on a
+create with no organization resolved, so a "New project" button in that state
+offers an action that cannot complete.
+
+That filter only ever REMOVES items from a superadmin. It never gates anything
+for anyone else — so a platform-scope entry still needs its own `requires`
+ability, or it appears in every organization admin's sidebar.
 
 Sidebar: `--spacing-sidebar`, `--color-primary` background, white text.
 Top nav height: `--spacing-nav`.
@@ -595,7 +614,9 @@ Content padding: `--spacing-section` horizontal, `--spacing-panel` vertical.
 | Project detail | Candidate list + status breakdown + webhook log |
 | Candidate detail | Timeline (lifecycle state), evaluation report (BARS), transcript |
 | Evaluation report | BARS competency grid: each competency with indicator scores (1–5), mean score, reliability, excerpts |
-| Settings | Organization profile, API keys, webhook config, user management (RBAC) |
+| Clients | **Superadmin only** (`clients.viewAny`). Every organization with its platform-wide statistics — client since, projects, candidates, completed, errored, last activity — and a per-row "Act as" that selects which client the superadmin is looking at. The one deliberate cross-tenant read surface in the product; see §8.2.8 |
+| Avatar templates | **Superadmin only** (`avatarTemplates.viewAny`). Provider template configuration |
+| Settings | Organization profile, branding, API keys, webhook config, user management (RBAC), LLM credentials, and a superadmin-only Platform section |
 | Data management | GDPR data deletion requests; export |
 
 > **Scope note (`backoffice-missing-pages`).** This table describes the eventual admin
@@ -603,6 +624,13 @@ Content padding: `--spacing-section` horizontal, `--spacing-panel` vertical.
 > `/settings` (Organization profile, API keys, Webhook defaults, Users & roles) are built
 > by this change. **Project detail, the webhook log, and Data management remain unbuilt**
 > — no route, no component — and stay out of scope until a future change picks them up.
+
+> **Scope note (`superadmin-clients-console`).** `/clients` is READ-ONLY plus the
+> switch. Editing an organization from that page, creating one from the UI, and
+> deleting or deactivating one are explicit non-goals: `OrganizationPolicy`
+> resolves on the caller's own `organization_id`, which is null for a
+> superadmin, so a by-id write path is a separate change. Provisioning stays
+> `ProvisionOrganizationCommand`.
 
 ### 8.2.1 Settings — section rail (not a tab strip)
 
@@ -775,6 +803,59 @@ the right.
 Imports arrive **inactive** and never overwrite: a colliding name creates under
 a derived name. A file must not silently change which avatar an organization's
 live interviews are running on.
+
+### 8.2.8 Clients console — the cross-tenant read surface
+
+`/clients` is the ONE page in the product that reads across tenants, and the
+binding constraint says a tenant must never see another tenant's data. Three
+rules make that safe, and they are design decisions rather than implementation
+details:
+
+1. **The cross-tenant read lives in one named, audited class.**
+   `ClientOverviewReader`, sibling to `ClientDirectory`, both under
+   `App\Support\Superadmin\`. `AdminTenancySafetyArchTest` forbids stripping
+   a tenant scope anywhere under `app/Http/` outside a named allowlist, and
+   `CrossTenantReaderInventoryArchTest` pins the set of files permitted to do it
+   at all. An unscoped query in a controller is the shape a leak takes.
+
+2. **The reader strips the scope itself; the superadmin's ambient bypass is not
+   enough.** That bypass is ON only while no client is selected. Act as one and
+   it goes OFF — an ambient-scoped aggregate would then return a single
+   organization, so the page's own headline action would have emptied the page.
+
+3. **Statistics are a constant number of queries, never a per-organization
+   loop.** A single join across projects and participants fans out and reports
+   counts that are WRONG, not merely slow; correlated subselects are the loop
+   pushed into the planner. Separate `GROUP BY organization_id` aggregates
+   merged in PHP are correct and do not grow with the client count — pinned by a
+   query-count assertion, not by review.
+
+`ClientDirectory`'s identity-only `{id, name}` contract is NOT widened to carry
+these fields: it feeds the topbar switcher, so anything added there is exposed
+to that surface too. Two response shapes, two types.
+
+### 8.2.9 Switching client — why it reloads the page
+
+Selecting a client, from the topbar switcher or from a row on `/clients`, does a
+FULL PAGE RELOAD rather than refreshing state in place, and it reloads on
+failure as well as on success.
+
+Every list, count and report on screen was fetched under the PREVIOUS selection.
+Re-fetching them one by one leaves whichever component the next developer
+forgets showing another tenant's data — in a product whose binding constraint is
+that this must never happen. A reload is the only version of this that cannot be
+half-done.
+
+On failure it reloads too, because the server is the authority on which client
+is selected: the page comes back showing what was actually recorded rather than
+what the control optimistically displayed.
+
+**Open, and worth naming rather than leaving implicit:** that reload is SILENT.
+A 403, a 422 on an unknown organization and a network failure all produce the
+same outcome — the page blinks and nothing changes, with no explanation. The
+argument above establishes why a reload is SAFE; it does not establish that a
+silent one is HONEST, and those are different claims. Resolving it belongs here,
+applied to both surfaces at once, not fixed in one component.
 
 ### 8.3 BARS Report View
 
