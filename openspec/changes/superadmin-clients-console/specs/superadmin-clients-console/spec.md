@@ -118,10 +118,28 @@ change ships.
 
 The unscoped cross-organization read for this console MUST live in exactly
 one new class under `App\Support\Superadmin\`, sibling to `ClientDirectory`,
-and MUST NOT be inlined into a controller. `AdminTenancySafetyArchTest`
-(forbidding `withoutGlobalScopes(` under `app/Http/`) MUST pass unmodified
-after this change — the new class lives outside the directory that arch
-test scans.
+and MUST NOT be inlined into a controller. `AdminTenancySafetyArchTest` MUST
+still pass, and MUST NOT be weakened — not relaxed, not annotated, not
+exempted.
+
+**AMENDED after implementation, because the original text was falsified by what
+implementation found.** It required the arch test to be BYTE-IDENTICAL, on the
+reasoning that the new class lives outside the directory it scans. That
+reasoning held; the requirement did not. The guard's pattern was
+`withoutGlobalScopes\(` — PLURAL ONLY — and this change establishes the
+SINGULAR `withoutGlobalScope('tenant')` as the correct idiom, because the plural
+form also strips `SoftDeletingScope` and `Project` carries both. So the form
+this change makes canonical was invisible to the guard meant to police it, and
+`SsoExchangeController` had been calling exactly that in a controller, on a
+public unauthenticated seam, while passing the test whose whole job is to forbid
+it.
+
+The guard was therefore WIDENED to `withoutGlobalScopes?\(` and given a NAMED
+allowlist, with a second test that fails if an allowlisted file stops stripping
+so the list cannot rot. That is strictly stronger than what it replaced. A
+requirement demanding a file stay untouched cannot survive discovering the file
+was wrong — and leaving the original text would have archived a false invariant
+into the live spec.
 
 #### Scenario: The new reader is the only caller of the unscoped read
 
@@ -130,11 +148,20 @@ test scans.
 - THEN `SuperadminController` is the only caller, and no controller
   performs the unscoped read itself
 
-#### Scenario: The arch test stays green and unmodified
+#### Scenario: The tenancy guard sees BOTH scope-strip forms
 
-- GIVEN `AdminTenancySafetyArchTest` before and after this change
-- WHEN the test file is diffed
-- THEN it is byte-identical, and it still passes
+- GIVEN `AdminTenancySafetyArchTest`
+- WHEN a tenant scope is stripped under `app/Http/` in either the plural
+  `withoutGlobalScopes()` or the singular `withoutGlobalScope('tenant')` form
+- THEN the guard fails, unless that file carries a NAMED allowlist entry stating
+  why it is safe
+
+#### Scenario: The allowlist cannot rot
+
+- GIVEN an allowlisted file that no longer strips a tenant scope
+- WHEN the guard runs
+- THEN it fails, so a stale entry cannot become a standing licence for whatever
+  else takes that path later
 
 ### Requirement: Console Page Requires The Ability And Renders Nothing Without It
 
@@ -209,3 +236,42 @@ deactivating an organization. No such control MUST be present on `/clients`.
 - WHEN its rendered controls are enumerated
 - THEN none of them edit, create, delete, or deactivate an organization —
   only the "Act as this client" switch is interactive
+
+### Requirement: Platform Capabilities Answer Through One Mechanism
+
+Every superadmin-only capability the backoffice gates a CTA on MUST publish an
+ability through `UserAbilities`, not be re-derived client-side from
+`is_superadmin`.
+
+**ADDED after implementation, disclosing scope creep rather than hiding it.**
+`platformSettings.viewAny` was built, tested and shipped in this change while
+appearing in no spec, proposal or design — `sdd-verify` caught it. It is kept
+rather than reverted because it fixes a real inconsistency the change created:
+`clients.viewAny` gates the Clients nav entry through an ability, and the
+Settings entry beside it in the same platform block was still deriving its
+platform section from `is_superadmin`. Two capabilities of the same kind
+answered two different ways, in one menu, is precisely the drift
+`UserAbilities` exists to end.
+
+Disclosed as a deviation, not presented as planned: it was not ratified before
+being built, and unratified work that ships is how scope stops meaning anything.
+
+#### Scenario: A superadmin receives the platform abilities
+
+- GIVEN a superadmin
+- WHEN `/auth/me` is read
+- THEN `abilities.clients.viewAny` and `abilities.platformSettings.viewAny` are
+  both true
+
+#### Scenario: An organization admin receives neither
+
+- GIVEN an org admin, who holds every tenant ability there is
+- WHEN `/auth/me` is read
+- THEN both are false, because a platform capability belongs to no organization
+  and no org-scoped policy can answer for it
+
+> **Not yet wired.** `/settings` still gates its platform section on
+> `is_superadmin`. The ability is published and tested; consuming it is a
+> follow-up, and until then the inconsistency this requirement describes is
+> only half closed.
+
