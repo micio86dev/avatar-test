@@ -1,4 +1,11 @@
-# Delta for Developer Tooling
+# Delta for CI Pipeline
+
+RETARGETED at archive time. This was written as a `developer-tooling` delta,
+following `docker-disk-guard`'s precedent — but no such live capability exists,
+and `ci-pipeline` already owns the cross-stack workflow and carries the
+directly adjacent requirement "Freshness Is Proven By The API Job, Not By
+Cross-Stack Equality". Inventing a parallel capability for two requirements
+about a CI gate would have fragmented the spec store.
 
 ## ADDED Requirements
 
