@@ -1097,11 +1097,27 @@ Usage:
    **Native `<select>` is excluded from the dense size and always uses the 44px
    default.** A native select cannot shrink gracefully: its option line box plus
    the platform's own vertical padding does not fit, and unlike a styled div it
-   clips rather than overflowing visibly. Every native `<select>` and every raw
-   `<input>` that cannot go through the vendored components uses the single
-   `formControlClass` in `app/components/ui/form-control` — four hand-written
+   clips rather than overflowing visibly. Every raw `<input>` that cannot go
+   through the vendored components uses `formControlClass` in
+   `app/components/ui/form-control`, and every native `<select>` uses
+   `formSelectClass` from the same module — four hand-written
    variants had already drifted across three files, one of them at 32px and
    visibly cutting its own text.
+
+   **The two classes differ by one thing: the arrow gutter.** `formSelectClass`
+   is `formControlClass` plus `pr-9`, because a native select draws the
+   platform's disclosure arrow INSIDE its own box and the shared `px-2.5` does
+   not reserve room for it. On a wide field nobody notices; give the select a
+   width and a `truncate` — the topbar client switcher — and the value renders
+   underneath the arrow. An `<input>` keeps the narrower padding, since padding
+   it for an arrow it does not have reads as a misaligned field.
+
+   This rule is MECHANICAL, not advisory: `tests/unit/arch/native-select-styling.spec.ts`
+   scans every SFC template and fails on a native `<select>` that does not route
+   through `formSelectClass`, or that carries its own border/background/height/
+   type-scale classes. The rule above was written once and re-broken twice
+   (`ClientSwitcher.vue`, both selects in `DashboardFilters.vue`), which is what
+   a doc paragraph with no test is worth.
 9. **Testing.** Assertions target `data-testid`, never CSS selectors, per §5.
 10. **Select highlighted-option contrast (form-clarity-and-console-warnings).** The
     highlighted option in a `Select` MUST render white text on `--color-accent-dark`
