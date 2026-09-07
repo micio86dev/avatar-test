@@ -52,7 +52,7 @@ number of slices the dependency graph allows.
 
 ## Branching Prerequisites
 
-- [ ] 0.1 Confirm `api`, `backoffice`, wrapper working trees are clean; create
+- [x] 0.1 Confirm `api`, `backoffice`, wrapper working trees are clean; create
       `feature/superadmin-clients-console` off `develop` in all three (no `frontend`
       branch — proposal assumption 10, no `frontend` submodule work).
 
@@ -66,7 +66,7 @@ number of slices the dependency graph allows.
 
 ### Phase 1: Foundation
 
-- [ ] 1.1 Create `api/tests/Feature/Superadmin/ClientOverviewTest.php`: new `co`-prefixed
+- [x] 1.1 Create `api/tests/Feature/Superadmin/ClientOverviewTest.php`: new `co`-prefixed
       helper functions only (`coOrg()`, etc.) — Pest loads every test file into one
       process, so redeclaring `saSuperadmin()`/`saOrgAdmin()`/`saProject()` from
       `ActingOrganizationTest.php:34,43,53` is a fatal error, not a shadow (D9). Reuse
@@ -75,24 +75,24 @@ number of slices the dependency graph allows.
 
 ### Phase 2: RED — Fan-Out and the Org That Owns Nothing (before `ClientOverviewReader` exists)
 
-- [ ] 2.1 RED same file: org A with 2 projects and 5 participants (3 `completato`, 1
+- [x] 2.1 RED same file: org A with 2 projects and 5 participants (3 `completato`, 1
       `errore`, 1 `in_corso`), org B with 1 project and 0 participants — assert exact
       per-org counts (`projects`, `candidates`, `completed`, `errored`). This is the
       test that fails against a `projects ⋈ participants` join fan-out (D1; spec
       Scenario "Counts are exact with unequal projects-per-org and
       participants-per-project").
-- [ ] 2.2 RED same file: an organization with 0 projects and 0 participants still
+- [x] 2.2 RED same file: an organization with 0 projects and 0 participants still
       appears in `data` with every count at `0` and `last_activity_at: null` — fails
       against a `GROUP BY`-driven row set that never emits a row for it (D1; spec
       Scenario "A zero-activity organization is never dropped").
-- [ ] 2.3 RED `api/tests/Arch/Superadmin/CrossTenantReaderInventoryArchTest.php`: assert
+- [x] 2.3 RED `api/tests/Arch/Superadmin/CrossTenantReaderInventoryArchTest.php`: assert
       the set of files under `api/app/Support/Superadmin/` calling `withoutGlobalScope(`
       or `withoutGlobalScopes(` equals exactly `{ClientDirectory.php,
       ClientOverviewReader.php}`. Fails today: only `ClientDirectory.php` exists (D2).
 
 ### Phase 3: GREEN — The Reader, The Route, The Declared Shape
 
-- [ ] 3.1 Create `api/app/Support/Superadmin/ClientOverviewReader.php::all()`: driver
+- [x] 3.1 Create `api/app/Support/Superadmin/ClientOverviewReader.php::all()`: driver
       `Organization::withoutGlobalScopes()->orderBy('name')->get(['id','name','created_at'])`
       (`Organization extends Model`, no tenant scope, no soft deletes — plural is
       harmless there, D1); `Participant::withoutGlobalScope('tenant')->selectRaw(...
@@ -103,7 +103,7 @@ number of slices the dependency graph allows.
       drive, the two aggregates are `keyBy('organization_id')` lookups defaulting to
       `0`/`null`. Counts cast `(int)` (PDO returns `count(*)` as a string, D1). Run
       2.1–2.3 GREEN.
-- [ ] 3.2 Modify `api/app/Http/Controllers/Api/SuperadminController.php`: add
+- [x] 3.2 Modify `api/app/Http/Controllers/Api/SuperadminController.php`: add
       `clients(Request $request): JsonResponse` behind
       `$this->assertSuperadmin($request)`, calling `app(ClientOverviewReader::class)->all()`
       and `app(ActingOrganization::class)->for(...)`, mirroring `organizations()`
@@ -112,77 +112,77 @@ number of slices the dependency graph allows.
       int, last_activity_at: string|null}>, acting_organization_id: int|null}` (D3) — the
       shape is declared because `app(ClientOverviewReader::class)->all()` is a container
       call Scramble cannot follow.
-- [ ] 3.3 Modify `api/routes/api.php`: add
+- [x] 3.3 Modify `api/routes/api.php`: add
       `Route::get('admin/clients', [SuperadminController::class, 'clients']);` inside the
       existing `['auth:api', TenantContext::class]` group at `:183-192`, beside
       `admin/organizations`.
 
 ### Phase 4: RED then GREEN — Soft-Delete, Acting-Client Narrowing, 403/Equivalence, The `{id,name}` Pin
 
-- [ ] 4.1 RED same file: seed 3 projects for one org, soft-delete 1, expect
+- [x] 4.1 RED same file: seed 3 projects for one org, soft-delete 1, expect
       `projects: 2` on that org's row — pins the reader against the plural
       `withoutGlobalScopes()` form, which would silently count the deleted project
       (D2 Trap 2).
-- [ ] 4.2 RED same file: set an acting organization for the superadmin
+- [x] 4.2 RED same file: set an acting organization for the superadmin
       (`app(ActingOrganization::class)->set(...)`), re-request
       `GET /api/admin/clients` — every organization is still present, not narrowed to
       one. Reproduces the exact post-"Act as" state D2 Trap 1 describes: ambient bypass
       alone would return one org's rows the moment an acting client is set.
-- [ ] 4.3 RED same file: a `DB::listen()` query-count assertion around
+- [x] 4.3 RED same file: a `DB::listen()` query-count assertion around
       `GET /api/admin/clients` — the count is equal at 2 seeded organizations and at 5.
       Pins D1 against a later per-org loop (spec "The Aggregate Is A Constant Number Of
       Queries").
-- [ ] 4.4 RED same file: `403` for admin/operator/viewer, `200` for superadmin; plus the
+- [x] 4.4 RED same file: `403` for admin/operator/viewer, `200` for superadmin; plus the
       D4 equivalence — `Gate::forUser($u)->allows('viewAnyClients')` is `true` iff
       `GET /api/admin/clients` returns `200`, across all four roles.
-- [ ] 4.5 RED same file: `GET /api/admin/organizations`'s row keys are exactly
+- [x] 4.5 RED same file: `GET /api/admin/organizations`'s row keys are exactly
       `['id','name']` after this change ships — a regression widening `ClientDirectory`
       by one field fails here, not in review (spec "The topbar switcher's contract is
       unaffected").
-- [ ] 4.6 RED same file: wire-type assertions — `projects`/`candidates`/`completed`/
+- [x] 4.6 RED same file: wire-type assertions — `projects`/`candidates`/`completed`/
       `errored` each `toBeInt()`; `created_at`/`last_activity_at` are ISO strings or
       `null` (D1 — PDO returns `count(*)` as a string, mirroring
       `ApiClientResourceTest`'s precedent).
-- [ ] 4.7 GREEN: adjust `ClientOverviewReader`/`SuperadminController` if 4.1–4.6 surface
+- [x] 4.7 GREEN: adjust `ClientOverviewReader`/`SuperadminController` if 4.1–4.6 surface
       a gap against 3.1–3.3's implementation; run the full `ClientOverviewTest.php` file
       GREEN.
 
 ### Phase 5: `clients.viewAny` Ability
 
-- [ ] 5.1 Modify `api/app/Providers/AppServiceProvider.php`: add
+- [x] 5.1 Modify `api/app/Providers/AppServiceProvider.php`: add
       `Gate::define('viewAnyClients', static fn (User $user): bool => $user->is_superadmin
       === true);` beside the existing `Gate::policy()` registrations (`:108-131`) and the
       `Gate::define('viewPulse', ...)` precedent (`:151`) (D4).
-- [ ] 5.2 Modify `api/app/Support/Authorization/UserAbilities.php`: add
+- [x] 5.2 Modify `api/app/Support/Authorization/UserAbilities.php`: add
       `'clients' => ['viewAny' => $gate->allows('viewAnyClients')]` to `for()`'s return
       array (no subject — the ability is about the caller, not a row) and to the
       method's `@return` array-shape docblock (`:84-92`), which currently publishes 7
       groups and none is superadmin-scoped.
-- [ ] 5.3 Modify `api/app/Http/Controllers/Auth/AuthController.php`: add `clients:
+- [x] 5.3 Modify `api/app/Http/Controllers/Auth/AuthController.php`: add `clients:
       array{viewAny: bool}` to `me()`'s `@scramble-return abilities` shape (`:163-176`).
-- [ ] 5.4 RED (extend) `api/tests/Feature/Authorization/AbilitiesMapTest.php`: add
+- [x] 5.4 RED (extend) `api/tests/Feature/Authorization/AbilitiesMapTest.php`: add
       `'clients' => ['viewAny' => true]` to the superadmin-scoped assertion pattern this
       file already uses at `:88-100`, and `'clients' => ['viewAny' => false]` to each of
       the three per-role expected-ability arrays (`:48-70`, org admin/operator/viewer).
-- [ ] 5.5 GREEN: run 5.4 against 5.1–5.3's changes.
+- [x] 5.5 GREEN: run 5.4 against 5.1–5.3's changes.
 
 ### Phase 6: OpenAPI Export + Full-Suite Gate
 
-- [ ] 6.1 `cd api && ./vendor/bin/pest` full suite; `phpstan analyse
+- [x] 6.1 `cd api && ./vendor/bin/pest` full suite; `phpstan analyse
       --memory-limit=1G` 0 new errors; `pint --dirty --format agent`.
-- [ ] 6.2 `DB_CONNECTION=pgsql DB_HOST=127.0.0.1 DB_PORT=5432 DB_DATABASE=beai_test
+- [x] 6.2 `DB_CONNECTION=pgsql DB_HOST=127.0.0.1 DB_PORT=5432 DB_DATABASE=beai_test
       DB_USERNAME=postgres DB_PASSWORD=postgres DB_URL= php artisan scramble:export` —
       Postgres, never SQLite (SQLite drops nullability and types ids as `string`).
       Confirm `openapi.json` has `/admin/clients` (get) with the declared shape and
       `AuthController::me()`'s `abilities` schema gains `clients`.
-- [ ] 6.3 `cp api/openapi.json backoffice/openapi.json && cd backoffice && bun run
+- [x] 6.3 `cp api/openapi.json backoffice/openapi.json && cd backoffice && bun run
       codegen` — `AbilityKey` in `useCurrentUser.ts:53-55` is derived from the
       generated `CurrentUser['abilities']`, so `'clients.viewAny'` stays a TypeScript
       error until this runs.
-- [ ] 6.4 `cp api/openapi.json frontend/openapi.json && cd frontend && bun run codegen`
+- [x] 6.4 `cp api/openapi.json frontend/openapi.json && cd frontend && bun run codegen`
       — `frontend`'s `check-client-drift.sh` runs against `../api/openapi.json`;
       skipping this reds a repo this change never otherwise touches.
-- [ ] 6.5 Confirm ~95% coverage on `ClientOverviewReader` and the superadmin gate; 85%
+- [x] 6.5 Confirm ~95% coverage on `ClientOverviewReader` and the superadmin gate; 85%
       overall maintained.
 
 ---
@@ -195,19 +195,19 @@ number of slices the dependency graph allows.
 
 ### Phase 7: `DESIGN.md` Update
 
-- [ ] 7.1 Modify `DESIGN.md` §8.1 (`:571-583`): correct the sidebar diagram from
+- [x] 7.1 Modify `DESIGN.md` §8.1 (`:571-583`): correct the sidebar diagram from
       `Projects / Candidates / Reports / Settings` to the real order — `Dashboard ·
       Projects · Candidates · Reports · Clients · Avatar Templates · Settings`, with
       Clients first in the platform block. Add one line noting `scope` decides
       visibility (the diagram currently implies a uniform sidebar).
-- [ ] 7.2 Modify `DESIGN.md` §8.2's Key Views table (`:589-599`): add a `Clients` row —
+- [x] 7.2 Modify `DESIGN.md` §8.2's Key Views table (`:589-599`): add a `Clients` row —
       superadmin-only; every organization with client-since, projects, candidates,
       completed, errored, last activity; per-row "Act as" switches the acting client and
       reloads.
-- [ ] 7.3 Modify `DESIGN.md` §8.2's scope note (`:601-605`): add Clients to what *is*
+- [x] 7.3 Modify `DESIGN.md` §8.2's scope note (`:601-605`): add Clients to what *is*
       built by this change, alongside `backoffice-missing-pages`'s existing entries;
       Project detail, the webhook log, and Data management stay listed as unbuilt.
-- [ ] 7.4 Bump the wrapper's `api` and `backoffice` submodule pointers once Slice 1 and
+- [x] 7.4 Bump the wrapper's `api` and `backoffice` submodule pointers once Slice 1 and
       Slice 6.1–6.4 are committed.
 
 ---
@@ -219,49 +219,49 @@ number of slices the dependency graph allows.
 
 ### Phase 8: RED — Nav Item
 
-- [ ] 8.1 RED (extend) `backoffice/tests/unit/components/organisms/SidebarNavSuperadmin.spec.ts`
+- [x] 8.1 RED (extend) `backoffice/tests/unit/components/organisms/SidebarNavSuperadmin.spec.ts`
       — the ONLY place `visibleNavItemsFor` is exercised for a superadmin: assert the
       Clients item is present among the platform-scope items alongside Avatar Templates
       and Settings, for a superadmin with `actingClientId = null` (spec "Superadmin with
       no acting client sees Clients and opens it").
-- [ ] 8.2 RED (extend) `backoffice/tests/unit/components/organisms/SidebarNav.spec.ts` —
+- [x] 8.2 RED (extend) `backoffice/tests/unit/components/organisms/SidebarNav.spec.ts` —
       assert the Clients item does NOT appear for a non-superadmin, even though it is
       `scope: 'platform'` — the scope filter alone does not give this; the ability gate
       does (spec "The item is absent for any non-superadmin").
 
 ### Phase 9: GREEN — Nav Item
 
-- [ ] 9.1 Modify `backoffice/app/components/organisms/SidebarNav.vue`: add `{ to:
+- [x] 9.1 Modify `backoffice/app/components/organisms/SidebarNav.vue`: add `{ to:
       '/clients', labelKey: 'nav.clients', icon: BuildingOffice2Icon, requires:
       'clients.viewAny', scope: 'platform' }` first in the platform block of `navItems`
       (`:114-140`). Run 8.1–8.2 GREEN.
-- [ ] 9.2 Modify `backoffice/app/middleware/03.abilities.global.ts`: add `clients:
+- [x] 9.2 Modify `backoffice/app/middleware/03.abilities.global.ts`: add `clients:
       'clients.viewAny'` to the `REQUIRED` map (`:39-42`), keyed by the first path
       segment so `/clients`, `/clients/`, and `/en/clients` are all covered.
 
 ### Phase 10: RED — `ClientTable` Organism
 
-- [ ] 10.1 RED `backoffice/app/composables/useSuperadmin.spec.ts` (extend or create):
+- [x] 10.1 RED `backoffice/app/composables/useSuperadmin.spec.ts` (extend or create):
       `fetchClientOverview()` calls `apiFetch<ClientOverviewResponse>('/admin/clients')`,
       typed off `paths['/admin/clients']['get']`.
-- [ ] 10.2 RED `backoffice/tests/unit/components/organisms/ClientTable.spec.ts`: rows
+- [x] 10.2 RED `backoffice/tests/unit/components/organisms/ClientTable.spec.ts`: rows
       render every column (Client, Client since, Projects, Candidates, Completed,
       Errored, Last activity, action); 0 rows renders `TableEmpty` with
       `data-testid="clients-table-empty"`; clicking `client-act-as-{id}` calls
       `setActingClient(id)` then `window.location.reload()` (stub
       `window.location.reload`); the current org's row has its act-as button disabled.
-- [ ] 10.3 RED same file: a failed `setActingClient(id)` still calls
+- [x] 10.3 RED same file: a failed `setActingClient(id)` still calls
       `window.location.reload()` — the `finally` block runs on rejection too (D6, spec
       "A failed switch still reloads").
 
 ### Phase 11: GREEN — `ClientTable` Organism
 
-- [ ] 11.1 Modify `backoffice/app/composables/useSuperadmin.ts`: add
+- [x] 11.1 Modify `backoffice/app/composables/useSuperadmin.ts`: add
       `fetchClientOverview(): Promise<ClientOverviewResponse>` beside `fetchClients()`,
       with `ClientOverviewResponse`/`ClientOverviewRow` types derived from
       `paths['/admin/clients']['get']…` (never hand-copied). `setActingClient()` stays
       unchanged. Run 10.1 GREEN.
-- [ ] 11.2 Create `backoffice/app/components/organisms/ClientTable.vue`: `Table`/
+- [x] 11.2 Create `backoffice/app/components/organisms/ClientTable.vue`: `Table`/
       `TableHeader`/`TableBody`/`TableRow`/`TableHead`/`TableCell` from
       `@/components/ui/table`; `TableEmpty :colspan="7"` for zero rows (the established
       empty-state primitive, per `CandidateTable.vue:43-45` — no `ui/empty` primitive
@@ -275,31 +275,31 @@ number of slices the dependency graph allows.
 
 ### Phase 12: RED — Page (Three States, Never Collapsed)
 
-- [ ] 12.1 RED `backoffice/tests/unit/pages/clients-page.spec.ts`: a failed
+- [x] 12.1 RED `backoffice/tests/unit/pages/clients-page.spec.ts`: a failed
       `fetchClientOverview()` renders `Alert`/`AlertTitle`/`AlertDescription`,
       `data-testid="clients-error"`, `data-state="error"`, via
       `resolveResourceErrorState(error)`/`resourceErrorKey(...)` — and the table is NOT
       rendered. The D7 discipline from `participants/index.vue:61-64` verbatim: a failed
       list must never fall through to the empty state.
-- [ ] 12.2 RED same file: a successful fetch with 0 organizations renders `ClientTable`
+- [x] 12.2 RED same file: a successful fetch with 0 organizations renders `ClientTable`
       (which itself renders `TableEmpty`) — the genuinely-reachable "fresh install"
       case, not the error state.
 
 ### Phase 13: GREEN — Page + i18n + Gate
 
-- [ ] 13.1 Create `backoffice/app/pages/clients/index.vue`: `PageHeader`, `ref` state,
+- [x] 13.1 Create `backoffice/app/pages/clients/index.vue`: `PageHeader`, `ref` state,
       `onMounted` load via `useSuperadmin().fetchClientOverview()`,
       `resolveResourceErrorState`/`resourceErrorKey` error mapping, `ClientTable` on
       success — following `participants/index.vue`'s state pattern (`:60-88`). Run
       12.1–12.2 GREEN.
-- [ ] 13.2 Modify `backoffice/i18n/locales/{en,it}.json`: nav label (`nav.clients`),
+- [x] 13.2 Modify `backoffice/i18n/locales/{en,it}.json`: nav label (`nav.clients`),
       column headers (client, client-since, projects, candidates, completed, errored,
       last-activity — the `it` wording for "Last activity" must read as *candidate*
       activity, not last login, per D1/proposal review item 2), empty-state copy, error
       copy, the act-as action label.
-- [ ] 13.3 `cd backoffice && bun run typecheck` clean; `bun run test:unit` green; `bun
+- [x] 13.3 `cd backoffice && bun run typecheck` clean; `bun run test:unit` green; `bun
       run lint` clean; `bun run codegen:check` green.
-- [ ] 13.4 Confirm 85% overall coverage maintained across the touched `backoffice`
+- [x] 13.4 Confirm 85% overall coverage maintained across the touched `backoffice`
       surface.
 
 ---
@@ -331,17 +331,17 @@ number of slices the dependency graph allows.
 
 ## Phase 15: Cross-Slice Integration Gate
 
-- [ ] 15.1 Re-run `bun run codegen:check` in `backoffice` **and** `frontend` after all
+- [x] 15.1 Re-run `bun run codegen:check` in `backoffice` **and** `frontend` after all
       of Slice 1's snapshot regen (6.3–6.4) and Slice 2's page are in place — final
       drift-free confirmation.
-- [ ] 15.2 Confirm every success criterion in the proposal is met: `AdminTenancySafetyArchTest`
+- [x] 15.2 Confirm every success criterion in the proposal is met: `AdminTenancySafetyArchTest`
       passes unmodified; `GET /api/admin/organizations` still returns `{id, name}` only;
       query count constant at 2 and 5 seeded organizations; counts exact with unequal
       projects/participants; "Act as" reloads and marks the current row; `DESIGN.md`
       §8.1/§8.2 describe the page, committed before the UI code; every string resolves in
       `en` and `it`; Playwright green on chromium + webkit; `/clients` → `/unsupported`
       on mobile.
-- [ ] 15.3 Update the wrapper submodule pointers to the final merged commits of `api`
+- [x] 15.3 Update the wrapper submodule pointers to the final merged commits of `api`
       and `backoffice`; confirm `VERSION`/`composer.json`/`package.json` agreement per
       Git Flow if either submodule's release version bumps.
 
@@ -364,3 +364,19 @@ number of slices the dependency graph allows.
   artisan test --filter`, observed fabricating passes in this repo. This tasks file
   otherwise names `php artisan test --parallel` per the orchestrator's stated command;
   run the API suite ALONE (two concurrent Pest runs against `beai_test` deadlock).
+
+---
+
+## Completion record — corrected
+
+Every phase above shipped and is on `main` in all four repos: api `v0.45.0`,
+backoffice `v0.28.0`, frontend `v0.15.0`, wrapper `v0.32.0`, CI green on both
+branches everywhere. `sdd-verify` re-ran the real suites (api 2885 tests,
+backoffice 1310, Playwright 7/7 chromium and webkit, mobile 10/10) and
+mutation-tested the four highest-risk invariants independently.
+
+These boxes were wrong until now: 3 of 50 were ticked, while commit `abb0b2d`'s
+message claimed "tasks.md marks Phases 8-15 done". The message was false about
+its own diff, which flipped three boxes. Corrected here rather than quietly, and
+worth naming as the defect it is — a completion record nobody maintains is worse
+than none, because the next reader trusts it.
