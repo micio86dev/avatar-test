@@ -311,16 +311,21 @@ number of slices the dependency graph allows.
 
 ### Phase 14: E2E
 
-- [ ] 14.1 RED then GREEN `backoffice/tests/e2e/clients.spec.ts` (chromium + webkit,
+- [x] 14.1 RED then GREEN `backoffice/tests/e2e/clients.spec.ts` (chromium + webkit,
       role-based locators, network fixtures): superadmin opens `/clients`, sees every
       seeded organization's row, clicks "Act as" on one, the page reloads, the sidebar
       gains the client-scope items, and the acted-as row is marked current with its
       button disabled. A separate scenario: an org admin sees no Clients nav item and
       `GET /api/admin/clients` in the network log returns `403`.
-- [ ] 14.2 RED then GREEN, mobile project only, pattern from
-      `tests/e2e/unsupported-gate.spec.ts` (SA-11): navigating to `/clients` on the
-      mobile viewport redirects to `/unsupported`.
-- [ ] 14.3 `@axe-core/playwright` clean on `/clients`.
+- [x] 14.2 RED then GREEN. **Deviation, disclosed**: added `/clients` to the
+      `ADMIN_ROUTES` array in the EXISTING `tests/e2e/unsupported-gate.spec.ts`
+      rather than a new mobile scenario inside `clients.spec.ts` —
+      `playwright.config.ts`'s `mobile` project restricts `testMatch` to that one
+      file, and the apply scope for this batch forbade touching anything outside
+      `tests/e2e/`, which includes the repo-root `playwright.config.ts`. Verified
+      passing under the actual `mobile` Playwright project (Pixel 7, unauthenticated,
+      forced 375px), not merely a viewport override inside a desktop project run.
+- [x] 14.3 `@axe-core/playwright` clean on `/clients`.
 
 ---
 

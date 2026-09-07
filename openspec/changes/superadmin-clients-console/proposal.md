@@ -340,3 +340,18 @@ Defaults adopted without confirmation.
 8. **Full page reload after the switch** (D7), including on failure.
 9. **Nothing is persisted**; no migration, no new column.
 10. **No `frontend` submodule work.** This is a platform-operator surface end to end.
+
+## Open question raised during slice 2 — the silent switch failure
+
+`onActAsClient` reloads in a `finally`, byte-for-byte the D6 doctrine
+`NavBar.vue` already ships. So a 403, a 422 on an unknown organization, and a
+network failure all produce the same outcome: the page reloads and the row is
+unchanged. Not one collapsed toast — ZERO. The operator clicks, the page blinks,
+nothing happens, and nothing explains why.
+
+D6 justifies why a reload is SAFE (the server is the authority on the selection,
+so the page comes back showing what was actually recorded). It does not justify
+why a silent one is HONEST, and the two are different claims. Raised here rather
+than fixed unilaterally in one component: the doctrine is ratified and shared
+with NavBar, so changing it belongs in the design record, applied to both.
+
