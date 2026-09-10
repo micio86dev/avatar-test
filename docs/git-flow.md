@@ -11,10 +11,10 @@ own cadence.
 
 | Repo | Role | Version SoT |
 |------|------|-------------|
-| wrapper (this repo) | Superproject; holds docs, SDD, docker-compose, Taskfile, submodule pointers | `package.json` `version` |
+| wrapper (this repo) | Superproject; holds docs, SDD, docker-compose, Taskfile, submodule pointers | `VERSION` file **and** `package.json` `version` (ci-guards asserts they match) |
 | `api` | Laravel 13 backend | `VERSION` file **and** `composer.json` `version` (CI asserts they match) |
-| `frontend` | Nuxt 4 SSR candidate app | `package.json` `version` |
-| `backoffice` | Nuxt 4 SPA admin panel | `package.json` `version` |
+| `frontend` | Nuxt 4 SSR candidate app | `VERSION` file **and** `package.json` `version` (ci-guards asserts they match) |
+| `backoffice` | Nuxt 4 SPA admin panel | `VERSION` file **and** `package.json` `version` (ci-guards asserts they match) |
 
 ### The catalogue pin points the other way
 
