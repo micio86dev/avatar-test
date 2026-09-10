@@ -974,7 +974,7 @@ All text against its background MUST achieve:
 
 > ⚠️ Do NOT use `--color-accent` (`#e45526`) for small text on white — it fails the 4.5:1 AA threshold for normal text (3.7:1). Use `--color-accent-dark` (`#b8431e`, 5.4:1) for text-sized accent elements.
 
-> **Select highlighted-option contrast (form-clarity-and-console-warnings, D-select).** `ui/select/SelectItem.vue`'s `focus:` (highlighted) state pairs white text with `--color-accent-dark`, never plain `--color-accent` — the request to make the highlight text white is legal ONLY on the darker token, because white on `--color-accent` is the 3.7:1 failure two rows up. Backoffice `tests/unit/theme.spec.ts` asserts the 5.4:1 ratio numerically (a small WCAG relative-luminance helper), not by eye, plus a source-level assertion that `SelectItem.vue`'s class list never regresses to `focus:bg-accent focus:text-accent-foreground`.
+> **Highlighted-row contrast, and ONE highlight (form-clarity-and-console-warnings, D-select).** Every row a pointer or a keyboard can highlight — `ui/select/SelectItem.vue` AND all four `ui/dropdown-menu` row variants — pairs white text with `--color-accent-dark`, never plain `--color-accent` — the request to make the highlight text white is legal ONLY on the darker token, because white on `--color-accent` is the 3.7:1 failure two rows up. Backoffice `tests/unit/theme.spec.ts` asserts the 5.4:1 ratio numerically (a small WCAG relative-luminance helper), not by eye, plus a source-level assertion across all five row files that no state variant — `focus:`, `data-open:`, any other — ever paints plain `bg-accent`. Those rows also carry `cursor-pointer`, and `data-disabled:cursor-not-allowed` WITHOUT `pointer-events-none`: `role="menuitem"` with `tabindex="-1"` matches no selector in the global base rule, `cursor-default` is a utility that outranks `@layer base` regardless, and an element that is not a pointer target resolves its cursor from an ancestor — so `not-allowed` could never render while `pointer-events-none` sat beside it. Dropping it costs no protection: reka-ui guards activation in JS (`if (!props.disabled)` in `MenuItem`, `if (!disabled.value)` in `SelectItem`). `tests/unit/components/ui/dropdown-menu.spec.ts` and `select-item.spec.ts` assert the RENDERED class list, because a source grep cannot see a `cn()` call that dropped the base list. The sub-trigger is not exempt from any of this: `MenuSubTrigger` declares a `disabled` prop and guards on it three times.
 
 > ⚠️ Do NOT use `--color-error` (#ef4444) as text on white. Use `#b91c1c` for error text.
 
@@ -1200,8 +1200,9 @@ Usage:
    (`ClientSwitcher.vue`, both selects in `DashboardFilters.vue`), which is what
    a doc paragraph with no test is worth.
 9. **Testing.** Assertions target `data-testid`, never CSS selectors, per §5.
-10. **Select highlighted-option contrast (form-clarity-and-console-warnings).** The
-    highlighted option in a `Select` MUST render white text on `--color-accent-dark`
+10. **Highlighted-row contrast, and ONE highlight (form-clarity-and-console-warnings).**
+    Every highlightable row — a `Select` option AND every `DropdownMenu` row —
+    MUST render white text on `--color-accent-dark`
     (5.4:1), never on plain `--color-accent` (3.7:1, fails 4.5:1 AA) — see §9.1's
     dedicated note for the numbers and the token pairing. This binds every current
     and future `focus:`/`hover:`/`data-highlighted:` variant that styles a select
