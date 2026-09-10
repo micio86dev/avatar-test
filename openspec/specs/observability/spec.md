@@ -60,7 +60,7 @@ used outside their defined scope.
 
 | Tool | Sole responsibility |
 |---|---|
-| Microsoft Clarity | User-behavior analytics (session recording, heatmaps, UX analysis) |
+| Microsoft Clarity | User-behavior analytics (session recording, heatmaps, UX analysis) — `frontend` only |
 | Google Analytics 4 | Product-event and marketing metrics |
 | Sentry | Application error monitoring — frontend and backend |
 | Laravel Pulse | Application health (requests, queues, caches, workers) |
@@ -78,9 +78,19 @@ used outside their defined scope.
 
 ### Requirement: Microsoft Clarity — User Behavior Analytics
 
-Microsoft Clarity MUST be integrated into both the `frontend` and `backoffice`
-Nuxt applications. Clarity is the primary and sole tool for user-behavior analysis;
-no other session-recording or heatmap service SHALL be introduced.
+Microsoft Clarity MUST be integrated into the `frontend` Nuxt application. Clarity
+is the primary and sole tool for user-behavior analysis; no other session-recording
+or heatmap service SHALL be introduced.
+
+Clarity MUST NOT be integrated into the `backoffice`. The backoffice is an internal
+admin SPA that renders a candidate's transcript and their BARS scores on the
+participants pages an operator uses every day; a third-party session recorder
+there would record exactly that content, held by a party BEAI cannot audit or
+purge, for every operator session rather than the narrow set of candidate-data
+routes a route-based carve-out could exclude. That risk profile does not exist on
+the frontend the same way — its own carve-out below excludes the one branch
+(`/interview`) that renders comparable content — so the two apps are not held to
+the same rule here.
 
 Clarity MUST capture:
 
@@ -93,11 +103,14 @@ Clarity MUST capture:
 Clarity MUST be connected to the Google Analytics 4 property so that behavioral
 sessions can be correlated with product events.
 
-Clarity's coverage is universal **except** on the routes the *Session Replay Never
-Runs On A Recovery Page* requirement below declares replay-unsafe. That carve-out
-is a hard exclusion, not a configuration preference: the recorder MUST NOT run
-there at all. Coverage is otherwise unconditional — a route is either on the
-replay-unsafe list or it is recorded.
+Clarity's coverage in the frontend is universal **except** on the `/interview`
+branch entire (`frontend/app/utils/analytics-path.ts`'s `isAnalyticsSafeRoute`):
+the interview page IS the candidate's live transcript and video surface, and
+recording it would hand a third party a copy of the assessment the candidate
+believes is between them and one employer. That carve-out is a hard exclusion,
+not a configuration preference: the recorder MUST NOT run there at all.
+Coverage is otherwise unconditional — a route is either on the replay-unsafe
+list or it is recorded.
 
 (Previously: *"the Microsoft Clarity snippet is loaded on every page in both
 apps"*, stated without exception. That was already inaccurate before
@@ -106,14 +119,38 @@ excluded in `backoffice/app/utils/analytics-path.ts` since the redaction utility
 was written, because the participants branch renders candidate display names and
 references. The exception set was never reflected here. This change added
 `/forgot-password` and `/reset-password` to that same list and is the occasion
-for correcting the drift, not its cause.)
+for correcting the drift, not its cause. That whole backoffice carve-out is now
+superseded by the amendment below.)
 
-#### Scenario: Clarity script is loaded in frontend and backoffice
+(Amended 2026-09-10, `remove-clarity-from-backoffice`: this requirement previously
+read "MUST be integrated into both the `frontend` and `backoffice`", with coverage
+pointing at the *Session Replay Never Runs On A Recovery Page* requirement below
+for its exceptions. That backoffice carve-out is retired along with Clarity itself
+— Clarity has been removed from `backoffice/app/plugins/analytics.client.ts`
+entirely, not merely excluded from more routes, so there is no backoffice coverage
+left to carve routes out of. The coverage paragraph above now describes the
+frontend's own carve-out instead, which is a distinct, pre-existing exclusion
+(the `/interview` branch, not the backoffice's participant/login/recovery
+routes) and was never affected by this change. `backoffice/app/utils/analytics-path.ts`'s
+`isAnalyticsSafeRoute` is NOT dead code — it still gates where the analytics-consent
+banner may appear, and `redactAnalyticsPath` still redacts GA4 and Sentry paths —
+but neither gates Clarity any longer, because there is no Clarity in that app to
+gate. See the *Session Replay Never Runs On A Recovery Page* requirement's own
+amendment note for what that means for it specifically.)
 
-- GIVEN the `frontend` and `backoffice` Nuxt apps
+#### Scenario: Clarity script is loaded in the frontend
+
+- GIVEN the `frontend` Nuxt app
 - WHEN a page is rendered and the network requests are inspected
-- THEN the Microsoft Clarity snippet is loaded on every page in both apps
-  EXCEPT those declared replay-unsafe
+- THEN the Microsoft Clarity snippet is loaded on every page EXCEPT those
+  declared replay-unsafe
+
+#### Scenario: Clarity is never loaded in the backoffice
+
+- GIVEN the `backoffice` Nuxt app
+- WHEN any page is rendered and the network requests are inspected, consent
+  granted or not
+- THEN no request to `clarity.ms` is made, and `window.clarity` is never defined
 
 #### Scenario: Clarity is connected to the GA4 property
 
@@ -730,9 +767,21 @@ default is precisely what can be changed without anyone touching this repository
 
 The complete replay-unsafe set is therefore `participants`, `login`, `forgot-password`,
 `reset-password`, each matching the branch entire and each tolerating an `@nuxtjs/i18n`
-locale prefix. This set is the exception named by the *Microsoft Clarity — User Behavior
-Analytics* requirement above; the two MUST NOT be allowed to drift, and the single
-implementation both refer to is `backoffice/app/utils/analytics-path.ts`.
+locale prefix. The single implementation is `backoffice/app/utils/analytics-path.ts`.
+
+(Amended 2026-09-10, `remove-clarity-from-backoffice`: this requirement's set used to be
+described as "the exception named by the Microsoft Clarity — User Behavior Analytics
+requirement above" — an exception CARVED OUT of Clarity's otherwise-universal backoffice
+coverage. That framing no longer applies: Clarity has been removed from the `backoffice`
+entirely, so this requirement is now satisfied vacuously there — session recording is
+disabled on every backoffice route, not only these four, because the backoffice runs no
+session-recording tool of any kind. The route set and `isAnalyticsSafeRoute` are NOT
+retired, though: the analytics-consent banner still stands down on exactly these routes —
+a tracking-consent dialog floating over a candidate's scored evaluation or a credential
+form is the wrong thing regardless of which tool it is asking permission for — and
+`redactAnalyticsPath` still keeps the participant id and the reset token out of GA4 and
+Sentry. This requirement's title and route set describe that surviving behavior now, not
+a Clarity carve-out.)
 
 #### Scenario: Both recovery routes are unsafe for replay
 
