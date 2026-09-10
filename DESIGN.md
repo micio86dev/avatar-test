@@ -974,7 +974,7 @@ All text against its background MUST achieve:
 
 > ⚠️ Do NOT use `--color-accent` (`#e45526`) for small text on white — it fails the 4.5:1 AA threshold for normal text (3.7:1). Use `--color-accent-dark` (`#b8431e`, 5.4:1) for text-sized accent elements.
 
-> **Select highlighted-option contrast (form-clarity-and-console-warnings, D-select).** `ui/select/SelectItem.vue`'s `focus:` (highlighted) state pairs white text with `--color-accent-dark`, never plain `--color-accent` — the request to make the highlight text white is legal ONLY on the darker token, because white on `--color-accent` is the 3.7:1 failure two rows up. Backoffice `tests/unit/theme.spec.ts` asserts the 5.4:1 ratio numerically (a small WCAG relative-luminance helper), not by eye, plus a source-level assertion that `SelectItem.vue`'s class list never regresses to `focus:bg-accent focus:text-accent-foreground`.
+> **Highlighted-row contrast, and ONE highlight (form-clarity-and-console-warnings, D-select).** Every row a pointer or a keyboard can highlight — `ui/select/SelectItem.vue` AND all four `ui/dropdown-menu` row variants — pairs white text with `--color-accent-dark`, never plain `--color-accent` — the request to make the highlight text white is legal ONLY on the darker token, because white on `--color-accent` is the 3.7:1 failure two rows up. Backoffice `tests/unit/theme.spec.ts` asserts the 5.4:1 ratio numerically (a small WCAG relative-luminance helper), not by eye, plus a source-level assertion across all five row files that no state variant — `focus:`, `data-open:`, any other — ever paints plain `bg-accent`. Those rows also carry `cursor-pointer`, and `data-disabled:cursor-not-allowed` WITHOUT `pointer-events-none`: `role="menuitem"` with `tabindex="-1"` matches no selector in the global base rule, `cursor-default` is a utility that outranks `@layer base` regardless, and an element that is not a pointer target resolves its cursor from an ancestor — so `not-allowed` could never render while `pointer-events-none` sat beside it. Dropping it costs no protection: reka-ui guards activation in JS (`if (!props.disabled)` in `MenuItem`, `if (!disabled.value)` in `SelectItem`). `tests/unit/components/ui/dropdown-menu.spec.ts` and `select-item.spec.ts` assert the RENDERED class list, because a source grep cannot see a `cn()` call that dropped the base list. The sub-trigger is not exempt from any of this: `MenuSubTrigger` declares a `disabled` prop and guards on it three times.
 
 > ⚠️ Do NOT use `--color-error` (#ef4444) as text on white. Use `#b91c1c` for error text.
 
@@ -1200,8 +1200,9 @@ Usage:
    (`ClientSwitcher.vue`, both selects in `DashboardFilters.vue`), which is what
    a doc paragraph with no test is worth.
 9. **Testing.** Assertions target `data-testid`, never CSS selectors, per §5.
-10. **Select highlighted-option contrast (form-clarity-and-console-warnings).** The
-    highlighted option in a `Select` MUST render white text on `--color-accent-dark`
+10. **Highlighted-row contrast, and ONE highlight (form-clarity-and-console-warnings).**
+    Every highlightable row — a `Select` option AND every `DropdownMenu` row —
+    MUST render white text on `--color-accent-dark`
     (5.4:1), never on plain `--color-accent` (3.7:1, fails 4.5:1 AA) — see §9.1's
     dedicated note for the numbers and the token pairing. This binds every current
     and future `focus:`/`hover:`/`data-highlighted:` variant that styles a select
@@ -1214,6 +1215,60 @@ Usage:
     over `app/**/*.vue` (novalidate present, `FieldError` imported, no `catch`
     that silently drops a server 422 without reaching the shared
     `applyServerFieldErrors` mapper), mirroring the `api/tests/Arch/**` pattern.
+
+12. **One image upload control (`ImageUploadField`), image-upload-crop-field.** Every
+    image an operator uploads in the backoffice goes through
+    `components/molecules/ImageUploadField.vue`. There is no second upload widget, and
+    adding one is a design change, not an implementation detail: the organization logo
+    and the profile photo previously WERE two widgets — a bare `<input type="file">`
+    beside a sentence, and an `Avatar` with a Change button — with different behaviour,
+    different affordances, and no shared code. Neither offered cropping, and one showed
+    the operator nothing at all after they picked a file.
+
+    **It is the CONTROL, not the field.** The caller owns
+    `Field > FieldLabel + ImageUploadField + FieldDescription/FieldError` per §16.1, and
+    a file the control refuses is reported as a REASON (`reject`), never as rendered
+    copy — the message and its placement belong to the form. It also never touches the
+    network: it emits a `File`, and the organism decides whether to upload on selection
+    (profile photo) or on submit (branding). That division is what lets one component
+    serve both policies.
+
+    | Prop | Values | Purpose |
+    |---|---|---|
+    | `aspect` | `1:1` \| `4:3` \| `16:9` \| `3:2` | Frame ratio. A string union, not a float — an unsupported ratio is a type error, not a squashed image. |
+    | `fit` | `cover` \| `contain` | `cover` fills the frame at minimum zoom; `contain` fits the whole image and pads. |
+    | `shape` | `square` \| `circle` | Mask and preview shape only. Never changes the exported bytes. |
+    | `outputWidth` | px, default `512` | Long edge of the exported bitmap. |
+    | `maxBytes` | bytes | Pre-crop size check, mirroring the endpoint's own cap. |
+
+    **`fit` is the prop that stops the duplication.** The two call sites genuinely
+    disagree and both are right: a logo is `contain` because a wide logotype cropped to
+    FILL a square loses its ends, and most organizations have a wide logotype; an avatar
+    is `cover` because a face has no edges worth preserving and padding inside a circular
+    mask reads as a rendering fault. Without the prop, one of the two has to be wrong,
+    and that pressure is exactly what produces a second component.
+
+    **Choosing a file opens `ImageCropDialog` — always.** Pan by drag, zoom by a labelled
+    native `<input type="range">` or the wheel, over a fixed-ratio window with a dimming
+    mask. The dialog produces the file that gets uploaded; the operator confirms a
+    framing rather than surrendering a rectangle. The confirmed crop previews
+    immediately, before any request, so choosing a file always produces a visible change.
+
+    **The frame is keyboard-operable** (§9.4): `role="application"`, `tabindex="0"`,
+    arrow keys pan and `+`/`-` zoom. Cropping is now mandatory to upload anything, so a
+    crop tool reachable only by dragging would lock keyboard users out of the whole
+    feature. The zoom control is a native range input, not a custom slider — the product
+    register does not reinvent standard affordances.
+
+    **Output encoding follows `fit`, and is not a separate prop.** `contain` pads, padding
+    means transparency, so PNG; `cover` fills and is almost always a photograph, so JPEG
+    at 0.9. The canvas is deliberately not pre-filled with white: a padded logo keeps a
+    transparent background so the same file works on light and dark chrome.
+
+    **`accept="image/png,image/jpeg"` is a picker filter and nothing else.** The server
+    decides on magic bytes, the real byte count and the decoded dimensions, all
+    unchanged by this control. A client that crops is a convenience for honest
+    operators and evidence of nothing.
 
 ---
 
