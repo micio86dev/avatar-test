@@ -321,9 +321,13 @@ authenticator in front of it, or you read the tables directly. Details in
 
 ## 6. Analytics and consent
 
-GA4 and Microsoft Clarity are wired into both Nuxt apps, but **switched off
-twice**: no ID configured, and consent denied by default. Locally nothing is sent
-to third parties.
+GA4 is wired into both Nuxt apps; Microsoft Clarity is **frontend-only** — it was
+removed from the backoffice (`remove-clarity-from-backoffice`), because the
+backoffice is an internal admin tool that renders a candidate's transcript and
+BARS scores, and a third-party session recorder there is a privacy liability the
+frontend does not share. Whatever is configured is **switched off twice**: no ID
+configured, and consent denied by default. Locally nothing is sent to third
+parties.
 
 If you want to see the banner, start with a fake ID:
 

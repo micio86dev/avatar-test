@@ -60,7 +60,7 @@ used outside their defined scope.
 
 | Tool | Sole responsibility |
 |---|---|
-| Microsoft Clarity | User-behavior analytics (session recording, heatmaps, UX analysis) |
+| Microsoft Clarity | User-behavior analytics (session recording, heatmaps, UX analysis) — `frontend` only |
 | Google Analytics 4 | Product-event and marketing metrics |
 | Sentry | Application error monitoring — frontend and backend |
 | Laravel Pulse | Application health (requests, queues, caches, workers) |
@@ -78,9 +78,19 @@ used outside their defined scope.
 
 ### Requirement: Microsoft Clarity — User Behavior Analytics
 
-Microsoft Clarity MUST be integrated into both the `frontend` and `backoffice`
-Nuxt applications. Clarity is the primary and sole tool for user-behavior analysis;
-no other session-recording or heatmap service SHALL be introduced.
+Microsoft Clarity MUST be integrated into the `frontend` Nuxt application. Clarity
+is the primary and sole tool for user-behavior analysis; no other session-recording
+or heatmap service SHALL be introduced.
+
+Clarity MUST NOT be integrated into the `backoffice`. The backoffice is an internal
+admin SPA that renders a candidate's transcript and their BARS scores on the
+participants pages an operator uses every day; a third-party session recorder
+there would record exactly that content, held by a party BEAI cannot audit or
+purge, for every operator session rather than the narrow set of candidate-data
+routes a route-based carve-out could exclude. That risk profile does not exist on
+the frontend the same way — its own carve-out below excludes the one branch
+(`/interview`) that renders comparable content — so the two apps are not held to
+the same rule here.
 
 Clarity MUST capture:
 
@@ -93,11 +103,14 @@ Clarity MUST capture:
 Clarity MUST be connected to the Google Analytics 4 property so that behavioral
 sessions can be correlated with product events.
 
-Clarity's coverage is universal **except** on the routes the *Session Replay Never
-Runs On A Recovery Page* requirement below declares replay-unsafe. That carve-out
-is a hard exclusion, not a configuration preference: the recorder MUST NOT run
-there at all. Coverage is otherwise unconditional — a route is either on the
-replay-unsafe list or it is recorded.
+Clarity's coverage in the frontend is universal **except** on the `/interview`
+branch entire (`frontend/app/utils/analytics-path.ts`'s `isAnalyticsSafeRoute`):
+the interview page IS the candidate's live transcript and video surface, and
+recording it would hand a third party a copy of the assessment the candidate
+believes is between them and one employer. That carve-out is a hard exclusion,
+not a configuration preference: the recorder MUST NOT run there at all.
+Coverage is otherwise unconditional — a route is either on the replay-unsafe
+list or it is recorded.
 
 (Previously: *"the Microsoft Clarity snippet is loaded on every page in both
 apps"*, stated without exception. That was already inaccurate before
@@ -106,14 +119,38 @@ excluded in `backoffice/app/utils/analytics-path.ts` since the redaction utility
 was written, because the participants branch renders candidate display names and
 references. The exception set was never reflected here. This change added
 `/forgot-password` and `/reset-password` to that same list and is the occasion
-for correcting the drift, not its cause.)
+for correcting the drift, not its cause. That whole backoffice carve-out is now
+superseded by the amendment below.)
 
-#### Scenario: Clarity script is loaded in frontend and backoffice
+(Amended 2026-09-10, `remove-clarity-from-backoffice`: this requirement previously
+read "MUST be integrated into both the `frontend` and `backoffice`", with coverage
+pointing at the *Session Replay Never Runs On A Recovery Page* requirement below
+for its exceptions. That backoffice carve-out is retired along with Clarity itself
+— Clarity has been removed from `backoffice/app/plugins/analytics.client.ts`
+entirely, not merely excluded from more routes, so there is no backoffice coverage
+left to carve routes out of. The coverage paragraph above now describes the
+frontend's own carve-out instead, which is a distinct, pre-existing exclusion
+(the `/interview` branch, not the backoffice's participant/login/recovery
+routes) and was never affected by this change. `backoffice/app/utils/analytics-path.ts`'s
+`isAnalyticsSafeRoute` is NOT dead code — it still gates where the analytics-consent
+banner may appear, and `redactAnalyticsPath` still redacts GA4 and Sentry paths —
+but neither gates Clarity any longer, because there is no Clarity in that app to
+gate. See the *Session Replay Never Runs On A Recovery Page* requirement's own
+amendment note for what that means for it specifically.)
 
-- GIVEN the `frontend` and `backoffice` Nuxt apps
+#### Scenario: Clarity script is loaded in the frontend
+
+- GIVEN the `frontend` Nuxt app
 - WHEN a page is rendered and the network requests are inspected
-- THEN the Microsoft Clarity snippet is loaded on every page in both apps
-  EXCEPT those declared replay-unsafe
+- THEN the Microsoft Clarity snippet is loaded on every page EXCEPT those
+  declared replay-unsafe
+
+#### Scenario: Clarity is never loaded in the backoffice
+
+- GIVEN the `backoffice` Nuxt app
+- WHEN any page is rendered and the network requests are inspected, consent
+  granted or not
+- THEN no request to `clarity.ms` is made, and `window.clarity` is never defined
 
 #### Scenario: Clarity is connected to the GA4 property
 
@@ -730,9 +767,21 @@ default is precisely what can be changed without anyone touching this repository
 
 The complete replay-unsafe set is therefore `participants`, `login`, `forgot-password`,
 `reset-password`, each matching the branch entire and each tolerating an `@nuxtjs/i18n`
-locale prefix. This set is the exception named by the *Microsoft Clarity — User Behavior
-Analytics* requirement above; the two MUST NOT be allowed to drift, and the single
-implementation both refer to is `backoffice/app/utils/analytics-path.ts`.
+locale prefix. The single implementation is `backoffice/app/utils/analytics-path.ts`.
+
+(Amended 2026-09-10, `remove-clarity-from-backoffice`: this requirement's set used to be
+described as "the exception named by the Microsoft Clarity — User Behavior Analytics
+requirement above" — an exception CARVED OUT of Clarity's otherwise-universal backoffice
+coverage. That framing no longer applies: Clarity has been removed from the `backoffice`
+entirely, so this requirement is now satisfied vacuously there — session recording is
+disabled on every backoffice route, not only these four, because the backoffice runs no
+session-recording tool of any kind. The route set and `isAnalyticsSafeRoute` are NOT
+retired, though: the analytics-consent banner still stands down on exactly these routes —
+a tracking-consent dialog floating over a candidate's scored evaluation or a credential
+form is the wrong thing regardless of which tool it is asking permission for — and
+`redactAnalyticsPath` still keeps the participant id and the reset token out of GA4 and
+Sentry. This requirement's title and route set describe that surviving behavior now, not
+a Clarity carve-out.)
 
 #### Scenario: Both recovery routes are unsafe for replay
 
@@ -746,3 +795,77 @@ implementation both refer to is `backoffice/app/utils/analytics-path.ts`.
 - WHEN each is tested for replay safety
 - THEN each is reported unsafe — the list shows display names and candidate references, so
   "only the detail page is sensitive" is wrong on its face
+
+<!-- FOLLOW-UP (2026-09-10, from the backoffice Sentry-scrubber review) -->
+<!--
+`email` is absent from the Sentry scrubber denylist in ALL THREE apps —
+`api/app/Support/Observability/SentryScrubber.php`, `backoffice/app/utils/sentry-scrub.ts`
+and `frontend/app/utils/sentry-scrub.ts`. Verified: an event carrying
+`{ candidate_ref, display_name, email }` — one object literal built by
+`backoffice/app/pages/participants/[id].vue` — has two of the three redacted and
+ships the email verbatim.
+
+That column is not incidental. CLAUDE.md ruling 8 was REVERSED on 2026-09-01:
+the candidate email is now mandatory, is the GLOBAL identity key, and is named
+explicitly in the GDPR retention sign-off (ruling 2). `redactAnalyticsPath`'s own
+docblock already treats `?email={address}` as sensitive enough to strip from a URL.
+The file knows; the list does not.
+
+RESOLVED 2026-09-10, as the one change touching all three denylists together —
+fixing it in a single repo would have created the divergence the mirroring exists
+to prevent. `email` now sits beside `candidate_ref` and `display_name` in
+`SentryScrubber::DENIED_KEYS` and both TS denylists, with the api's own fixture
+finally asserted on: it had carried an address since it was written and only ever
+checked the other two fields, so the test read as covering the case it leaked.
+-->
+
+<!-- FOLLOW-UP (2026-09-10, spotted during the same review, outside its diff) -->
+<!--
+`backoffice/.env.example:5` was `NUXT_PUBLIC_API_BASE=http://localhost:8000`.
+
+RESOLVED 2026-09-10 — but NOT to the value this note first prescribed. The note
+read the requirement off `backoffice/Dockerfile:26` and concluded the fix was to
+append `/api` to the absolute URL. That prescription was already superseded:
+`backoffice-same-origin-api` had since landed, and `Dockerfile:123-130` now FAILS
+THE BUILD on any value not starting with `/` — so `http://localhost:8000/api`
+would have been rejected by the very file the note cited as its authority. The
+correct value is the relative `/api`, matching `frontend/.env.example`.
+
+The gap was real: the Dockerfile check guards the build ARG and cannot see
+`.env.example`, which is the file a developer copies on day one. An absolute
+value there is a broken local setup that never reaches the gate that would
+explain it, and it surfaces as a CORS failure — Laravel's CORS covers `api/*`
+only — sending people after the wrong bug. `tests/unit/arch/same-origin-api.spec.ts`
+now asserts the value is relative, closing the one path the build cannot reach.
+-->
+
+<!-- FOLLOW-UP (2026-09-10, opened while closing the email-denylist gap above) -->
+<!--
+The api Sentry scrubber had SEVEN carriers the class never walked, all closed in
+`fix(observability): close the Sentry scrubber's unreachable carriers` and each
+reproduced by a test first: `request.url`/`query_string` (the SSO token),
+`request.data` (a plaintext password on a failing login), breadcrumbs (Laravel
+log context, so transcripts), `tags`, `contexts`, exception values, and the
+event message — whose PARAMS, not template, hold the data.
+
+Key matching also lowercased without normalising, so `candidateRef`,
+`X-Api-Key`, `APIKey` and `SSOToken` walked out while their snake_case spellings
+were denied. Both TS mirrors normalise before matching; only the api never did.
+
+STILL OPEN, and NOT regressions from that change — they are live today:
+
+- `contexts.http.query` is populated independently of `request.query_string`
+  and is not reached by the request branch.
+- Transaction SPANS are not scrubbed. `before_send_transaction` is now wired, so
+  the transaction EVENT is covered, but span data is a separate carrier.
+- `before_send_log` is deliberately unwired: it takes `callable(Log): ?Log`,
+  which `SentryScrubber::handle` cannot satisfy. Dormant while `enable_logs` is
+  false and no `sentry` channel exists in `config/logging.php` — but
+  `SENTRY_ENABLE_LOGS=true` reopens it with nothing in the path.
+
+These want their own change rather than another round on a release branch. The
+pattern across all of them is the same and is worth stating once: this scrubber
+is a DENYLIST over a surface the SDK keeps adding to, so every new carrier is
+open until someone names it. The review gate found each of these by walking the
+installed SDK rather than the file — that is the technique to repeat.
+-->

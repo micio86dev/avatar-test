@@ -3,6 +3,15 @@
 # the SAME environment CI uses, so screenshot baselines (-linux) stay
 # deterministic and green everywhere. Pass --update-snapshots to regenerate.
 #
+# `CI=1` is part of that sameness and was missing. Both playwright.config.ts
+# files read it for `workers` (1 under CI, unbounded otherwise) and `retries`
+# (2 under CI, 0 otherwise) — so this script promised CI parity while running a
+# different concurrency profile than CI. Locally that surfaced as three webkit
+# failures with nothing wrong in the code: the rAF gap-sampler assertions
+# (`samples.length > 30`) count frames in a fixed window, and parallel workers
+# competing for CPU starved them down to 4, 23 and 25. Serialised, the same
+# tests pass.
+#
 # Bun is installed with its OWN installer, never `npm install -g bun`.
 # CLAUDE.md is unambiguous — "never use npm, pnpm, yarn, npx or pnpx" — and the
 # wrapper CI enforces it with a guard whose own comment says "no carve-outs;
@@ -59,9 +68,16 @@ fi
 docker run --rm \
   -v "$ROOT/$APP":/work \
   -v /work/node_modules \
-  -w /work -e HOME=/root \
+  -w /work -e HOME=/root -e CI=1 \
   "$IMAGE" \
   bash -lc "set -euo pipefail
+    # unzip FIRST. The Bun installer downloads a .zip and shells out to unzip,
+    # and the pinned Playwright image does not ship it — the run died on
+    # 'error: unzip is required to install bun' before a single test started.
+    # Installed here rather than baked into a derived image so the pinned tag
+    # stays the one CI and this script agree on; that tag is what keeps the
+    # -linux screenshot baselines reproducible.
+    apt-get update -qq >/dev/null && apt-get install -y -qq unzip >/dev/null
     curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s bun-v1.4.0 >/dev/null
     bun install --frozen-lockfile >/dev/null
     node node_modules/.bin/playwright test$ARGS"
