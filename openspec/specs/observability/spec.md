@@ -795,3 +795,77 @@ a Clarity carve-out.)
 - WHEN each is tested for replay safety
 - THEN each is reported unsafe — the list shows display names and candidate references, so
   "only the detail page is sensitive" is wrong on its face
+
+<!-- FOLLOW-UP (2026-09-10, from the backoffice Sentry-scrubber review) -->
+<!--
+`email` is absent from the Sentry scrubber denylist in ALL THREE apps —
+`api/app/Support/Observability/SentryScrubber.php`, `backoffice/app/utils/sentry-scrub.ts`
+and `frontend/app/utils/sentry-scrub.ts`. Verified: an event carrying
+`{ candidate_ref, display_name, email }` — one object literal built by
+`backoffice/app/pages/participants/[id].vue` — has two of the three redacted and
+ships the email verbatim.
+
+That column is not incidental. CLAUDE.md ruling 8 was REVERSED on 2026-09-01:
+the candidate email is now mandatory, is the GLOBAL identity key, and is named
+explicitly in the GDPR retention sign-off (ruling 2). `redactAnalyticsPath`'s own
+docblock already treats `?email={address}` as sensitive enough to strip from a URL.
+The file knows; the list does not.
+
+RESOLVED 2026-09-10, as the one change touching all three denylists together —
+fixing it in a single repo would have created the divergence the mirroring exists
+to prevent. `email` now sits beside `candidate_ref` and `display_name` in
+`SentryScrubber::DENIED_KEYS` and both TS denylists, with the api's own fixture
+finally asserted on: it had carried an address since it was written and only ever
+checked the other two fields, so the test read as covering the case it leaked.
+-->
+
+<!-- FOLLOW-UP (2026-09-10, spotted during the same review, outside its diff) -->
+<!--
+`backoffice/.env.example:5` was `NUXT_PUBLIC_API_BASE=http://localhost:8000`.
+
+RESOLVED 2026-09-10 — but NOT to the value this note first prescribed. The note
+read the requirement off `backoffice/Dockerfile:26` and concluded the fix was to
+append `/api` to the absolute URL. That prescription was already superseded:
+`backoffice-same-origin-api` had since landed, and `Dockerfile:123-130` now FAILS
+THE BUILD on any value not starting with `/` — so `http://localhost:8000/api`
+would have been rejected by the very file the note cited as its authority. The
+correct value is the relative `/api`, matching `frontend/.env.example`.
+
+The gap was real: the Dockerfile check guards the build ARG and cannot see
+`.env.example`, which is the file a developer copies on day one. An absolute
+value there is a broken local setup that never reaches the gate that would
+explain it, and it surfaces as a CORS failure — Laravel's CORS covers `api/*`
+only — sending people after the wrong bug. `tests/unit/arch/same-origin-api.spec.ts`
+now asserts the value is relative, closing the one path the build cannot reach.
+-->
+
+<!-- FOLLOW-UP (2026-09-10, opened while closing the email-denylist gap above) -->
+<!--
+The api Sentry scrubber had SEVEN carriers the class never walked, all closed in
+`fix(observability): close the Sentry scrubber's unreachable carriers` and each
+reproduced by a test first: `request.url`/`query_string` (the SSO token),
+`request.data` (a plaintext password on a failing login), breadcrumbs (Laravel
+log context, so transcripts), `tags`, `contexts`, exception values, and the
+event message — whose PARAMS, not template, hold the data.
+
+Key matching also lowercased without normalising, so `candidateRef`,
+`X-Api-Key`, `APIKey` and `SSOToken` walked out while their snake_case spellings
+were denied. Both TS mirrors normalise before matching; only the api never did.
+
+STILL OPEN, and NOT regressions from that change — they are live today:
+
+- `contexts.http.query` is populated independently of `request.query_string`
+  and is not reached by the request branch.
+- Transaction SPANS are not scrubbed. `before_send_transaction` is now wired, so
+  the transaction EVENT is covered, but span data is a separate carrier.
+- `before_send_log` is deliberately unwired: it takes `callable(Log): ?Log`,
+  which `SentryScrubber::handle` cannot satisfy. Dormant while `enable_logs` is
+  false and no `sentry` channel exists in `config/logging.php` — but
+  `SENTRY_ENABLE_LOGS=true` reopens it with nothing in the path.
+
+These want their own change rather than another round on a release branch. The
+pattern across all of them is the same and is worth stating once: this scrubber
+is a DENYLIST over a surface the SDK keeps adding to, so every new carrier is
+open until someone names it. The review gate found each of these by walking the
+installed SDK rather than the file — that is the technique to repeat.
+-->
