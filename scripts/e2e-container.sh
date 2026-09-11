@@ -62,6 +62,13 @@ docker run --rm \
   -w /work -e HOME=/root \
   "$IMAGE" \
   bash -lc "set -euo pipefail
+    # unzip FIRST. The Bun installer downloads a .zip and shells out to unzip,
+    # and the pinned Playwright image does not ship it — the run died on
+    # 'error: unzip is required to install bun' before a single test started.
+    # Installed here rather than baked into a derived image so the pinned tag
+    # stays the one CI and this script agree on; that tag is what keeps the
+    # -linux screenshot baselines reproducible.
+    apt-get update -qq >/dev/null && apt-get install -y -qq unzip >/dev/null
     curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash -s bun-v1.4.0 >/dev/null
     bun install --frozen-lockfile >/dev/null
     node node_modules/.bin/playwright test$ARGS"
