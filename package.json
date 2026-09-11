@@ -1,6 +1,6 @@
 {
   "name": "beai-wrapper",
-  "version": "0.35.1",
+  "version": "0.36.0",
   "private": true,
   "description": "BEAI wrapper superproject \u2014 holds docs, SDD artifacts, docker-compose, and submodule pointers.",
   "scripts": {
