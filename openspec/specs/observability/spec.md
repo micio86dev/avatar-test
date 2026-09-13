@@ -852,16 +852,61 @@ Key matching also lowercased without normalising, so `candidateRef`,
 `X-Api-Key`, `APIKey` and `SSOToken` walked out while their snake_case spellings
 were denied. Both TS mirrors normalise before matching; only the api never did.
 
+CLOSED since that note was written, and recorded so the list stops lying:
+
+- `before_send_log` is now WIRED, through a second entry point
+  `SentryScrubber::handleLog`. It takes `callable(Log): ?Log`, which `handle()`
+  cannot satisfy, and that mismatch was the whole reason it sat open. "Dormant
+  behind `SENTRY_ENABLE_LOGS`" is the argument this class had already refused
+  three times — for spans, the event stacktrace and the fingerprint — and
+  accepting it here was the inconsistency. The body takes the free-text pass,
+  the attributes the key walk.
+
+- `contexts.http` is now scrubbed by its own branch, which cuts `query_string`,
+  `query` and `fragment` — the request branch never reached it.
+- Transaction SPANS are now scrubbed. They are REBUILT from a `SpanContext`
+  rather than mutated, because `setData()`/`setTags()` merge and therefore
+  cannot REMOVE a renamed key; the rebuild carries traceId, spanId,
+  parentSpanId, op, status, origin, sampled and both timestamps.
+
 STILL OPEN, and NOT regressions from that change — they are live today:
 
-- `contexts.http.query` is populated independently of `request.query_string`
-  and is not reached by the request branch.
-- Transaction SPANS are not scrubbed. `before_send_transaction` is now wired, so
-  the transaction EVENT is covered, but span data is a separate carrier.
-- `before_send_log` is deliberately unwired: it takes `callable(Log): ?Log`,
-  which `SentryScrubber::handle` cannot satisfy. Dormant while `enable_logs` is
-  false and no `sentry` channel exists in `config/logging.php` — but
-  `SENTRY_ENABLE_LOGS=true` reopens it with nothing in the path.
+- NO automated guard compares the two Nuxt scrubbers against each other. They
+  are declared mirrors — "where a leak class exists on both sides, its exact
+  denylist" — and the only parity check that exists today is the static
+  `EXPECTED_DENIED_KEYS` list inside each app's own suite, which catches a
+  denylist divergence and nothing else. A file-level diff belongs in the
+  wrapper's `scripts/ci-guards.sh`, which is the one place that can see both
+  submodules.
+  EVIDENCE, not theory: a manual diff of the two files found `api_keys` present
+  in the api's list and missing from both mirrors, and then TWO mutation-testing
+  artefacts that had been committed as if they were the code — `next.tags`
+  reverted from `scrubBody` to `scrubValue`, and `scrubbedContext`'s
+  fail-closed branch replaced by `safeClone(context) ?? context`. Both passed
+  every suite. The mirror diff is what caught them, and it was run by hand.
+- NEITHER Nuxt app type-checks its unit tests. Nuxt's generated
+  `.nuxt/tsconfig.app.json` includes `app/**` and `tests/nuxt/**` and NOT
+  `tests/unit/**`, so `nuxi typecheck` never sees them — a fixture annotated as
+  the real `ScrubbableEvent` while carrying a deliberately off-shape payload was
+  a type error no gate could report. MEASURED: adding `../tests/**/*` to
+  `typescript.tsConfig.include` surfaces **181** errors across both apps
+  (missing `unassessable_reason` in evaluation fixtures, `Promise<Disposable>`
+  vs `Promise<void>` in Playwright fixtures, and a Vue SFC arch fixture). Those
+  are test-fixture debt, not product defects, and closing the gap is a change of
+  its own — it must not be bolted onto a release branch. The scrubber fixtures
+  were fixed by hand in the meantime.
+- BOTH Nuxt mirrors match the `http`/`response` context names as literal
+  lowercase in the post-pass that applies the full request rules. A
+  differently-cased key falls to the generic walk, whose `url` handling reduces
+  the value to a bare origin. Latent — Sentry emits these names lowercase — and
+  a diagnostic loss rather than a leak, so it wants evidence before code.
+- BOTH Nuxt mirrors apply the frame-preserving stacktrace rule only under
+  `exception.values[]`. A stacktrace arriving under any other field — `threads`
+  is the shape Sentry defines — falls through to the generic key walk, which
+  reduces every frame to its bare origin and loses symbolication. This is a
+  DIAGNOSTIC loss, not a leak, and browser JS Sentry is not known to emit
+  `threads`, so the asymmetry is real but the trigger is unproven. It wants
+  evidence before code.
 
 These want their own change rather than another round on a release branch. The
 pattern across all of them is the same and is worth stating once: this scrubber
