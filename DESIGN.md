@@ -539,7 +539,62 @@ never estimated (§9.1):
 
 The brand purple `--color-primary` is NOT used here: at `#771aaf` it sits too
 close to the panel background to carry a thin stroke. Tokens are read from the
-stylesheet at paint time, never restated as literals in the canvas code.
+stylesheet at paint time.
+
+**Named fallbacks are permitted in the canvas, and only there.** This section
+previously said tokens are "never restated as literals in the canvas code". That
+rule is right for CSS, where an unresolved token simply inherits; it is wrong
+for a canvas, where `getPropertyValue` returning `''` yields `addColorStop('')`
+and a `SyntaxError` inside the paint loop — a blank panel, which is the one
+outcome §7.3 exists to prevent. So `readBrandColors()` may carry a named
+fallback per token, and it must be the same value the `@theme` block declares.
+A wrong-but-visible ribbon beats an absent one; a SILENTLY wrong one does not,
+which is why the fallback is named beside the token it stands in for rather
+than buried in the draw call.
+
+#### 7.3.2 Tenant branding of the ribbon
+
+An organization's `primary_color` reaches this canvas, because a ribbon in the
+product palette inside an otherwise branded interview reads as a brand that did
+not apply. Three rules make that safe:
+
+1. **Concrete colours only, mixed in JavaScript.** The derived shades are
+   computed as an sRGB channel mix by `app/utils/brand-color`, and the stored
+   value is always a `#rrggbb`. `color-mix(in oklab, …)` was the first design
+   and is **rejected**: an unregistered custom property's computed value is its
+   specified *text*, so `getComputedStyle` returns the expression verbatim and
+   `addColorStop()` — which throws on what it cannot parse — throws every
+   frame, blanking the panel. Resolving the expression through a probe element
+   was the other candidate and is also rejected: it works in a browser and not
+   in the test DOM, which would leave the branded path unexercised by every
+   unit test in the repo. sRGB rather than oklab is an accepted trade — less
+   perceptually even, far less code to get subtly wrong, and the same colour
+   space WCAG already defines the contrast maths in.
+2. **The canvas guarantees its own contrast.** The ratios in the table above
+   are measured against the product's own palette; an operator picks an
+   arbitrary colour, and a dark one drops the ribbon below §9.1's binding
+   **≥3:1** against `--color-avatar-bg`. The canvas therefore lightens a tenant
+   colour until it clears the floor rather than rendering something a candidate
+   cannot see. Two floors, not one: **3:1** for the ribbon edge
+   (`--color-primary-light`), the §9.1 minimum for a graphical object, and
+   **4.5:1** for `--color-lavender`, which is stricter because it paints the
+   resting hairline — one pixel tall, the only mark on screen in silence, and
+   the product's own `#8373d2` measures 4.55:1 there. Contrast is not delegated
+   to the operator: the product cannot ask someone choosing a brand colour to
+   also verify a waveform.
+3. **Every mark, or none.** `--color-lavender` paints the centre stop AND the
+   resting baseline — the only mark visible in silence. Branding the edges
+   while leaving the centre in product purple is the half-applied brand this
+   document's own §3.1 warns about, so the lavender follows the tenant too.
+   `--color-primary-dark` is deliberately NOT branded: it has no consumer in
+   this app, and painting a token nothing reads is ceremony that looks like
+   coverage.
+4. **The resting hairline is composited, never `color-mix`-ed.** `strokeStyle`
+   does not throw on a colour it cannot parse — it silently keeps the previous
+   value, which on a fresh context is black, about 1.06:1 on this panel. An
+   invisible hairline with no error anywhere is the precise failure §7.3 exists
+   to prevent, so the alpha is applied by mixing against `--color-avatar-bg`
+   into a concrete colour instead.
 
 **Motion is state.** The ribbon moves only because the voice does. Under
 `prefers-reduced-motion` the animation loop never starts; the panel repaints
