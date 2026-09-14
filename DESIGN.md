@@ -665,8 +665,18 @@ A horizontal tab strip is **not** used here, and must not be reintroduced:
 Implementation stays on the reka-ui `Tabs` primitive with
 `orientation="vertical"`, preserving `role="tab"` / `role="tabpanel"`, roving
 arrow-key focus, and lazy panel mounting (only the visible panel is in the DOM).
-Selected state: `bg-primary/10` with a `--color-primary` label and icon. Side
-stripes (`border-left` accents) are **not** an allowed selected-state affordance.
+Selected state: `bg-primary/10` with a `--color-primary` label and icon, **plus
+a `font-semibold` label**. Side stripes (`border-left` accents) are **not** an
+allowed selected-state affordance.
+
+The weight is not decoration and not optional. The other three signals —
+fill, label colour, icon colour — are all COLOUR, and
+`backoffice/AGENTS.md` states the rule without exception: *"Never convey
+meaning by colour alone. Every state needs a non-colour cue."* This rail had
+none, and the ban on side stripes one line up is what makes weight the
+available cue rather than a preference. `role="tab"` + `aria-selected` already
+carry the state to assistive tech, so the gap was never an AT failure — it was
+a sighted reader who cannot tell `--color-primary` from `--foreground`.
 
 ### 8.2.2 Selected state on toggles
 
