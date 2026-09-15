@@ -1,0 +1,528 @@
+# Tasks: Framework Catalogue Authoring
+
+> Strict TDD active. Correctness-critical zones (~95% coverage): revision
+> resolution, `ProjectInterviewability`, `ApplyCompetencySelection`, the
+> publish sweep, the superadmin gate — this change touches two of the three
+> high-integrity zones (scoring, candidate state machine). 85% overall in
+> every submodule touched. This breakdown follows `design.md`'s PR slicing
+> **verbatim** — 12 PRs, not re-sliced. Where a slice looks wrong the design
+> already says so explicitly (Contradictions surfaced 1–7); this file does
+> not silently change the split.
+
+**Ordering dependency, stated once, load-bearing:** within PR 3, the runtime
+invariant twin (FormRequest validation + DB CHECK constraints + the blocking
+publish sweep — Phase 8/9 below) MUST be implemented and GREEN **before** the
+CRUD controllers are wired to accept writes (Phase 10). Reversing this order
+opens a window where a superadmin can write a catalogue `scripts/ci-guards.sh`
+would reject. This is not a suggestion — it is the reason PR 3 groups
+`OpenDraftRevision`/`PublishRevision`/CRUD/FormRequest twins/`catalogue.manage`
+into one PR rather than splitting CRUD from its guard.
+
+**Open questions (OQ-A/B/C) are non-blocking for every task below**, per
+design. No task in PRs 1–12 depends on their answers:
+- OQ-A (JSON-ingress after publish) — left open; PR 9 documents the loss
+  (Contradiction 7), invents nothing.
+- OQ-B ("copy from revision X" affordance) — not built; PR 4/PR 10 ship the
+  plain per-revision default-question editor only.
+- OQ-C (`TurnClassifier` false-follow-up rate) — PR 7 ships the conservative
+  (over-report) behavior as specified and discloses the residual; no task
+  waits on a measured rate.
+
+## API Verification Commands (run at the gate of every `api` PR: 1, 2, 3, 4, 5, 6, 7, 8)
+
+```
+cd api
+./vendor/bin/pint --test
+./vendor/bin/phpstan analyse --memory-limit=1G
+php artisan migrate:fresh --seed=false   # or the repo's test-DB migration step
+./vendor/bin/pest --parallel
+./vendor/bin/pest --coverage --min=85
+# fresh OpenAPI export, Postgres only, diffed against the committed snapshot:
+DB_CONNECTION=pgsql php artisan scramble:export && git diff --exit-code openapi.json
+# VERSION / composer.json / openapi.json agreement (wrapper guard)
+scripts/ci-guards.sh   # must stay green, unmodified, exactly as strict
+```
+
+`task openapi:sync` (wrapper `Taskfile.yml`) is the required step whenever a
+PR changes the API surface (PRs 3, 4, 6*, 7*, 8*) — it runs
+`scramble:export`, copies `openapi.json` into `frontend/` and `backoffice/`,
+and regenerates both typed clients. **It MUST run with `DB_CONNECTION=pgsql`
+— never sqlite**, which silently produces a wrong export (JSON-column
+introspection differs). Follow with `task verify:openapi` before any PR is
+considered gate-clean. (*PRs 6/7/8 change response payload shapes on
+existing routes but add no new routes; re-run the export and diff regardless
+— a shape change is still a contract change.)
+
+Pest is run as `cd api && ./vendor/bin/pest <exact-file>` or a full run —
+never `php artisan test --filter` (observed fabricating passes in this repo).
+
+## Review Workload Forecast
+
+| Field | Value |
+|-------|-------|
+| Estimated changed lines | PR1 ~420 · PR2 ~260 · PR3 ~400 · PR4 ~200 · PR5 ~380 · PR6 ~340 · PR7 ~360 · PR8 ~120 · PR9 ~150 · PR10 ~420 · PR11 ~60 · PR12 ~140 · **Total ≈ 3250** (design's own ≈2,500–3,500 estimate) |
+| 400-line budget risk | High — PR1, PR3, PR5, PR6, PR7, PR10 are at or above the 400-line budget on their own |
+| Chained PRs recommended | Yes |
+| Suggested split | PR 1 → PR 2 → PR 3 → PR 4 → PR 5 → PR 6 → PR 7 → PR 8 (`api`, each on the previous slice's branch) → PR 9 (wrapper, before PR 10) → PR 10 (`backoffice`) → PR 11 (`frontend`) → PR 12 (`backoffice`, on PR 10's branch) |
+| Delivery strategy | ask-on-risk |
+| Chain strategy | feature-branch-chain — PR 1 targets `feature/framework-catalogue-authoring`; each later `api` slice targets the previous `api` slice's branch; PR 9 (wrapper) lands before PR 10; PR 10/PR 12 (`backoffice`) and PR 11 (`frontend`) each target their own tracker branch, requiring the wrapper's PR 9 merged first per `CLAUDE.md`'s "`DESIGN.md` before any UI code" |
+
+Decision needed before apply: Yes
+Chained PRs recommended: Yes
+Chain strategy: feature-branch-chain
+400-line budget risk: High
+
+### Suggested Work Units
+
+| Unit | Goal | Repo / Base | Focused test command | Runtime harness | Rollback boundary |
+|------|------|-------------|-----------------------|------------------|--------------------|
+| 1 | Revisions table, composite FKs, baseline migration, `BarsIndicatorLoader` resolution | `api`, base = tracker | `./vendor/bin/pest tests/Feature/Migration/` | Railway-like staging against a copy of real data — **required before PR 2 starts**, per Migration/Rollout | `down()` restores single-revision schema (tested); not cheap after a 2nd revision exists |
+| 2 | Seeder against revision state; `SeederLockGuardTest` rewritten | `api`, base = PR1 branch | `./vendor/bin/pest tests/Feature/C4/Seeder/` | N/A — seeder-only, no external call | Revert restores prior seeder + test file |
+| 3 | `OpenDraftRevision`/`PublishRevision`, CRUD, FormRequest twins, `catalogue.manage`, 403s, OpenAPI ×3 | `api`, base = PR2 branch | `./vendor/bin/pest tests/Feature/Catalogue/` | `task openapi:sync` against Postgres | Additive routes/tables; revert removes with no residue, regenerate 3 snapshots |
+| 4 | `framework_default_questions` CRUD + `catalogue:export` | `api`, base = PR3 branch | `./vendor/bin/pest tests/Feature/Catalogue/DefaultQuestion* tests/Feature/Catalogue/CatalogueExportTest.php` | `Storage::fake()` proves zero filesystem writes | Additive; revert removes command + table |
+| 5 | `operator_modified`, `ApplyCompetencySelection`, restore renumber | `api`, base = PR4 branch | `./vendor/bin/pest tests/Feature/Project/` | N/A — runs inside existing `DB::transaction` scopes | Revert restores prior `ProjectController` selection code path |
+| 6 | `ProjectInterviewability`, 3 ingress refusals, `/start` use-time check | `api`, base = PR5 branch | `./vendor/bin/pest tests/Feature/Interview/` | Manual: mint an entry link, empty a competency, confirm use-time refusal | Additive predicate + guard clauses; revert removes both cleanly |
+| 7 | Composer budget reversal, `primary_questions` snapshot, `TurnClassifier` | `api`, base = PR6 branch | `./vendor/bin/pest tests/Unit/Conversation/ tests/Feature/Interview/TranscriptAuditTest.php` | A real `/start` → `/utterance` round trip against a seeded competency | Revert restores additive-budget composer and drops the two new columns |
+| 8 | `audit_logs.organization_id` nullable, `PlatformAuditWriter` | `api`, base = PR7 branch | `./vendor/bin/pest tests/Feature/Catalogue/PlatformAuditWriterTest.php` | N/A — DB-only write path | Additive column + writer class; revert is clean |
+| 9 | `DESIGN.md`, `CLAUDE.md`, the two other "4 fixed" documents | wrapper, base = tracker | N/A — documentation only | N/A | Pure doc revert |
+| 10 | `QuestionListEditor` extraction, `/catalogue` page, nav, guard, i18n | `backoffice`, base = PR9 merged + tracker | `bun run test:unit` | `bun run test:e2e -- catalogue` (chromium) | Revert drops the page/nav entry; `ProjectQuestionsPanel` stays functional (extraction, not rewrite) |
+| 11 | `[token].vue` consumes `redirect_url` | `frontend`, base = tracker | `bun run test:unit` | Manual: trigger a `403` from `/sso/exchange` with a configured `error_redirect_url` | ~60-line revert to the existing null-fallback branch |
+| 12 | Playwright: chromium + webkit + mobile SA-11 gate | `backoffice`, base = PR10 branch | `bun run test:e2e` | Full Playwright run, 3 projects | Pure test-file revert, no production code |
+
+---
+
+## PR 1 — `api`: Revisions, Composite FKs, Baseline Migration, Loader Resolution
+
+> Base: `feature/framework-catalogue-authoring`. **Nothing downstream ships
+> until this PR is verified in a Railway-like environment against real
+> data** (Migration/Rollout). Must not break: every existing scoring test;
+> `SeederLockGuardTest` in its **old** form (seeder untouched here);
+> `scripts/ci-guards.sh`.
+
+### Phase 1: RED — the highest-value test in the change, written before the migration exists
+
+- [x] 1.1 RED `api/tests/Feature/Migration/BaselineRevisionMigrationTest.php`: seed an evaluation against the pre-revision schema, snapshot `getTranslation()` for all four fields of its indicators, migrate, re-resolve through `Evaluation → FrameworkVersion → revision`, assert byte-identical text. Written against schema that does not exist yet — confirm it fails to compile/resolve (RED) before any migration in Phase 2 lands.
+
+### Phase 2: Foundation — schema
+
+- [x] 2.1 Create migration `api/database/migrations/*_create_framework_catalog_revisions_table.php`: `id`, `state` (`draft`|`published`), `is_baseline` bool, `label` nullable, `published_at` nullable, `published_by_user_id` nullable FK `nullOnDelete`, timestamps; partial unique indexes `framework_catalog_revisions_one_draft` (`WHERE state = 'draft'`) and `framework_catalog_revisions_one_baseline` (`WHERE is_baseline`).
+- [x] 2.2 Create migration `api/database/migrations/*_add_revision_to_framework_catalog.php`: `revision_id NOT NULL` on `framework_roles`, `framework_competencies`, `framework_bars_indicators`, `framework_role_competency`; `UNIQUE (id, revision_id)` on roles and competencies; composite FKs per the design's table (`role_competency`, `bars_indicators` → `(role_id, revision_id)`/`(competency_id, revision_id)`); drop-and-recreate `framework_role_competency`'s PK to `(revision_id, role_id, competency_id)`, repopulated from existing pivot contents in the same migration; partial unique `(revision_id, competency_id, position) WHERE role_id IS NULL` on BARS indicators. **No row is copied.** — implemented as a nullable-add-then-tighten split across this migration and `*_backfill_baseline_revision.php` (2.4): Postgres cannot add a NOT NULL column with no default to an already-populated table, and there is no revision row to point at until the backfill migration creates one. See both files' docblocks.
+- [x] 2.3 Create migration `api/database/migrations/*_create_framework_default_questions_table.php`: revision-scoped, `{en,it}` json text, `position`, `UNIQUE (revision_id, competency_id, position)`, composite FK `(competency_id, revision_id)` → competencies. — **corrected post-review**: the auto-generated unique-constraint name for `(revision_id, competency_id, position)` is 69 characters, over Postgres's 63-byte identifier limit; it was being silently truncated to a name ending in a bare underscore. Given an explicit short name (`framework_default_questions_rev_competency_position_unique`).
+- [x] 2.4 Create migration `api/database/migrations/*_backfill_baseline_revision.php`: insert ONE revision row (`is_baseline = true`); stamp its id onto every existing catalogue row and every existing `framework_versions` row. No anchor text copied, rewritten, or re-keyed; `framework_bars_indicators.id` values unchanged. — **corrected post-review**: inserted as `state = 'published'` (`published_at = now()`), not `'draft'`. Draft was a review-gate-caught defect: `framework_catalog_revisions_one_draft` permits at most one draft platform-wide, so a draft baseline occupies that slot PERMANENTLY and PR 3's `OpenDraftRevision` could never open a real draft; the baseline is also, simply, already-shipped/already-scored content, which is what `published` means. Also carries the NOT NULL/composite-key tightening deferred from 2.2/2.5 (see those tasks' notes); sets a literal `DEFAULT <baseline id>` on the four catalog-content tables so every pre-existing factory/direct-create call site across the suite (none of which knows about revisions) keeps working unmodified. A second **post-review correction**: the raw `CREATE UNIQUE INDEX` for `framework_bars_indicators (revision_id, role_id, competency_id, position)` used a 66-character name, over Postgres's 63-byte identifier limit and silently truncated to a name ending in a bare underscore; given an explicit short name (`framework_bars_indicators_rev_role_comp_position_unique`).
+- [x] 2.5 Create migration `api/database/migrations/*_add_revision_to_framework_versions.php`: `revision_id` FK `restrictOnDelete`; guard refusing a `draft` target (DB-level or model-level, whichever the migration's own test proves — see 4.4, not 4.3 as originally cross-referenced). — `revision_id` is left NULLABLE here (not NOT NULL): the `framework-catalog` spec text itself says "set when the version is resolved", and a DEFAULT (the way the four catalog tables get one) would silently repoint every unscoped `FrameworkVersion` creation across the suite at a real revision it never asked to pin. NULL states "not resolved to anything", independent of the baseline's state. The guard (2.8) fires only on an explicit `revision_id` assignment.
+- [x] 2.6 Create `api/app/Models/FrameworkCatalogRevision.php`, `api/app/Models/FrameworkDefaultQuestion.php`. — also added `database/factories/FrameworkCatalogRevisionFactory.php` (not separately itemized above), required for `HasFactory<FrameworkCatalogRevisionFactory>` to satisfy PHPStan/Larastan generics checking, and its `draft()` state now has real call sites (`FrameworkCatalogRevisionInvariantsTest`, `BaselineRevisionRollbackTest`, `FrameworkVersionRefusesDraftRevisionTest`) after the review-gate fixes below. Also added `App\Exceptions\PublishedRevisionImmutableException` and a `FrameworkCatalogRevision::booted()` guard (mirrors `FrameworkVersion`'s `is_locked` shape) refusing any mutation once `state` was `published`, and a DB `CHECK (state IN ('draft','published'))` constraint on `framework_catalog_revisions.state` (migration 2.1) — both review-gate fixes, covered by `api/tests/Feature/Catalogue/FrameworkCatalogRevisionInvariantsTest.php`.
+- [x] 2.7 Modify `api/app/Models/{Role,Competency,BarsIndicator}.php`: `revision_id` fillable + `revision()` `belongsTo` relation.
+- [x] 2.8 Modify `api/app/Models/FrameworkVersion.php`: `revision()` relation; refuse a `draft` target on assignment. — new `App\Exceptions\DraftRevisionPinRejectedException` (422), mirroring `LockedFrameworkVersionException`'s shape; guard fires on `creating` and `updating`, only when `revision_id` is dirty.
+- [x] 2.9 Modify `api/app/Services/Conversation/BarsIndicatorLoader.php`: resolve indicators through `Project → FrameworkVersion → revision_id`, never the single live catalogue. — `forRoleCompetency()` gained an OPTIONAL trailing `?int $revisionId = null`; omitted, it preserves today's exact query (every existing caller, including `SystemPromptComposer` and `tests/Unit/C8/BarsIndicatorLoaderTest.php`, is unaffected). Wiring a real revision id through the live interview call path (`SystemPromptComposer`/`InterviewController`) is D7/D8's job in PR7, not this PR's file list — see the loader's updated docblock.
+
+### Phase 3: GREEN — run the Phase 1 test
+
+- [x] 3.1 Run migrations against the test DB; run 1.1 GREEN. This is the correctness proof for "an already-scored evaluation still means what it meant" — do not weaken the assertion to "the chain resolves" if it fails; fix the migration.
+
+### Phase 4: RED — the remaining PR 1 tests
+
+- [x] 4.1 RED `api/tests/Feature/Migration/BaselineRevisionRollbackTest.php`: `down()` drops `revision_id` columns and the revisions table, restoring the pre-revision shape with the baseline rows intact — an explicit test, not an assumption. Document inline that this only restores a **single-revision** catalogue; reverting after a second revision exists is a reseed (stated, not silently true).
+- [x] 4.2 RED `api/tests/Feature/Catalogue/CrossRevisionCompositeFkTest.php`: a `framework_bars_indicators` row whose `role_id` belongs to revision 1 and whose `revision_id` says 2 is refused by PostgreSQL (composite FK), not by application code.
+- [x] 4.3 RED `api/tests/Feature/Catalogue/BarsIndicatorLoaderRevisionResolutionTest.php`: two revisions with divergent anchor text; a project pinned to revision 1 always resolves revision 1's text regardless of revision 2's later publish.
+- [x] 4.4 RED `api/tests/Feature/Catalogue/FrameworkVersionRefusesDraftRevisionTest.php`: creating/resolving a `FrameworkVersion` against a `draft` revision is rejected. — after the review-gate fix (2.4), it can no longer read the baseline as its draft fixture (the baseline is published); rewritten to mint an explicit draft/reuse the published baseline directly where each subtest calls for it.
+- [x] 4.5 (added post-review, not in the original breakdown) RED `api/tests/Feature/Catalogue/FrameworkCatalogRevisionInvariantsTest.php`: the baseline is `published` not `draft`; `framework_catalog_revisions_one_draft` actually refuses a second draft (previously zero test coverage); `state` has a real DB CHECK, not only a PHP comment; a `published` revision refuses any mutation (`PublishedRevisionImmutableException`); a `draft` revision may still be freely mutated.
+- [x] 4.6 **Second post-review correction** (2nd gate pass): 4.1, 4.2, and 4.5's five DB-constraint assertions used the anti-pattern `rules.design` names verbatim — `toThrow(QueryException::class)` / `toThrow(Exception::class)`, which passes just as happily against a missing table as against the specific constraint each test exists to prove. Replaced with a shared `assertPostgresConstraintViolation(callable, sqlstate, constraintName)` helper (`api/tests/Pest.php`) pinning the exact SQLSTATE (`23505` unique, `23503` FK, `23514` CHECK) and the constraint name from the driver message. Each of the five was then MUTATED (the targeted constraint temporarily removed from its migration, `migrate:fresh`, run, confirm the test fails with "none was thrown" rather than passing vacuously, then reverted) to prove it actually watches the constraint it claims to.
+
+### Phase 5: GREEN + Gate
+
+- [x] 5.1 Run 4.1–4.4 GREEN; run `php artisan migrate:rollback` on the test DB and confirm the schema matches pre-PR-1 exactly.
+- [x] 5.2 Run the full existing scoring test suite; zero regressions.
+- [x] 5.3 Confirm `api/tests/Feature/C4/Seeder/SeederLockGuardTest.php` still passes in its **old** form — the seeder is not touched in this PR.
+- [x] 5.4 Run the API Verification Commands block above. No new API routes in this PR — the OpenAPI diff should be empty; still run it.
+- [ ] 5.5 Deploy/verify this migration against a Railway-like environment with a copy of real data before any PR 2 work starts (Migration/Rollout hard gate). — NOT performed in this session: requires an actual Railway-like staging environment with a copy of real production data, which is an infrastructure/ops action outside a local implementation session. Local verification (fresh migrate, rollback, re-migrate, full Pest suite against real Postgres) all passed — see the apply report — but this specific hard gate still needs a human-operated staging deploy before PR2 work starts.
+
+---
+
+> **PR 1 REVIEW ADVISORIES (RDD lineage `review-b179a28cd3bb34b3`, approved, non-blocking).**
+> Recorded as follow-up work, not reasons to reopen PR 1:
+>
+> - [ ] R3-001 (WARNING, relevant to PR 3) — the literal `DEFAULT <baseline id>` on
+>       `revision_id` for the four catalogue-content tables routes every insert that omits
+>       `revision_id` into the PUBLISHED baseline, so content writes to a published revision
+>       are not refused. The model guard covers the revision row, not its content. Drop the
+>       default (or enforce content immutability in the DB) once PR 3's writers always name
+>       a revision.
+> - [ ] R3-002 (WARNING) — `down()` of the backfill does not check for a second revision
+>       before mutating; with non-colliding codes it silently merges revisions. Add a
+>       pre-flight refusal.
+> - [ ] R3-003 (WARNING) — `BaselineRevisionMigrationTest` rolls back a hard-coded 5 steps
+>       and never asserts the rollback happened; a later migration will shift the window
+>       silently. Roll back by named migration and assert `revision_id` is gone.
+> - [ ] R3-004 — `BarsIndicatorLoaderRevisionResolutionTest` never builds a Project or
+>       FrameworkVersion; the pin-based resolution is unproven until PR 7 wires it.
+> - [ ] R3-005 — same gap as 13.0/13.1: new `FrameworkVersion` rows keep a NULL pin.
+> - [ ] R3-006 — `is_baseline`/`published_at` immutability and the `one_baseline` index are
+>       untested; query-builder bulk writes bypass the Eloquent guard (document or enforce).
+> - [ ] R3-007 — `BaselineRevisionRollbackTest` uses `DB::` without importing the facade.
+>
+> Second pass on the committed diff (RDD lineage `review-6fd6d9e45d1b0abc`, approved,
+> non-blocking), new items only:
+>
+> - [ ] R3-1 (WARNING) — the revision-scoped uniqueness that replaced the global indexes
+>       (`framework_bars_indicators_rev_role_comp_position_unique`, the rebuilt role-less
+>       partial index, `revision_code_unique` on roles/competencies) has no test proving it
+>       refuses a duplicate inside one revision.
+> - [ ] R3-3 — the rollback test compares row counts but never inserts known catalogue rows;
+>       if the catalogue is not seeded both counts are zero and the check proves nothing.
+> - [ ] R3-4 — the draft-pin update-path test does not re-read the row to prove `revision_id`
+>       stayed null; raw query updates bypass the Eloquent guard.
+> - [ ] R3-5 — `BarsIndicatorLoaderRevisionResolutionTest` finds the baseline with an
+>       unordered `first()` instead of `is_baseline`.
+
+## PR 2 — `api`: Seeder Against Revision State
+
+> Base: PR 1 branch. Must not break: idempotence; per-role seeded counts;
+> `framework_gaps` reconciliation.
+
+> **PR 1 review-gate landmine, annotated not fixed (out of PR 1's scope):**
+> `api/database/seeders/FrameworkCatalogSeeder.php` resolves natural-key rows
+> by CODE ALONE, not by `(revision_id, code)`: `Competency::firstOrNew(['code'
+> => $code])` (`:245`) and `Role::firstOrNew(['code' => $roleCode])` (`:307`).
+> Safe today — only the baseline revision exists, so `code` is still
+> effectively unique platform-wide. The moment this PR's own migration
+> ships **and** PR 3's `OpenDraftRevision` clones the catalogue, `code` is
+> unique PER REVISION (`UNIQUE(revision_id, code)`, `*_add_revision_to_
+> framework_catalog.php`) — TWO rows can legitimately share a code (baseline's
+> "ICO" and a draft's own cloned "ICO"), and `firstOrNew(['code' => ...])`
+> with no `revision_id` in the lookup binds to WHICHEVER of them Postgres
+> happens to return first, silently. Whichever PR touches the seeder next
+> (this one) MUST scope every one of these lookups to the seeder's target
+> revision (the baseline) before that ambiguity becomes reachable — a
+> `Role::where('revision_id', $baselineId)->where('code', $roleCode)
+> ->firstOrNew()` shape, not a bare `firstOrNew(['code' => ...])`.
+
+### Phase 6: RED
+
+- [ ] 6.1 RED rewrite `api/tests/Feature/C4/Seeder/SeederLockGuardTest.php` against the draft/published pair (not deleted — rewritten): draft baseline still syncs (full delete-stale, as before); published baseline performs **zero writes** (no additive insert, no gap-row update) and emits the `seeder_lock_guard_active`-equivalent structured signal + `Log::warning`; `framework_gaps` and `catalog_meta` are unaffected by the gate either way. Keep the existing cross-tenant `withoutGlobalScopes()` assertions where they still mean something.
+- [ ] 6.2 Confirm `api/tests/Feature/C4/Seeder/LockedFillEmptyLocaleTest.php`'s only subject (`fillEmptyLocalesUnderLock()`) will no longer exist post-GREEN — mark the file for deletion in Phase 7, not now (deletion happens once the code it tests is gone).
+
+### Phase 7: GREEN
+
+- [ ] 7.1 Modify `api/database/seeders/FrameworkCatalogSeeder.php` (`:708`): replace `hasLockedVersions()` with `baselineRevisionIsPublished()`. Draft path: existing delete-stale sync runs unchanged. Published path: zero writes; emit the `seeder_lock_guard_active` `FrameworkGap` row and `Log::warning`, kept with their existing kind/shape.
+- [ ] 7.2 Delete `fillEmptyLocalesUnderLock()` and `recordLockedFillEmptyLocaleGap()` from `FrameworkCatalogSeeder.php` — the new rule has no partially-writable state, so they exist for nothing now.
+- [ ] 7.3 Delete `api/tests/Feature/C4/Seeder/LockedFillEmptyLocaleTest.php`.
+- [ ] 7.4 Run 6.1 GREEN; confirm idempotence and per-role seeded counts (ICO 45, FLL 54, MLL 54, BUL 42, SRX 54) are unchanged against the draft baseline.
+
+### Phase 8: Gate
+
+- [ ] 8.1 Run the API Verification Commands block. Confirm `scripts/ci-guards.sh` stays green, unmodified — the seeder change is invisible to it by design.
+
+---
+
+## PR 3 — `api`: Draft/Publish Lifecycle, CRUD, Runtime Invariant Twin, `catalogue.manage`
+
+> Base: PR 2 branch. Must not break: `scripts/ci-guards.sh` unmodified; no
+> tenant read widens; `AdminTenancySafetyArchTest`. **This PR is the
+> ordering-dependency PR** — Phase 8/9 (the twin) MUST be GREEN before Phase
+> 10 (CRUD) wires write routes; see the top-of-file note.
+
+### Phase 9: Foundation
+
+- [ ] 9.1 Create migration `api/database/migrations/*_add_catalogue_nonblank_locale_checks.php`: `CHECK (anchor_5 ? 'en' AND length(btrim(anchor_5->>'en')) > 0)` × 4 anchor/text fields on `framework_bars_indicators`, and the equivalent non-blank/edge-whitespace CHECK on `framework_roles.name`/`responsibilities` and `framework_competencies.name`/`definition`.
+- [ ] 9.2 Create `api/app/Actions/Catalogue/OpenDraftRevision.php`: if no open draft exists, clone the latest published revision (~5 roles + 85 competencies + 249 indicators + 83 pivot rows + defaults, one `INSERT … SELECT` per table inside one transaction) into a new `draft` revision; if a draft already exists, continue it.
+- [ ] 9.3 Create `api/app/Actions/Catalogue/PublishRevision.php`: `SELECT … FOR UPDATE` on the revision row inside the transaction that flips `state`; `violations(FrameworkCatalogRevision): list<array{rule:string, subject:string, detail:string}>` — every blocking check named at once, not the first failure only.
+- [ ] 9.4 Modify `api/app/Support/Authorization/UserAbilities.php`: add `'catalogue' => ['manage' => $gate->allows('manageCatalogue')]`.
+- [ ] 9.5 Modify `api/app/Providers/AppServiceProvider.php::boot()`: `Gate::define('manageCatalogue', fn (User $u) => $u->is_superadmin === true)`.
+- [ ] 9.6 Modify `api/app/Http/Controllers/Auth/AuthController.php::me()`: `@scramble-return` gains the `catalogue` ability group.
+
+### Phase 10: RED — the invariant twin (before CRUD is wired)
+
+- [ ] 10.1 RED `api/tests/Feature/Catalogue/PublishSweepTest.php`: a pair with 2 or 4 indicators, an unanchored competency, a `potential` competency present in the pivot, and a role-scoped MTG/LAT indicator — each refuses publish (422 naming every violation) and leaves `state = 'draft'`.
+- [ ] 10.2 RED `api/tests/Feature/Catalogue/CatalogueBaselineLiteralCountsTest.php`: 83 role×competency pairs (15/18/18/14/18) and 85 anchored competencies, asserted against the **baseline revision only**, against the database.
+- [ ] 10.3 RED `api/tests/Feature/Catalogue/CatalogueFormRequestTwinTest.php`: a 6th role, a 4th indicator for a pair, a blank `it` locale value, a default question missing `it` → 422 at the FormRequest layer.
+- [ ] 10.4 RED `api/tests/Feature/Catalogue/CrossRoleDuplicateDeltaTest.php`: a duplicate anchor text **new to the revision** is refused, in both directions; the four inherited baseline duplicates (`MLL.json:142`/`BUL.json:142`, `FLL.json:176`/`MLL.json:176`) publish fine.
+- [ ] 10.5 RED `api/tests/Feature/Catalogue/CatalogueAbilityEquivalenceTest.php`: across superadmin/admin/operator/viewer, `allows('manageCatalogue')` is true **iff** a catalogue-write route returns non-403.
+- [ ] 10.6 RED `api/tests/Feature/Catalogue/CatalogueOpenApi403ContractTest.php`: the generated `openapi.json` declares 403 on **every** catalogue-write operation.
+
+### Phase 11: GREEN — the invariant twin
+
+- [ ] 11.1 Create `api/app/Http/Requests/Catalogue/{Store,Update}RoleRequest.php`: refuses a 6th role.
+- [ ] 11.2 Create `api/app/Http/Requests/Catalogue/{Store,Update}CompetencyRequest.php`, `{Store,Update}BarsIndicatorRequest.php`: refuses a 4th indicator for `(revision, role, competency)`; non-blank `{en,it}` shape validation. Run 10.3 GREEN.
+- [ ] 11.3 Implement `PublishRevision::violations()` body: `GROUP BY` over the revision's pivot refuses any pair ≠ 3; a pivot row with zero indicators refuses publish; a `potential` competency in the pivot refuses; role-scoped MTG/LAT indicator check mirrors `CI_NON_ROLE_BARS_FILES`; the delta cross-role duplicate check compares against the revision's parent, refusing only duplicates new to this revision. Run 10.1, 10.4 GREEN.
+- [ ] 11.4 Run 10.2 GREEN (literal counts against the baseline revision only — never enforced on every publish, which would refuse the first competency a superadmin ever adds).
+
+### Phase 12: RED + GREEN — CRUD, wired only after Phase 11 is GREEN
+
+- [ ] 12.1 Create `api/app/Http/Controllers/Api/Catalogue/{Competency,Role,BarsIndicator,Revision}Controller.php`: every action opens `abort_unless($this->isSuperadmin($request), Response::HTTP_FORBIDDEN);` inline, copied verbatim from `PlatformUserController:87,102` — never a shared helper. Create/update/reorder/pre-publish-only-delete, scoped to the open draft revision (auto-opens one via `OpenDraftRevision` on first edit if none is open).
+- [ ] 12.2 Wire `PublishRevision` into `RevisionController::publish`; a failing sweep returns 422 with the full violations list.
+- [ ] 12.3 RED `api/tests/Feature/Catalogue/PublishedRevisionImmutabilityTest.php`: a published revision refuses update, delete, **and insert** — three assertions, stricter than the old seeder guard.
+- [ ] 12.4 Append superadmin catalogue routes to `api/routes/api.php`.
+- [ ] 12.5 Run 10.5, 10.6, 12.3 GREEN.
+- [ ] 12.6 Run `DB_CONNECTION=pgsql php artisan scramble:export`; `task openapi:sync`; `bun run codegen` in `frontend` and `backoffice`; `bun run codegen:check` green in all three (`AbilityKey` in `useCurrentUser.ts` must now accept `'catalogue.manage'`).
+
+### Phase 13: Gate
+
+- [ ] 13.1 Full Pest suite; confirm `AdminTenancySafetyArchTest` stays green — no tenant read widens; no `organization_id` appears anywhere in this surface.
+- [ ] 13.2 Run the API Verification Commands block, including `scripts/ci-guards.sh` unmodified.
+
+---
+
+> **GAP FOUND DURING PR 1, MUST BE CLOSED BEFORE THE CHANGE ARCHIVES.** No task
+> anywhere assigns `framework_versions.revision_id` when a NEW `FrameworkVersion`
+> is created. PR 1's backfill stamps every row that existed at migration time, so
+> nothing is null today — but a project created after this change ships would pin
+> a version with no revision, and `Evaluation → FV → revision → rows` would have
+> nothing to resolve. That chain is the entire point of the change. The column is
+> deliberately nullable at the end of PR 1 (the baseline is still `draft`, and the
+> draft-pin guard would reject every existing creation), so the assignment belongs
+> AFTER the baseline is published in PR 3.
+>
+> - [ ] 13.0 RED `api/tests/Feature/Catalogue/FrameworkVersionPinsPublishedRevisionTest.php`:
+>       a newly created `FrameworkVersion` resolves the latest PUBLISHED revision,
+>       never null and never a draft; an existing version keeps the revision it was
+>       stamped with.
+> - [ ] 13.1 Assign the pin on creation wherever `FrameworkVersion` rows are minted,
+>       and decide — stated, not assumed — whether a null pin should remain legal at
+>       all once the baseline is published, or become NOT NULL with a default.
+
+## PR 4 — `api`: Catalogue Default Questions + Export Command
+
+> Base: PR 3 branch. Must not break: published-revision immutability. OQ-B
+> (cross-revision "copy from" affordance) is explicitly NOT built here.
+
+### Phase 14: RED
+
+- [ ] 14.1 RED `api/tests/Feature/Catalogue/DefaultQuestionCrudTest.php`: a default authored with `en`+`it` text and a position persists and is orderable among that competency's other defaults, scoped to the open draft; a default missing a required locale is rejected (422).
+- [ ] 14.2 RED `api/tests/Feature/Catalogue/CatalogueExportTest.php`: `Storage::fake()` proves the export command makes zero filesystem writes; it writes only to STDOUT; a published revision's exported JSON round-trips its role×competency×indicator content byte-for-byte.
+
+### Phase 15: GREEN
+
+- [ ] 15.1 Create `api/app/Http/Requests/Catalogue/{Store,Update}DefaultQuestionRequest.php`: `{en,it}` both required.
+- [ ] 15.2 Create `api/app/Http/Controllers/Api/Catalogue/DefaultQuestionController.php`: superadmin-only 403 per action, scoped to the open draft revision.
+- [ ] 15.3 Create `api/app/Console/Commands/CatalogueExportCommand.php`: `php artisan catalogue:export {revision?}` — writes the split-file JSON shape to STDOUT, takes no path argument at all (no `--dir`, no `--write` mode). Run 14.1, 14.2 GREEN.
+- [ ] 15.4 Append default-question routes to `api/routes/api.php`; run `DB_CONNECTION=pgsql php artisan scramble:export` + `task openapi:sync` + `bun run codegen:check` in all three repos.
+
+### Phase 16: Gate
+
+- [ ] 16.1 RED then GREEN a threat-matrix test (Git repo selection / push state row, "Applicable — answered by removal"): assert the export command's filesystem-write assertion proves no repository tree is reachable at all.
+- [ ] 16.2 Run the API Verification Commands block; confirm published-revision immutability holds for default questions the same as for anchors (OQ-2 answered: they freeze with the revision).
+
+---
+
+## PR 5 — `api`: `operator_modified`, `ApplyCompetencySelection`
+
+> Base: PR 4 branch. Must not break: the partial unique index
+> (`project_questions_position_unique WHERE deleted_at IS NULL`);
+> `ProjectQuestionController` and `ProjectQuestionsPanel` behaviour; the cap
+> as a ceiling (zero stays legal).
+
+### Phase 17: Foundation + RED
+
+- [ ] 17.1 Create migration `api/database/migrations/*_add_operator_modified_to_project_questions.php`: boolean `NOT NULL DEFAULT false`; backfill `true` for every existing row (every row that exists today was typed by an operator).
+- [ ] 17.2 Modify `api/app/Models/ProjectQuestion.php`: `operator_modified` cast + fillable.
+- [ ] 17.3 RED `api/tests/Feature/Project/OperatorModifiedProvenanceTest.php`: `store` → `true`; `update` → `true` unconditionally, no `isDirty('text')` check; `destroy` → soft delete only, flag untouched; a catalogue-default edit performs **zero** writes to `project_questions` (query-count assertion).
+- [ ] 17.4 RED `api/tests/Feature/Project/SelectedCompetencyQuestionRuleTest.php`: `StoreProjectQuestionRequest` refuses a question for a competency not currently in `project_competencies` (422) — closes the hole that would otherwise collide on restore.
+- [ ] 17.5 RED `api/tests/Feature/Project/ApplyCompetencySelectionTest.php`: select → copies ≤ cap, in the defaults' authored order; re-save with the same set → no duplicates; deselect → soft-delete; reselect → operator's own text and `operator_modified` restored untouched, defaults NOT re-copied; reselect with an occupied position slot → renumbered defensively above the current max, no constraint violation.
+
+### Phase 18: GREEN
+
+- [ ] 18.1 Modify `api/app/Http/Controllers/Api/ProjectQuestionController.php`: `store`/`update` set `operator_modified = true`. Run 17.3 GREEN.
+- [ ] 18.2 Modify `api/app/Http/Requests/StoreProjectQuestionRequest.php`: add the unselected-competency rule. Run 17.4 GREEN.
+- [ ] 18.3 Create `api/app/Actions/Project/ApplyCompetencySelection.php`: `apply(Project $project, array $attached, array $detached): void`. Per detached competency: soft-delete live rows. Per attached competency, in order: (1) `onlyTrashed()` rows exist → restore, stop, renumber any restored row whose original position collides with a live row; (2) live rows exist → no-op; (3) otherwise → copy `framework_default_questions` for the competency from `$project->frameworkVersion->revision_id`, ordered by `position`, positions `0..n-1`, capped by `PlatformSettings::maxQuestionsPerCompetency($project->assessment_type)`, `operator_modified = false`. All three branches inside the one transaction the caller already opened. Run 17.5 GREEN.
+- [ ] 18.4 Modify `api/app/Http/Controllers/Api/ProjectController.php::store` (`:107`): call `ApplyCompetencySelection::apply()` after `attach($attach)`, inside the existing `DB::transaction`.
+- [ ] 18.5 Modify `api/app/Http/Controllers/Api/ProjectController.php::update` (`:184`): `$changes = $resolved->competencies()->sync($attach)`; call `apply()` with `$changes['attached']`/`$changes['detached']` — the `sync()` return value IS the observation, never a pre-read diff. `updated` is ignored (a position change, not a selection change).
+
+### Phase 19: Gate
+
+- [ ] 19.1 Full Pest suite; confirm the partial unique index survives every restore/renumber path; confirm `ProjectQuestionController`/`ProjectQuestionsPanel`-adjacent existing tests are unaffected.
+- [ ] 19.2 Run the API Verification Commands block.
+
+---
+
+## PR 6 — `api`: `ProjectInterviewability`, the Three (Four) Ingress Refusals
+
+> Base: PR 5 branch. Must not break: `GENERIC_403` disclosure doctrine on
+> `SsoExchangeController`; in-flight (`in_corso`) sessions never severed; no
+> participant/session/webhook created on any refusal path.
+
+### Phase 20: RED — the predicate
+
+- [ ] 20.1 RED `api/tests/Feature/Interview/ProjectInterviewabilityTest.php`: a zero-live-question selected competency → not interviewable; all-soft-deleted rows for a selected competency → not interviewable; a deselected competency (no `project_competencies` row) → ignored entirely, out of scope for the check; zero selected competencies → not interviewable (extension beyond the spec's literal wording, per Contradiction 5 — stated, not invented silently).
+
+### Phase 21: GREEN — the predicate
+
+- [ ] 21.1 Create `api/app/Support/Project/ProjectInterviewability.php`: `unsatisfiedCompetencyCodes(Project): list<string>`, `isInterviewable(Project): bool`. Built with `DB::table()`, never `ProjectQuestion::query()` — an Eloquent read through `TenantScoped` would fail on the SSO path, which resolves with no ambient tenant. Organization taken from `$project->organization_id`, stated explicitly in the query's `ON` clause, never ambient. `deleted_at IS NULL` in the `LEFT JOIN`, not a `WHERE`. No cache, no `static` memo, no `relationLoaded()` shortcut — resolved from the container at each call site, queried every call. Run 20.1 GREEN.
+
+### Phase 22: RED — the four ingresses
+
+- [ ] 22.1 RED `api/tests/Feature/Interview/InterviewabilityIngressRefusalTest.php`: all four ingresses refuse with the exact payloads from the design's interface contract; `candidate_ref` echoed byte-for-byte on the M2M refusal; **no** participant row, no `InterviewSession` row, no webhook fires on the M2M or SSO refusal paths.
+- [ ] 22.2 RED `api/tests/Feature/Interview/StandingExemptionTest.php`: mint an entry link (or SSO token) while interviewable, then make the project non-interviewable, then use the link/token → still refused at use — the mint-time check is not a standing exemption.
+- [ ] 22.3 RED `api/tests/Feature/Interview/InFlightSessionSurvivesTest.php`: a candidate with an `in_corso` competency session continues uninterrupted when a *different* competency is emptied; the predicate only blocks a new `/start`.
+
+### Phase 23: GREEN — the four ingresses
+
+- [ ] 23.1 Modify `api/app/Http/Controllers/Api/EntryLinkController.php::store` (`:78`): predicate call after `Project::findOrFail`, before `$this->minter->mint(...)`; `422 {"error":"PROJECT_NOT_INTERVIEWABLE","competency_codes":[...]}`.
+- [ ] 23.2 Modify `api/app/Http/Controllers/M2m/ParticipantController.php::store` (`:64`): predicate after the org-scoped `findOrFail`, **before** `$participant->save()`; same 422 body plus `"candidate_ref"` echoed byte-for-byte from the request.
+- [ ] 23.3 Modify `api/app/Http/Controllers/M2m/SsoLinkController.php::store` (`:82`): predicate after the org-scoped `findOrFail`, before `mint`; same 422 shape as 23.1.
+- [ ] 23.4 Modify `api/app/Http/Controllers/Sso/SsoExchangeController.php::exchange`: new Step 6b, after `projectIsAccessible()`, before the Step 9 upsert; `403` with the existing `GENERIC_403` message; `redirect_url` (`$project->error_redirect_url`, nullable) added to **every** 403 branch of `exchange` uniformly (`projectIsAccessible`, `checkRoleCode`, blocked-status, interviewability) — a field present only on this one branch would disclose which gate fired.
+- [ ] 23.5 Modify `api/app/Http/Controllers/Candidate/InterviewController.php::start`: predicate evaluated only when `InterviewSession::where(participant_id, competency_code)->doesntExist()`; `422 {"error":"project_not_interviewable"}`.
+- [ ] 23.6 Run 22.1–22.3 GREEN.
+
+### Phase 24: Gate
+
+- [ ] 24.1 Full Pest suite; confirm `GENERIC_403` disclosure doctrine unchanged on every `exchange` branch; run the API Verification Commands block (this PR changes response payload shapes on existing routes — re-run `scramble:export`/`task openapi:sync` and diff, even with no new routes).
+
+---
+
+## PR 7 — `api`: Composer Budget Reversal, `primary_questions` Snapshot, `TurnClassifier`
+
+> Base: PR 6 branch. Must not break: `prompt_version` stamping; the
+> advance-phrase/minimum interaction; `replaceUtteranceStretch`'s
+> ref-bounded DELETE. OQ-C (false-follow-up rate) is accepted as an
+> unmeasured, disclosed residual — no task here waits on it.
+
+### Phase 25: Foundation
+
+- [ ] 25.1 Create migration `api/database/migrations/*_add_turn_kind_to_utterances.php`: `turn_kind` nullable string.
+- [ ] 25.2 Create migration `api/database/migrations/*_add_primary_questions_to_interview_sessions.php`: `primary_questions` jsonb + `follow_up_budget` int.
+- [ ] 25.3 Modify `api/app/Models/Utterance.php`: `turn_kind` attribute. Modify `api/app/Models/InterviewSession.php`: `primary_questions` array cast.
+
+### Phase 26: RED — the composer reversal
+
+- [ ] 26.1 RED `api/tests/Unit/Conversation/SystemPromptComposerBudgetTest.php`: 1 primary + `follow_up_budget = 4` → the composed prompt states 5 total questions, never 9 (the deleted `$effectiveBudget = $budget + count($authoredQuestions)` arithmetic); `effectiveMinimum()` clamps to `max(1, min($configured, count($primaryQuestions) + $followUpBudget))`; the primaries section grants no latitude to invent, substitute, reorder, or reword a primary.
+- [ ] 26.2 RED `api/tests/Feature/Interview/SinglePrimariesResolutionTest.php`: `OpeningTextComposer`'s opening question and `SystemPromptComposer`'s primary 1 come from the **same array** — a divergence test that fails if the two queries diverge (proves the dual channel is collapsed).
+
+### Phase 27: GREEN — the composer reversal
+
+- [ ] 27.1 Modify `api/app/Services/Conversation/SystemPromptComposer.php::compose()`: new signature per design D7 (`followUpBudget` fed raw to `buildBudgetSection()`, `primaryQuestions` param renamed from `authoredQuestions`, `openingSpokeFirstPrimary` flag); delete the `$effectiveBudget` addition at `:124`; `buildAuthoredQuestionsSection()` → `buildPrimaryQuestionsSection()` with the "complete primary set, asked as written, only latitude is follow-ups" framing; when `$openingSpokeFirstPrimary` is true, state primary 1 was already spoken and continue from primary 2. Run 26.1 GREEN.
+- [ ] 27.2 Modify `api/app/Http/Controllers/Candidate/InterviewController.php`: rename `authoredQuestionsFor()` (`:1386`) → `primaryQuestionsFor()`; call it **once** in `start()` into `$primaries`; `$primaries[0]` → `OpeningTextComposer` (`:295-301`, unchanged in shape); `$primaries` → `composePromptForCompetency()` as a parameter (stops self-loading at `:722`); compute `$openingSpokeFirstPrimary = $openingVariant !== 'resume' && $primaries !== []` at `:272-277`; write `interview_sessions.primary_questions` + `follow_up_budget` in the same request that composed the prompt, never recomputed later. Run 26.2 GREEN. Do not touch `api/app/Services/Conversation/OpeningTextComposer.php` — already correct.
+
+### Phase 28: RED + GREEN — `TurnClassifier`
+
+- [ ] 28.1 RED `api/tests/Unit/Interview/TurnClassifierTest.php`: an avatar turn matching the next **unmatched** entry in `primary_questions` under casefold + whitespace-collapse + trailing-punctuation-strip normalization → `primary`; otherwise → `follow_up`. Not a similarity score, not a word list.
+- [ ] 28.2 Create `api/app/Support/Interview/TurnClassifier.php`: `classify(InterviewSession, string $text): string`. Run 28.1 GREEN.
+- [ ] 28.3 RED `api/tests/Feature/Interview/TranscriptAuditTest.php`: primaries marked, follow-ups marked, snapshot matches `project_questions` 1:1 in order; a session ending with `matched < count(primary_questions)` produces a violation, not a silent reclassification (the conservative, over-reporting direction — OQ-C's disclosed residual).
+- [ ] 28.4 Wire `TurnClassifier::classify()` into both write paths: the live `/utterance` write and the provider harvest (`replaceUtteranceStretch`, `harvestOutgoingTranscript`) — setting `turn_kind` only on `speaker = 'avatar'` rows. Run 28.3 GREEN.
+
+### Phase 29: Gate
+
+- [ ] 29.1 Full Pest suite; confirm `prompt_version` stamping unchanged; confirm `replaceUtteranceStretch`'s ref-bounded DELETE unchanged; confirm the advance-phrase/minimum interaction (`:100-121`'s ADDITIVE comment) still holds under the new arithmetic.
+- [ ] 29.2 Run the API Verification Commands block.
+
+---
+
+## PR 8 — `api`: Nullable Audit Org, `PlatformAuditWriter`
+
+> Base: PR 7 branch. Must not break: the dashboard activity feed; tenant
+> audit reads (a NULL-org row must stay invisible to every tenant-scoped
+> read).
+
+### Phase 30: RED
+
+- [ ] 30.1 RED `api/tests/Feature/Catalogue/PlatformAuditWriterTest.php`: every catalogue write and `revision.published` produce exactly one `audit_logs` row with NULL `organization_id`, actor, `before`/`after`; a tenant-scoped read (`TenantScoped` filtering `organization_id = X`) never returns the row; the dashboard activity feed is unaffected.
+- [ ] 30.2 RED extend `CrossTenantReaderInventoryArchTest`: files under `api/app/Support/Superadmin/` that write `audit_logs` directly = exactly `{PlatformAuditWriter.php}` — pins the bypass so it cannot grow quietly.
+
+### Phase 31: GREEN
+
+- [ ] 31.1 Create migration `api/database/migrations/*_make_audit_logs_organization_nullable.php`: `organization_id` becomes nullable; NULL means platform scope. The two composite indexes still lead with `organization_id`.
+- [ ] 31.2 Create `api/app/Support/Superadmin/PlatformAuditWriter.php`: `DB::table('audit_logs')->insert([...])` — no Eloquent, no global scope to bypass. `action` values: `catalogue.competency.updated`, `catalogue.role.updated`, `catalogue.indicator.created`, `catalogue.default_question.deleted`, `revision.published`, …; `subject_type`/`subject_id` name the row; `before`/`after` restricted to changed attributes; the revision id rides in `after.revision_id`. Run 30.1, 30.2 GREEN.
+- [ ] 31.3 Wire `PlatformAuditWriter` calls into every catalogue-write controller action (Competency/Role/BarsIndicator/DefaultQuestion controllers) and into `PublishRevision`.
+
+### Phase 32: Gate
+
+- [ ] 32.1 Run the API Verification Commands block. `api` PRs 1–8 complete — every existing scoring test, `ci-guards.sh`, and tenant isolation must all still be green at this checkpoint.
+
+---
+
+## PR 9 — wrapper: `DESIGN.md`, and the "4 fixed" Correction in All Three Documents
+
+> Base: wrapper tracker branch. **Must land before PR 10** — `CLAUDE.md`
+> requires `DESIGN.md` updated before any UI code. Resolves Contradiction 7
+> (seeder ingress loss under D2) as an explicit note, not silently.
+
+### Phase 33: Documentation
+
+- [ ] 33.1 Update `DESIGN.md` §8.1 sidebar diagram: add `Catalogue ·p`.
+- [ ] 33.2 Update `DESIGN.md` §8.2 Key Views table: add a Catalogue row (superadmin only, `catalogue.manage`).
+- [ ] 33.3 Add `DESIGN.md` new §8.2.10: the revision header (state, label, Publish action behind `ConfirmDialog`), the vertical section rail (Competencies · Roles · Indicators · Default questions — **not** a tab strip, per §8.2.1's ruling), and the publish confirmation flow.
+- [ ] 33.4 Add a `DESIGN.md` §8.2 sentence on the project-questions affordance: the panel stays in the project edit drawer; the drawer gains a named "Questions" section-rail entry; the projects table gains a per-row deep-link action (OQ-3 answered — no relocation).
+- [ ] 33.5 Correct `CLAUDE.md`'s binding domain constraints: "4 fixed questions" → "up to 4, default 4" for `potential`'s question count.
+- [ ] 33.6 Correct `docs/app_description/02-domain/03-assessment-types.md:23`: the identical correction — the PO confirmed `CLAUDE.md`; this is the same sentence in a second place.
+- [ ] 33.7 Correct `openspec/specs/interview-conversation/spec.md:25`: the identical correction — the third place. Fixing all three in one PR is the point: this repo has already paid for fixing one of three (`AGENTS.md` drifting from `CLAUDE.md`, an indicator-count guard disagreeing with the spec and the data) twice.
+- [ ] 33.8 Note inline in this PR's description: Contradiction 7 (the seeder loses its only ingress after the baseline is published, and D2 deletes `fillEmptyLocalesUnderLock` — the exception `bars-catalogue-completion` D5b added) is left as OQ-A, not resolved by this PR or any other in this change.
+
+### Phase 34: Gate
+
+- [ ] 34.1 Confirm PR 9 is merged to the wrapper's tracker branch before any PR 10 branch is created (hard ordering dependency, not advisory).
+- [ ] 34.2 Confirm `scripts/ci-guards.sh` stays green — this PR touches none of the files it governs.
+
+---
+
+## PR 10 — `backoffice`: `QuestionListEditor` Extraction, `/catalogue` Page
+
+> Base: PR 9 merged + `backoffice` tracker branch. Must not break:
+> `ProjectQuestionsPanel`'s existing tests must pass unchanged against the
+> refactor (extraction, not rewrite — duplicating 625 lines is this repo's
+> named, already-paid-for failure mode).
+
+### Phase 35: Foundation
+
+- [ ] 35.1 Run `task openapi:sync` (Postgres, against the merged PR 1–8 `api` state) to pull the merged `openapi.json` into `backoffice/openapi.json`; `bun run codegen`; confirm `bun run codegen:check` green.
+
+### Phase 36: RED — extraction
+
+- [ ] 36.1 RED `backoffice/app/components/organisms/QuestionListEditor.spec.ts`: competency-grouped list, dual-locale `{en,it}` fields, drag reorder, cap display — the extracted presentational core.
+- [ ] 36.2 Confirm `backoffice/app/components/organisms/ProjectQuestionsPanel.spec.ts` (existing suite) is run as-is first, to establish the pre-refactor baseline before extraction begins.
+
+### Phase 37: GREEN — extraction
+
+- [ ] 37.1 Create `backoffice/app/components/organisms/QuestionListEditor.vue`: extracted from `ProjectQuestionsPanel.vue`'s presentational core (competency-grouped list, dual-locale fields, drag reorder, cap display). Run 36.1 GREEN.
+- [ ] 37.2 Modify `backoffice/app/components/organisms/ProjectQuestionsPanel.vue`: becomes a thin container over `QuestionListEditor`. Run 36.2 (the pre-existing suite) GREEN against the refactor, unchanged.
+
+### Phase 38: RED + GREEN — the catalogue page
+
+- [ ] 38.1 RED `backoffice/app/components/organisms/CatalogueDefaultQuestionsPanel.spec.ts`: a thin container over `QuestionListEditor`, revision-scoped (no "copy from revision X" affordance — OQ-B not built).
+- [ ] 38.2 Create `backoffice/app/components/organisms/CatalogueDefaultQuestionsPanel.vue`. Run 38.1 GREEN.
+- [ ] 38.3 RED `backoffice/app/pages/catalogue/index.spec.ts`: revision header (state, label, Publish behind `ConfirmDialog`); vertical section rail (Competencies · Roles · Indicators · Default questions), never a tab strip.
+- [ ] 38.4 Create `backoffice/app/pages/catalogue/index.vue`, following `pages/avatar-templates/index.vue`'s shape. Run 38.3 GREEN.
+- [ ] 38.5 RED nav/guard test: the Catalogue nav entry is present only for `catalogue.manage`; direct navigation to `/catalogue` is blocked for a non-superadmin, and the nav entry was never shown to them.
+- [ ] 38.6 Modify `backoffice/app/components/organisms/SidebarNav.vue`: add `{ to: '/catalogue', labelKey: 'nav.catalogue', requires: 'catalogue.manage', scope: 'platform' }`.
+- [ ] 38.7 Modify `backoffice/app/middleware/03.abilities.global.ts`: add `catalogue: 'catalogue.manage'` (keyed by first path segment — covers `/catalogue`, `/en/catalogue`, and future children). Run 38.5 GREEN.
+
+### Phase 39: Gate
+
+- [ ] 39.1 Modify `backoffice/i18n/locales/{en,it}.json`: every new string, both locales — no hardcoded copy.
+- [ ] 39.2 `bun run typecheck` clean; `bun run test:unit` green; `bun run codegen:check` green in all three repos.
+
+---
+
+## PR 11 — `frontend`: `[token].vue` Consumes `redirect_url`
+
+> Base: `frontend` tracker branch, after PR 6 (`api`) is merged. Must not
+> break: the 401 spent-link branch; the null fallback to
+> `/interview/terminal?reason=403`. Resolves Contradiction 1 — `frontend`
+> IS touched, contrary to the proposal's "not touched" claim.
+
+### Phase 40: RED
+
+- [ ] 40.1 RED `frontend/tests/unit/pages/interview-token.spec.ts` (extend): a `403` response carrying `redirect_url` navigates there via `useExitRedirect`'s existing `redirectTo` safety rules; a `403` with `redirect_url: null` falls through to `/interview/terminal?reason=403` (today's shipped behavior becomes the null case, not a replacement); the existing 401 spent-link branch is unaffected.
+- [ ] 40.2 RED a threat-matrix test (process integration / external routing row): a project with a `javascript:` or relative `error_redirect_url` value never reaches navigation.
+
+### Phase 41: GREEN
+
+- [ ] 41.1 Modify `frontend/app/pages/interview/[token].vue:110-112`: the 403 branch reads `redirect_url` and routes through `useExitRedirect`'s existing safety rules. Run 40.1, 40.2 GREEN — `error_redirect_url` is already `url`-validated and length-bounded at the FormRequest layer (`Store/UpdateProjectRequest`), so 40.2 should already pass; add coverage if the existing rules do not already reject unsafe values.
+
+### Phase 42: Gate
+
+- [ ] 42.1 `bun run typecheck` clean; `bun run test:unit` green.
+
+---
+
+## PR 12 — `backoffice`: Playwright E2E
+
+> Base: PR 10 branch. No production code in this PR.
+
+### Phase 43: E2E
+
+- [ ] 43.1 `backoffice/tests/e2e/catalogue-edit-publish.spec.ts` (chromium + webkit): superadmin edits an anchor, publishes, sees it frozen (a subsequent write attempt to the published revision is refused); an org admin gets no nav entry and is blocked on direct navigation to `/catalogue`.
+- [ ] 43.2 `backoffice/tests/e2e/catalogue-unsupported-gate.spec.ts` (mobile project): `/catalogue` → `/unsupported`, following the existing SA-11 pattern.
+
+### Phase 44: Gate
+
+- [ ] 44.1 Full Playwright suite green across chromium, webkit, and the mobile project.
+- [ ] 44.2 Confirm every proposal Success Criteria item is now met end-to-end; confirm `bun run codegen:check` green in all three repos as the final drift-free check.
