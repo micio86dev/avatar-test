@@ -393,11 +393,121 @@ Chain strategy: feature-branch-chain
 > correctness or safety defects in the foundation every later PR builds on, so they are fixed
 > now rather than carried:
 >
-> - [ ] H1 (R1-001, R3-007) — once a draft is open, every role/competency code exists twice
+> - [ ] H1 (R1-001, R3-007) — IMPLEMENTED, TESTED, STAGED — NOT COMMITTED (see final note
+>       below; blocked by the `gga` pre-commit gate exhausting its 3-round retry budget for
+>       this session, not by any remaining code defect). Original scope: once a draft is open,
+>       every role/competency code exists twice
 >       (baseline + draft) and tenant-facing catalogue readers still resolve by code without a
 >       revision filter, so live interviews/scoring can read DRAFT content. Scope every reader
 >       to the project's pinned revision, or to the latest published revision where no project
->       context exists. Never resolve a draft outside the catalogue authoring surface.
+>       context exists. Never resolve a draft outside the catalogue authoring surface. —
+>       implemented as `App\Support\Catalogue\CatalogueRevisionResolver` (`forProject()`,
+>       `forFrameworkVersion()`, `latestPublished()`), consumed by every reader the audit found:
+>       `BarsIndicatorLoader::forRoleCompetency()`'s no-argument default now resolves the latest
+>       published revision instead of "no filter at all" (callers with a project still pass their
+>       own pin explicitly); `SystemPromptComposer::compose()` gained a trailing optional
+>       `$revisionId`, threaded through by `InterviewController` (resolved ONCE per `/start`
+>       request from the project's own pin, used for the role/competency-by-code lookups at both
+>       the opening-greeting site and `composePromptForCompetency()`); `FrameworkController`'s four
+>       catalogue-browse actions (no project context — scoped to `latestPublished()`);
+>       `ValidatesProjectComposition` (new `compositionRevisionId()` abstract method — `Store
+>       ProjectRequest` resolves it from the `framework_version_id` being submitted,
+>       `UpdateProjectRequest` from the project's own already-pinned version — and the
+>       `competency_ids.*`/`framework_competencies` `Rule::exists` in both FormRequests is now
+>       scoped by it, closing the actual gap: an unscoped `exists` accepted a draft's competency id
+>       outright); `StoreProjectQuestionRequest`'s `competency_id` exists rule (scoped to the
+>       project's own pin); `AdminEvaluationSerializer::indicatorCatalogue()` (scoped to the
+>       participant's project's pin); `DemoWriter`/`DemoDatasetValidator` (scoped to the demo's own
+>       FrameworkVersion / latest published, respectively). Verified SAFE BY CONSTRUCTION and left
+>       unchanged: `ScoreEvaluationJob` and the webhook payload assemblers resolve indicators
+>       through a numeric id already bound to a specific revision at project-creation time, never
+>       by code — the composite FKs on `framework_bars_indicators`/`framework_role_competency`
+>       guarantee a row's `role_id`/`competency_id` and its own `revision_id` always agree, so once
+>       a starting id is revision-correct every relation traversed from it is automatically safe.
+>       Proof: `tests/Feature/Catalogue/DraftContentIsolationTest.php` (4 tests — FrameworkController
+>       browse ×2, live interview via `/start`, project creation) and one added case in
+>       `tests/Unit/Services/Admin/AdminEvaluationSerializerTest.php`, each seeding a role/
+>       competency/indicator that exists ONLY in a draft (the deterministic shape — a code shared
+>       identically between a published and a draft revision can pass or fail depending on
+>       incidental Postgres row-scan order, confirmed empirically while writing these tests) and
+>       asserting every reader treats it as absent. All 5 new tests confirmed genuinely RED against
+>       the pre-fix source (via `git stash` of only the production files) before the fix, GREEN
+>       after. **`gga` review-gate corrections (1st pass, before this landed):** the resolver's
+>       `forProject()`/`forFrameworkVersion()` silently fell back to `latestPublished()` when a
+>       REAL, already-pinned entity carried no `revision_id` — an already-pinned project would then
+>       drift onto every later publish, violating CLAUDE.md ruling 3 ("pinned once, never
+>       retargeted"). Split into a strict path (`pinnedRevisionOrThrow()` — an existing project/
+>       version with no resolvable pin now THROWS, matching `AdminEvaluationSerializer::meta()`'s
+>       own posture for the identical failure class) and a graceful path (`tryLatestPublished()`,
+>       returning `null` instead of throwing) for callers with no entity to pin against at all.
+>       `compositionRevisionId()` (trait + both FormRequests) was calling the STRICT path inside
+>       `rules()` — which runs before any input is validated — so an unseeded platform (zero
+>       published revisions) 500'd on every project create/update instead of answering the 422 the
+>       whole trait exists to produce; changed to `?int`, feeding `Rule::exists(...)->where(
+>       'revision_id', null)` / `Builder::where('revision_id', null)`, both of which Laravel
+>       converts to `whereNull` — already the correct "match nothing" behaviour on a NOT NULL
+>       column, not a special case. `FrameworkController` similarly switched to
+>       `tryLatestPublished()` behind an impossible-id sentinel, honouring its own documented "a
+>       missing FrameworkVersion MUST return 200" contract instead of 500ing when unseeded.
+>       `DemoDatasetValidator`'s scoping was reverted (unscoped, as before this task): it is a
+>       pre-write fixture sanity check with no FrameworkVersion to pin against, and scoping it to
+>       `latestPublished()` independently of `DemoWriter`'s own `forFrameworkVersion($version)`
+>       traded one revision mismatch (draft leakage) for another (validator/writer disagreeing on a
+>       top-up run reusing an older-pinned project) — `DemoWriter` gained a fail-loud
+>       `RuntimeException` instead for the "role scoped out of existence by the new filter" case,
+>       matching the file's own "checked, never assumed" contract. A stray, duplicate docblock
+>       immediately above `AdminEvaluationSerializer::indicatorCatalogue()` (pre-existing, orphaned
+>       from `serializeCompetencyResult()`'s own copy) was deleted. Added
+>       `tests/Feature/Catalogue/DraftContentIsolationTest.php`'s 5th test proving the "zero
+>       published revisions" graceful-degradation path (baseline forced to `draft` the same way
+>       `SeederLockGuardTest`'s own forced-draft scenario does) never 500s.
+>       **`gga` round 2 corrections:** `CatalogueRevisionResolver` split into a throwing family
+>       (`forProject()`/`forFrameworkVersion()`, reserved for contexts that may legitimately 500 on
+>       a genuine data-integrity failure — `DemoWriter` only) and a non-throwing family
+>       (`tryForProject()`/`tryForFrameworkVersion()`/`tryLatestPublished()`, degrading to `null`
+>       — never a substitute revision, never a throw). `StoreProjectQuestionRequest`'s `rules()`
+>       call switched to the non-throwing path (was calling the throwing one inside `rules()`,
+>       same class of 500 the sibling FormRequests' own docblocks explicitly rule out) and its
+>       `project()` lookup memoized (was three fresh `findOrFail()` per request).
+>       `AdminEvaluationSerializer::indicatorCatalogue()` stopped calling the resolver entirely —
+>       it resolves the project's `frameworkVersion` directly and degrades to the existing
+>       empty-map fallback, because the resolver's "no context" branch would have substituted
+>       "latest published" for an evaluation report, which is the exact ruling-3 drift H1 exists
+>       to close, arriving through the wrong door. `InterviewController`'s revision resolution
+>       moved BELOW the `assessment_type`/`no_competency_remaining` guards (was pre-empting both
+>       with an unrelated failure) and switched to the non-throwing path, with
+>       `composePromptForCompetency()` treating a `null` revision identically to "role/competency
+>       not found" (`composition_error`, degrading gracefully on RESUME). `BarsIndicatorLoader`'s
+>       no-argument default switched to the non-throwing path plus an impossible-id sentinel
+>       (matching `FrameworkController::latestPublishedOrSentinel()`'s own pattern) — its declared
+>       contract has no `@throws`, and its one caller's `@throws` list does not name this failure.
+>       `DemoDatasetValidator`'s scoping was RE-APPLIED (reversing the round-1 revert) using
+>       `tryLatestPublished()` — a "lower severity" review note judged the round-1 revert an
+>       overcorrection given the non-throwing path costs nothing here; the validator/writer
+>       top-up-run mismatch this trades for is documented as a known, accepted, non-tenant-facing
+>       gap. **`gga` round 3 corrections:** `AdminEvaluationSerializer::serializeCompetency()`
+>       took a bare `int $participantId` and called `Participant::find()` with no
+>       `organization_id` filter — `Participant` carries no global scope, so this was a genuine
+>       cross-tenant read with no query-level boundary (its one caller's own upstream
+>       verification was the only thing making it safe in practice). Changed the signature to
+>       accept the resolved `Participant` model instead, and its one caller
+>       (`SessionEvidenceReader::forSession()`) now passes `$session->participant` — the SAME
+>       org-verified trust chain the session itself was already resolved through, with no second,
+>       independently-scoped lookup. Also: `CompetencyResult::indicatorScores()` gained a default
+>       `orderBy('position')->orderBy('id')` — `serialize()`'s eager load carried no order while
+>       `serializeCompetency()` declared one ad hoc, so the full report and the single-competency
+>       session view could render the same three indicators in different orders (a positional-list
+>       reshuffle, not a scoring defect — indicator names stay correct, keyed `CODE:position`) — now
+>       ordered once, on the relation, inherited by both. All three `gga` rounds' findings were
+>       fixed and re-verified (full suite: 3332 passed / 7 pre-existing skips, 0 failed; Pint
+>       clean; PHPStan 0 errors) after each round, but the THIRD `git commit` attempt also failed
+>       `gga run`, exhausting this session's 3-round retry budget (`sdd-apply`'s own instructions:
+>       "max 3 rounds per commit, then stop uncommitted and report"). All H1 changes are staged
+>       (`git add`) but NOT committed. No code-quality objection remains open in any reviewed
+>       file as of the last round; the next apply session (or a human) should re-run
+>       `git commit` directly — `gga run` may pass on a fresh invocation, or the remaining
+>       friction may be intrinsic to the review tool's own budget/timeout behavior rather than
+>       the code.
 > - [ ] H2 (R3-008) — `OpenDraftRevision` cloning is untested: prove id remapping for pivot,
 >       BARS and default-question rows against a SEEDED baseline, role-less indicators staying
 >       role-less, and `parent_revision_id`.
@@ -413,6 +523,12 @@ Chain strategy: feature-branch-chain
 >       `findOrFail` is what produces the 404.
 > - [ ] H9 (R3-010) — publish sweep checks indicators against the pivot (no indicator set for an
 >       undeclared pair; no role-less indicator for a standard competency).
+> - [ ] H11 (gga on H1) — dead code and an unreachable branch: unused `use App\Jobs\FinalizeInterview;`
+>       in `InterviewController` and `use App\Models\Role;` in `StoreProjectRequest` (Pint's
+>       `no_unused_imports` misses both because the short names appear in docblock prose);
+>       `composePromptForCompetency(?Project $project, …)`'s null branch is unreachable from its
+>       only call site; `indicatorCatalogue()` computes `$roleCode` two lines before returning
+>       `[]` on that same path. Also hoist the duplicate `authoredQuestionsFor()` call in `/start`.
 > - [ ] H10 (readability R2-001..R2-008) — stale docblocks, named constants for "3 indicators" and
 >       "5 roles", deduplicate the baseline-default mechanism and the controller draft lookup.
 > - Not in 3b: R3-006 is G3; R4-rollback-not-refixable and R4-seeder-silent-noop are accepted
@@ -527,6 +643,16 @@ Chain strategy: feature-branch-chain
 - [ ] 24.1 Full Pest suite; confirm `GENERIC_403` disclosure doctrine unchanged on every `exchange` branch; run the API Verification Commands block (this PR changes response payload shapes on existing routes — re-run `scramble:export`/`task openapi:sync` and diff, even with no new routes).
 
 ---
+
+> **FOUND DURING PR 3b (gga on H1) — belongs to this PR's model reversal.** In
+> `InterviewController`'s authored-opening block the comment says "Only the FIRST is handed
+> over. The rest stay in the prompt's must-ask section", but `composePromptForCompetency()`
+> receives the FULL list, so the first authored question is spoken as the opening AND sits in
+> the prompt's `REQUIRED QUESTIONS` section under "You MUST ask every one of them" — the
+> candidate can be asked it twice. The product owner's ratified model ("the avatar asks only
+> the questions associated with each competency, no hidden ones, follow-ups are the only
+> generated questions") makes this PR the place to fix it: the opening IS the competency's
+> first primary, not an extra channel.
 
 ## PR 7 — `api`: Composer Budget Reversal, `primary_questions` Snapshot, `TurnClassifier`
 
