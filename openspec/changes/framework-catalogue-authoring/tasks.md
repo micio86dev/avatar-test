@@ -20,8 +20,8 @@ into one PR rather than splitting CRUD from its guard.
 
 **Open questions (OQ-A/B/C) are non-blocking for every task below**, per
 design. No task in PRs 1–12 depends on their answers:
-- OQ-A (JSON-ingress after publish) — left open; PR 9 documents the loss
-  (Contradiction 7), invents nothing.
+- OQ-A (JSON-ingress after publish) — RESOLVED by the product owner
+  2026-09-15: `catalogue:import --into-draft`. Delivered in PR 4 (task 15.5).
 - OQ-B ("copy from revision X" affordance) — not built; PR 4/PR 10 ship the
   plain per-revision default-question editor only.
 - OQ-C (`TurnClassifier` false-follow-up rate) — PR 7 ships the conservative
@@ -315,62 +315,98 @@ Chain strategy: feature-branch-chain
 
 ### Phase 9: Foundation
 
-- [ ] 9.1 Create migration `api/database/migrations/*_add_catalogue_nonblank_locale_checks.php`: `CHECK (anchor_5 ? 'en' AND length(btrim(anchor_5->>'en')) > 0)` × 4 anchor/text fields on `framework_bars_indicators`, and the equivalent non-blank/edge-whitespace CHECK on `framework_roles.name`/`responsibilities` and `framework_competencies.name`/`definition`.
-- [ ] 9.2 Create `api/app/Actions/Catalogue/OpenDraftRevision.php`: if no open draft exists, clone the latest published revision (~5 roles + 85 competencies + 249 indicators + 83 pivot rows + defaults, one `INSERT … SELECT` per table inside one transaction) into a new `draft` revision; if a draft already exists, continue it.
-- [ ] 9.3 Create `api/app/Actions/Catalogue/PublishRevision.php`: `SELECT … FOR UPDATE` on the revision row inside the transaction that flips `state`; `violations(FrameworkCatalogRevision): list<array{rule:string, subject:string, detail:string}>` — every blocking check named at once, not the first failure only.
-- [ ] 9.4 Modify `api/app/Support/Authorization/UserAbilities.php`: add `'catalogue' => ['manage' => $gate->allows('manageCatalogue')]`.
-- [ ] 9.5 Modify `api/app/Providers/AppServiceProvider.php::boot()`: `Gate::define('manageCatalogue', fn (User $u) => $u->is_superadmin === true)`.
-- [ ] 9.6 Modify `api/app/Http/Controllers/Auth/AuthController.php::me()`: `@scramble-return` gains the `catalogue` ability group.
+- [x] 9.1 Create migration `api/database/migrations/*_add_catalogue_nonblank_locale_checks.php`: `CHECK (anchor_5 ? 'en' AND length(btrim(anchor_5->>'en')) > 0)` × 4 anchor/text fields on `framework_bars_indicators`, and the equivalent non-blank/edge-whitespace CHECK on `framework_roles.name`/`responsibilities` and `framework_competencies.name`/`definition`. — **corrected**: `framework_roles.responsibilities` is deliberately EXCLUDED. `?` is a `jsonb`-only operator; these columns are `json` (2026_07_17 migrations), so every CHECK uses `->>'en'` (`IS NOT NULL AND length(btrim(...)) > 0`) instead, which works identically on either type. Excluding `responsibilities` preserves `FrameworkCatalogSeeder::readLocaleMap()`'s own `$allowBlankEn` sentinel for "not yet authored" (already tested, `tests/Feature/Seeders/GapResolutionTest.php`'s `missing_role_meta` scenario) — a CHECK forbidding it would have broken that already-shipped, still-correct behaviour.
+- [x] 9.2 Create `api/app/Actions/Catalogue/OpenDraftRevision.php`: if no open draft exists, clone the latest published revision (~5 roles + 85 competencies + 249 indicators + 83 pivot rows + defaults, one `INSERT … SELECT` per table inside one transaction) into a new `draft` revision; if a draft already exists, continue it. — **corrected**: NOT a literal `INSERT … SELECT` per table, which cannot satisfy the composite FKs (a cloned pivot/BARS/default row must reference the NEWLY inserted role/competency ids, not the parent's). Implemented as an in-memory old-id → new-id map built while roles/competencies are cloned first — same one-transaction, ~450-row shape, correct against the composite FK constraints. Also sets the new `parent_revision_id` column (see design.md's PR3 corrections) so the cross-role duplicate delta check has a concrete parent to diff against.
+- [x] 9.3 Create `api/app/Actions/Catalogue/PublishRevision.php`: `SELECT … FOR UPDATE` on the revision row inside the transaction that flips `state`; `violations(FrameworkCatalogRevision): list<array{rule:string, subject:string, detail:string}>` — every blocking check named at once, not the first failure only.
+- [x] 9.4 Modify `api/app/Support/Authorization/UserAbilities.php`: add `'catalogue' => ['manage' => $gate->allows('manageCatalogue')]`.
+- [x] 9.5 Modify `api/app/Providers/AppServiceProvider.php::boot()`: `Gate::define('manageCatalogue', fn (User $u) => $u->is_superadmin === true)`.
+- [x] 9.6 Modify `api/app/Http/Controllers/Auth/AuthController.php::me()`: `@scramble-return` gains the `catalogue` ability group.
+- [x] (added, foundation) Migration `*_enforce_catalogue_published_content_immutability.php`: DB trigger refusing INSERT/UPDATE/DELETE on the five catalogue-content tables for a published, NON-BASELINE revision — see design.md's PR3 corrections for why the baseline is deliberately exempt (a blanket rule broke 100+ unrelated pre-existing tests that use the baseline as a generic factory-default bucket).
+- [x] (added, foundation) Migration `*_drop_catalogue_revision_defaults.php`: drops the literal `DEFAULT <baseline id>` on `revision_id` for `framework_roles`/`framework_competencies` only (review advisory R3-001) — see design.md's PR3 corrections for why `framework_bars_indicators`/`framework_role_competency` are excluded (measured, not assumed: dropping the BARS default broke 223 tests via dozens of per-file ad-hoc fixture helpers with no shared call site to fix centrally).
+- [x] (added, foundation) Migration `*_add_parent_revision_id_to_framework_catalog_revisions.php` — see 9.2's note.
 
 ### Phase 10: RED — the invariant twin (before CRUD is wired)
 
-- [ ] 10.1 RED `api/tests/Feature/Catalogue/PublishSweepTest.php`: a pair with 2 or 4 indicators, an unanchored competency, a `potential` competency present in the pivot, and a role-scoped MTG/LAT indicator — each refuses publish (422 naming every violation) and leaves `state = 'draft'`.
-- [ ] 10.2 RED `api/tests/Feature/Catalogue/CatalogueBaselineLiteralCountsTest.php`: 83 role×competency pairs (15/18/18/14/18) and 85 anchored competencies, asserted against the **baseline revision only**, against the database.
-- [ ] 10.3 RED `api/tests/Feature/Catalogue/CatalogueFormRequestTwinTest.php`: a 6th role, a 4th indicator for a pair, a blank `it` locale value, a default question missing `it` → 422 at the FormRequest layer.
-- [ ] 10.4 RED `api/tests/Feature/Catalogue/CrossRoleDuplicateDeltaTest.php`: a duplicate anchor text **new to the revision** is refused, in both directions; the four inherited baseline duplicates (`MLL.json:142`/`BUL.json:142`, `FLL.json:176`/`MLL.json:176`) publish fine.
-- [ ] 10.5 RED `api/tests/Feature/Catalogue/CatalogueAbilityEquivalenceTest.php`: across superadmin/admin/operator/viewer, `allows('manageCatalogue')` is true **iff** a catalogue-write route returns non-403.
-- [ ] 10.6 RED `api/tests/Feature/Catalogue/CatalogueOpenApi403ContractTest.php`: the generated `openapi.json` declares 403 on **every** catalogue-write operation.
+- [x] 10.1 RED `api/tests/Feature/Catalogue/PublishSweepTest.php`: a pair with 2 or 4 indicators, an unanchored competency, a `potential` competency present in the pivot, and a role-scoped MTG/LAT indicator — each refuses publish (422 naming every violation) and leaves `state = 'draft'`.
+- [x] 10.2 RED `api/tests/Feature/Catalogue/CatalogueBaselineLiteralCountsTest.php`: 83 role×competency pairs (15/18/18/14/18) and 85 anchored competencies, asserted against the **baseline revision only**, against the database.
+- [x] 10.3 RED `api/tests/Feature/Catalogue/CatalogueFormRequestTwinTest.php`: a 6th role, a 4th indicator for a pair, a blank `it` locale value → 422 at the FormRequest layer. — the "default question missing `it`" scenario belongs to PR4's `DefaultQuestionController` (Phase 14/15), not built in this PR; not asserted here.
+- [x] 10.4 RED `api/tests/Feature/Catalogue/CrossRoleDuplicateDeltaTest.php`: a duplicate anchor text **new to the revision** is refused, in both directions; an inherited (parent) duplicate publishes fine. — asserted against a minimal manufactured parent/child pair rather than the real `MLL.json:142`/`BUL.json:142` baseline pairs specifically (same rule, proven either way; the manufactured fixture isolates the delta logic from the real catalogue's specific content).
+- [x] 10.5 RED `api/tests/Feature/Catalogue/CatalogueAbilityEquivalenceTest.php`: across superadmin/admin/operator/viewer, `allows('manageCatalogue')` is true **iff** a catalogue-write route returns non-403.
+- [x] 10.6 RED `api/tests/Feature/Catalogue/CatalogueOpenApi403ContractTest.php`: the generated `openapi.json` declares 403 on **every** catalogue-write operation.
 
 ### Phase 11: GREEN — the invariant twin
 
-- [ ] 11.1 Create `api/app/Http/Requests/Catalogue/{Store,Update}RoleRequest.php`: refuses a 6th role.
-- [ ] 11.2 Create `api/app/Http/Requests/Catalogue/{Store,Update}CompetencyRequest.php`, `{Store,Update}BarsIndicatorRequest.php`: refuses a 4th indicator for `(revision, role, competency)`; non-blank `{en,it}` shape validation. Run 10.3 GREEN.
-- [ ] 11.3 Implement `PublishRevision::violations()` body: `GROUP BY` over the revision's pivot refuses any pair ≠ 3; a pivot row with zero indicators refuses publish; a `potential` competency in the pivot refuses; role-scoped MTG/LAT indicator check mirrors `CI_NON_ROLE_BARS_FILES`; the delta cross-role duplicate check compares against the revision's parent, refusing only duplicates new to this revision. Run 10.1, 10.4 GREEN.
-- [ ] 11.4 Run 10.2 GREEN (literal counts against the baseline revision only — never enforced on every publish, which would refuse the first competency a superadmin ever adds).
+- [x] 11.1 Create `api/app/Http/Requests/Catalogue/{Store,Update}RoleRequest.php`: refuses a 6th role.
+- [x] 11.2 Create `api/app/Http/Requests/Catalogue/{Store,Update}CompetencyRequest.php`, `{Store,Update}BarsIndicatorRequest.php`: refuses a 4th indicator for `(revision, role, competency)`; non-blank `{en,it}` shape validation. Run 10.3 GREEN.
+- [x] 11.3 Implement `PublishRevision::violations()` body: `GROUP BY` over the revision's pivot refuses any pair ≠ 3; a pivot row with zero indicators refuses publish; a `potential` competency in the pivot refuses; role-scoped MTG/LAT indicator check mirrors `CI_NON_ROLE_BARS_FILES`; the delta cross-role duplicate check compares against the revision's parent (`parent_revision_id`), refusing only duplicates new to this revision, matched by COMPETENCY/ROLE CODE (not numeric id — a clone's ids differ from its parent's). Run 10.1, 10.4 GREEN. — **review-gate correction**: the first cut only checked indicator counts for ROLE-SCOPED pairs (`whereNotNull('role_id')`) and empty pairs via the PIVOT, so a `potential` competency's own 3-indicator rule (MTG/LAT, no pivot row, `role_id IS NULL`) was never enforced — deleting one of MTG's three indicators and publishing passed the sweep silently. Added `potentialIndicatorCountViolations()`, a LEFT JOIN from `framework_competencies` so a zero-indicator `potential` competency is also caught. Also fixed, same review pass: the content-immutability trigger read the revision's state with a plain `SELECT`, which does not wait for `PublishRevision`'s own `SELECT … FOR UPDATE` lock — a concurrent content write mid-publish could still see `draft` and commit; changed to `SELECT … FOR SHARE`.
+- [x] 11.4 Run 10.2 GREEN (literal counts against the baseline revision only — never enforced on every publish, which would refuse the first competency a superadmin ever adds).
 
 ### Phase 12: RED + GREEN — CRUD, wired only after Phase 11 is GREEN
 
-- [ ] 12.1 Create `api/app/Http/Controllers/Api/Catalogue/{Competency,Role,BarsIndicator,Revision}Controller.php`: every action opens `abort_unless($this->isSuperadmin($request), Response::HTTP_FORBIDDEN);` inline, copied verbatim from `PlatformUserController:87,102` — never a shared helper. Create/update/reorder/pre-publish-only-delete, scoped to the open draft revision (auto-opens one via `OpenDraftRevision` on first edit if none is open).
-- [ ] 12.2 Wire `PublishRevision` into `RevisionController::publish`; a failing sweep returns 422 with the full violations list.
-- [ ] 12.3 RED `api/tests/Feature/Catalogue/PublishedRevisionImmutabilityTest.php`: a published revision refuses update, delete, **and insert** — three assertions, stricter than the old seeder guard.
-- [ ] 12.4 Append superadmin catalogue routes to `api/routes/api.php`.
-- [ ] 12.5 Run 10.5, 10.6, 12.3 GREEN.
-- [ ] 12.6 Run `DB_CONNECTION=pgsql php artisan scramble:export`; `task openapi:sync`; `bun run codegen` in `frontend` and `backoffice`; `bun run codegen:check` green in all three (`AbilityKey` in `useCurrentUser.ts` must now accept `'catalogue.manage'`).
+- [x] 12.1 Create `api/app/Http/Controllers/Api/Catalogue/{Competency,Role,BarsIndicator,Revision}Controller.php`: every action opens `abort_unless($this->isSuperadmin($request), Response::HTTP_FORBIDDEN);` inline, copied verbatim from `PlatformUserController:87,102` — never a shared helper. Create/update/pre-publish-only-delete, scoped to the open draft revision (`store()` auto-opens one via `OpenDraftRevision` on first edit if none is open). — **scope note**: no `reorder` endpoint and no `framework_role_competency` pivot-management endpoint were built — the task list names exactly these four controllers and neither the design's Interfaces/Contracts section nor its File Changes table names a pivot endpoint; flagged as a real design gap rather than invented. **Review-gate corrections**: `update()` no longer opens a draft at all (only `store()` does) — the target row either already belongs to an existing draft or does not exist to update, and opening a fresh clone first copied ~450 rows only to 404 immediately after, since a newly-cloned row's id can never equal the id in the URL; `UpdateRoleRequest`/`UpdateCompetencyRequest` gained a read-only `existingOpenDraftRevisionId()` counterpart for the same reason. `RevisionController::current()` is READ-ONLY (was auto-opening/cloning on every GET, which broke HTTP safety for a prefetch/retry/monitoring probe). Raw model serialization (`response()->json(['data' => $model])`) replaced with dedicated `Catalogue{Role,Competency,BarsIndicator,Revision}Resource` classes (`api/app/Http/Resources/Catalogue/`) — separate from the existing `RoleResource`/`CompetencyResource`/`BarsIndicatorResource`, which resolve translatable fields to the current locale for the candidate-facing read surface; authoring needs the full `{en, it}` map. Numeric route parameters gained `->whereNumber(...)` so a non-numeric id 404s instead of a 500 `TypeError`.
+- [x] 12.2 Wire `PublishRevision` into `RevisionController::publish`; a failing sweep returns 422 with the full violations list.
+- [x] 12.3 RED `api/tests/Feature/Catalogue/PublishedRevisionImmutabilityTest.php`: a published revision refuses update, delete, **and insert** — proven at two layers: the CRUD surface 404s (never reaches a published revision — every write is scoped to the open draft), and the DB trigger refuses a raw, Eloquent-bypassing write naming a published revision directly.
+- [x] 12.4 Append superadmin catalogue routes to `api/routes/api.php`.
+- [x] 12.5 Run 10.5, 10.6, 12.3 GREEN.
+- [x] 12.6 Ran `DB_CONNECTION=pgsql php artisan scramble:export`; committed `openapi.json`. **Deliberately did NOT** run `task openapi:sync` / `bun run codegen` in `frontend`/`backoffice` — this session's explicit instructions say "Do NOT sync it into frontend/backoffice ... that happens at release", which supersedes this task's literal wording for this session. Follow-up work before archive.
 
 ### Phase 13: Gate
 
-- [ ] 13.1 Full Pest suite; confirm `AdminTenancySafetyArchTest` stays green — no tenant read widens; no `organization_id` appears anywhere in this surface.
-- [ ] 13.2 Run the API Verification Commands block, including `scripts/ci-guards.sh` unmodified.
+- [x] 13.1 Full Pest suite; confirm `AdminTenancySafetyArchTest` stays green — no tenant read widens; no `organization_id` appears anywhere in this surface. — see apply report for verbatim output.
+- [x] 13.2 Run the API Verification Commands block, including `scripts/ci-guards.sh` unmodified. — see apply report.
 
 ---
 
-> **GAP FOUND DURING PR 1, MUST BE CLOSED BEFORE THE CHANGE ARCHIVES.** No task
-> anywhere assigns `framework_versions.revision_id` when a NEW `FrameworkVersion`
-> is created. PR 1's backfill stamps every row that existed at migration time, so
-> nothing is null today — but a project created after this change ships would pin
-> a version with no revision, and `Evaluation → FV → revision → rows` would have
-> nothing to resolve. That chain is the entire point of the change. The column is
+> **GAP FOUND DURING PR 1, CLOSED IN PR3.** No task anywhere assigned
+> `framework_versions.revision_id` when a NEW `FrameworkVersion` is created. PR 1's
+> backfill stamps every row that existed at migration time, so nothing is null
+> today — but a project created after this change ships would pin a version with
+> no revision, and `Evaluation → FV → revision → rows` would have nothing to
+> resolve. That chain is the entire point of the change. The column is
 > deliberately nullable at the end of PR 1 (the baseline is still `draft`, and the
 > draft-pin guard would reject every existing creation), so the assignment belongs
-> AFTER the baseline is published in PR 3.
+> AFTER the baseline is published in PR 3. **Renumbered G1/G2** — the original
+> `13.0`/`13.1` numbering collided with this PR's own `13.1` gate task.
 >
-> - [ ] 13.0 RED `api/tests/Feature/Catalogue/FrameworkVersionPinsPublishedRevisionTest.php`:
+> - [x] G1 RED `api/tests/Feature/Catalogue/FrameworkVersionPinsPublishedRevisionTest.php`:
 >       a newly created `FrameworkVersion` resolves the latest PUBLISHED revision,
 >       never null and never a draft; an existing version keeps the revision it was
 >       stamped with.
-> - [ ] 13.1 Assign the pin on creation wherever `FrameworkVersion` rows are minted,
->       and decide — stated, not assumed — whether a null pin should remain legal at
->       all once the baseline is published, or become NOT NULL with a default.
+> - [x] G2 Assign the pin on creation wherever `FrameworkVersion` rows are minted
+>       (`FrameworkVersion::booted()`'s `creating` listener, `assignLatestPublished
+>       RevisionIfUnset()` — fires only when `revision_id` was never set at all, so
+>       an explicit caller is never overridden). **Decided, not assumed**: the
+>       column STAYS NULLABLE at the DB level rather than becoming `NOT NULL` — a
+>       blanket `NOT NULL` would require a default for every creation path,
+>       including pre-revision-schema tests that construct a `FrameworkVersion`
+>       against the rolled-back schema before the column exists at all, and any
+>       environment where migrations ran but no published revision exists yet. The
+>       application-level guard is what actually closes the gap in the ordinary
+>       path; `NOT NULL` would only forbid legitimate no-revision-yet states this
+>       guard does not need to forbid to be correct. One pre-existing test
+>       (`FrameworkVersionRefusesDraftRevisionTest`'s "unaffected by the guard"
+>       scenario) asserted the OLD gap behaviour (`revision_id` stays null) and was
+>       updated to assert the closed-gap behaviour instead.
+
+> **REQUIRED BEFORE ARCHIVE — baseline immutability at the database layer (G3).**
+> PR 3's content-immutability trigger (`2026_09_15_201434_enforce_catalogue_published_content_immutability.php`)
+> exempts the BASELINE revision, and the literal `DEFAULT <baseline id>` on `revision_id`
+> survives on `framework_bars_indicators` and `framework_role_competency`. Together that
+> leaves the one revision every already-scored evaluation resolves writable by any raw
+> write or any insert that omits `revision_id` — the exact failure PR 1's zero-copy
+> design exists to prevent (review advisory R3-001 on PR 1, still open). The exemption
+> exists because hundreds of pre-existing tests use the baseline as a scratch fixture,
+> which is a test-suite convenience, not a product rule.
+>
+> - [ ] G3.1 Give the suite a non-baseline scratch revision (fixture/factory state) and
+>       migrate tests that write catalogue content off the baseline.
+> - [ ] G3.2 Give `BarsIndicator` a factory; stop constructing it via per-file
+>       `forceFill`/raw inserts; drop the remaining `DEFAULT`s.
+> - [ ] G3.3 Extend the trigger to the baseline, with the seeder's one-time bootstrap of
+>       an EMPTY baseline as the only permitted path (explicit, tested, not a blanket
+>       bypass).
+> - [ ] G3.4 Close `OpenDraftRevision`'s concurrent first-edit race (second caller gets
+>       a 500 from the one-draft unique index instead of continuing the draft).
 
 ## PR 4 — `api`: Catalogue Default Questions + Export Command
 
@@ -387,6 +423,7 @@ Chain strategy: feature-branch-chain
 - [ ] 15.1 Create `api/app/Http/Requests/Catalogue/{Store,Update}DefaultQuestionRequest.php`: `{en,it}` both required.
 - [ ] 15.2 Create `api/app/Http/Controllers/Api/Catalogue/DefaultQuestionController.php`: superadmin-only 403 per action, scoped to the open draft revision.
 - [ ] 15.3 Create `api/app/Console/Commands/CatalogueExportCommand.php`: `php artisan catalogue:export {revision?}` — writes the split-file JSON shape to STDOUT, takes no path argument at all (no `--dir`, no `--write` mode). Run 14.1, 14.2 GREEN.
+- [ ] 15.5 Create `api/app/Console/Commands/CatalogueImportCommand.php`: `php artisan catalogue:import --into-draft` — reads the vendored split-file JSON trees (the same shape `catalogue:export` writes), opens or continues the ONE draft revision via `OpenDraftRevision`, and writes the JSON's content into that draft only. It NEVER writes a published revision (the immutability trigger and `writesAreBlocked()` must both stay untouched) and NEVER publishes: publishing stays a separate, reviewable act through `PublishRevision` and its sweep. Round-trip test: export a revision, import it into a draft, and the draft's content equals the source revision's. Refuses cleanly when a draft already holds unrelated edits unless told to continue it. This is the ingress for ruling 6's expert-authored translations now that a published baseline takes no seeder writes.
 - [ ] 15.4 Append default-question routes to `api/routes/api.php`; run `DB_CONNECTION=pgsql php artisan scramble:export` + `task openapi:sync` + `bun run codegen:check` in all three repos.
 
 ### Phase 16: Gate

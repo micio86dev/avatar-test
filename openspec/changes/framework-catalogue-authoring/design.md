@@ -147,11 +147,29 @@ as the content proxy), not on `state` alone. A published-but-empty baseline
 is populated once; a published baseline that already carries content is
 immutable, exactly as this section says. The migration is unchanged — every
 PR1 invariant test that asserts the baseline is unconditionally published
-immediately after migration, with no seeding, stays true. `framework_gaps`
-and `catalog_meta` bookkeeping run unconditionally, both branches, per this
-section's own "untouched by the gate" wording — see
+immediately after migration, with no seeding, stays true. `catalog_meta`
+bookkeeping runs unconditionally, both branches, per this section's own
+"untouched by the gate" wording — see
 `framework-catalogue-authoring/tasks.md`'s PR2 section for the full
 before/after evidence.
+
+**PR3 fix correction, superseding "framework_gaps ... untouched by the gate,
+both branches" above.** That wording was the actual PR2 defect, caught by
+review: `framework_gaps` RECONCILIATION runs unconditionally (recording a
+still-pending gap describes the JSON, never a DB claim, so it stays
+unconditional), but gap RESOLUTION (marking `pending_authoring` ->
+`resolved`) is a claim that the database now satisfies the rule, and a
+blocked run writes nothing this run to back that claim. Before the fix,
+editing the source JSON on an already-published, already-populated baseline
+could mark `role_no_bars`/`competency_no_bars`/`missing_role_meta`/
+`missing_translation` gaps resolved even though nothing reached the
+database — disagreeing with the `missing_potential_competency` check, which
+already read `BarsIndicator` existence from the database and was never
+affected. Gap resolution for these five kinds is now gated behind the same
+write gate the content writes are; gap recording is not. See
+`FrameworkCatalogSeeder`'s class docblock ("Gap resolution reflects
+DATABASE state, not the JSON") and `SeederLockGuardTest`'s rewritten
+scenario 5 for the corrected behaviour and its evidence.
 
 ---
 
@@ -193,6 +211,45 @@ weakening of it. **See Contradiction 3.**
 transaction that flips `state`, `SELECT … FOR UPDATE` on the revision row. A
 revision that fails any check stays `draft` and the action returns 422 with the
 full list of violations — one response naming every problem, not the first one.
+
+**PR3 implementation corrections to D1/D3, all discovered during PR3's own
+apply, not assumed:**
+
+- **`framework_catalog_revisions.parent_revision_id`** (a migration this
+  design did not name): the cross-role duplicate DELTA check needs a concrete
+  "the revision's parent" to diff against, and nothing in PR1's schema
+  recorded one. Nullable, self-referential, set by `OpenDraftRevision` when
+  it clones. `null` for the baseline (the root) and for any revision minted
+  before this column existed — the delta check is then a no-op for it,
+  which is correct: nothing to diff against means nothing is "new".
+- **Published-content immutability is DB-enforced by a trigger, scoped to
+  EXCLUDE the baseline.** `2026_09_15_201434_enforce_catalogue_published_
+  content_immutability` refuses INSERT/UPDATE/DELETE on the five catalogue-
+  content tables for a `published`, NON-BASELINE revision — never the
+  baseline. A blanket rule covering the baseline too was tried first and
+  reverted: the baseline is `published` from the moment it is created
+  (PR1) and is ALSO, across this whole suite, the default landing spot for
+  every `Role::factory()`/`Competency::factory()` call that does not care
+  which revision it belongs to (PR1's own explicit compatibility promise).
+  A blanket trigger broke over a hundred unrelated, pre-existing tests the
+  moment the baseline held any content. The baseline's own immutability
+  stays exactly what PR2 already built: the seeder's `writesAreBlocked()`
+  gate. The trigger's actual job is the revision kind PR3 actually adds —
+  a superadmin-published, non-baseline revision.
+- **The literal `DEFAULT <baseline id>` on `revision_id` is dropped for
+  `framework_roles` and `framework_competencies` ONLY**, not for
+  `framework_bars_indicators` or `framework_role_competency` as R3-001
+  originally suggested. Both factories were updated to name the baseline
+  explicitly so every existing call site keeps working unmodified.
+  `framework_bars_indicators` has no Eloquent factory — the suite
+  constructs it via dozens of independent, per-test-file helpers
+  (`new BarsIndicator; ->forceFill([...])` or raw `DB::table()->insert()`),
+  and dropping its default broke 223 tests across the suite in measurement;
+  reverted rather than left half-fixed. `framework_role_competency` is
+  written exclusively through `Role::competencies()->sync()`, whose pivot
+  columns do not include `revision_id` at all — a `withPivotValue()`-style
+  relation change, out of scope here. The underlying risk the DEFAULT
+  posed is independently closed for both, regardless, by the trigger above.
 
 ---
 
@@ -903,7 +960,13 @@ why, so the tasks phase inherits a decision rather than a surprise.
 
 ## Open Questions
 
-- [ ] **OQ-A — how does JSON-authored content reach a published catalogue?**
+- [x] **OQ-A — RESOLVED 2026-09-15 by the product owner: `catalogue:import --into-draft`.**
+      JSON content enters a new draft revision, which is reviewed and published
+      through the backoffice and `PublishRevision`'s sweep. The JSON trees remain
+      the source for expert-authored content (ruling 6). Rejected: backoffice-only
+      authoring with frozen JSON, and destructive reseeds in production. Delivered
+      in PR 4 (task 15.5). Original question, kept for the record:
+- **OQ-A — how does JSON-authored content reach a published catalogue?**
       Candidates: a `catalogue:import --into-draft` console command (symmetric with
       the export, reviewable as a diff before publish), or accepting that
       catalogue content is authored in the backoffice from now on and the JSON
