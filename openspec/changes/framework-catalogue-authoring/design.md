@@ -134,6 +134,25 @@ assertions where they still mean something. This closes the route
 `bars-catalogue-completion` D5b opened, and that is a real loss with no
 replacement in the specs: **see Contradiction 7.**
 
+**PR2 correction (implemented, not this design's original shape).** This
+section's "draft baseline syncs / published baseline writes zero" reads as a
+bare `state` check, and PR1's own backfill migration (corrected during PR1's
+review) inserts the baseline as `published` UNCONDITIONALLY — including over
+an empty, freshly migrated catalogue. Combined literally, a fresh install
+breaks: `DatabaseSeeder` seeds immediately after migration, finds a published
+baseline, and writes nothing. PR2 resolves this in the seeder, not the
+migration: `FrameworkCatalogSeeder::writesAreBlocked()` gates on "published
+AND already has content" (`Competency::where('revision_id', $id)->exists()`
+as the content proxy), not on `state` alone. A published-but-empty baseline
+is populated once; a published baseline that already carries content is
+immutable, exactly as this section says. The migration is unchanged — every
+PR1 invariant test that asserts the baseline is unconditionally published
+immediately after migration, with no seeding, stays true. `framework_gaps`
+and `catalog_meta` bookkeeping run unconditionally, both branches, per this
+section's own "untouched by the gate" wording — see
+`framework-catalogue-authoring/tasks.md`'s PR2 section for the full
+before/after evidence.
+
 ---
 
 ### D3 — The runtime twin, constraint by constraint

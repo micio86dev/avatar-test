@@ -179,7 +179,99 @@ Chain strategy: feature-branch-chain
 > Base: PR 1 branch. Must not break: idempotence; per-role seeded counts;
 > `framework_gaps` reconciliation.
 
-> **PR 1 review-gate landmine, annotated not fixed (out of PR 1's scope):**
+> **Fresh-install contradiction, resolved (not the migration-conditional
+> shape this file originally implied).** Combining "PR1's baseline is always
+> inserted `published`" (corrected during PR1 review — see PR1's Phase 2.4
+> note) with "the seeder writes zero rows against a published baseline"
+> (D2, this file's original Phase 6/7 wording) breaks a fresh install: the
+> backfill migration creates a published baseline over an EMPTY catalogue,
+> `DatabaseSeeder::run()` calls `FrameworkCatalogSeeder` immediately after,
+> and a bare `state === 'published'` gate refuses to write anything — a
+> fresh environment ships with no catalogue at all.
+>
+> **Rejected fix**: making the backfill migration insert the baseline as
+> `draft` when the catalogue is empty and `published` when it already holds
+> content (the shape this file originally sketched), with the seeder
+> publishing a synced draft. This was rejected on evidence, not preference:
+> several already-committed PR1 tests assert the baseline is
+> UNCONDITIONALLY `published` immediately after migration, with NO seeding —
+> `FrameworkCatalogRevisionInvariantsTest::test('the baseline revision is
+> published, not draft')` and `FrameworkVersionRefusesDraftRevisionTest`'s
+> "published by construction" tests chief among them (both run against a
+> freshly migrated, unseeded test database, per `tests/Pest.php`'s
+> `RefreshDatabase` wiring — migrations run once, before any test-specific
+> seeding). Making the migration conditional would reopen and change
+> already-shipped, already-tested PR1 behaviour to solve a PR2-only gap.
+>
+> **Implemented fix**: the backfill migration is UNCHANGED — the baseline
+> stays unconditionally `published`. The seeder's write gate
+> (`FrameworkCatalogSeeder::writesAreBlocked()`) checks not merely "is the
+> baseline published" but "is the baseline published AND does it already
+> carry content" (`Competency::where('revision_id', $baselineId)->exists()`
+> — competencies are this seeder's own first catalogue write on every
+> mutating run, so their presence is a sufficient proxy for "already
+> populated"). A published-but-empty baseline is populated normally, exactly
+> once; a published baseline that already carries content is immutable, full
+> stop. No mutation to `framework_catalog_revisions.state` ever happens in
+> the seeder — the "publishing is the draft→published transition, allowed
+> because the original state was draft" invariant from PR1 is therefore
+> never exercised by this seeder at all, because the seeder never needs to
+> transition the revision's state. A **draft** baseline — never produced by
+> this schema today, only constructible via a raw `DB::table()` write that
+> bypasses the Eloquent immutability guard — still runs the full
+> delete-stale sync unconditionally, matching this section's literal
+> "draft baseline still syncs" wording; see
+> `tests/Feature/C4/Seeder/SeederLockGuardTest.php`'s forced-draft scenario.
+>
+> **Undocumented fallout, discovered and resolved while implementing this
+> PR**: the ENTIRE old platform-wide `FrameworkVersion.is_locked` per-row
+> additive-lock machinery (`hasLockedVersions()`,
+> `fillEmptyLocalesUnderLock()`, `recordLockedFillEmptyLocaleGap()`, and the
+> "fix 5b" role-responsibilities fill-empty-only precedent) is deleted by D2,
+> not merely the two files this section originally named
+> (`SeederLockGuardTest.php`, `LockedFillEmptyLocaleTest.php`). One more file
+> exercised the SAME deleted machinery via the SAME `$locked` gate and is
+> deleted alongside it: `tests/Feature/Seeders/LockedRoleMetaFillTest.php`
+> (its subject, the role-responsibilities fill-empty-only exception under a
+> locked `FrameworkVersion`, no longer exists — `FrameworkVersion.is_locked`
+> has no bearing on this seeder any more). `tests/Feature/C4/PinLockTest.php`
+> was checked and is UNAFFECTED: it exercises `is_locked` only against
+> `FrameworkVersion` mutation/deletion guards, never against a seeder
+> re-run. The "keep the existing cross-tenant `withoutGlobalScopes()`
+> assertions where they still mean something" instruction below turned out
+> to have nothing left to keep: the new gate reads only
+> `FrameworkCatalogRevision.state` and `Competency.revision_id`, neither of
+> which is tenant-scoped or reads `FrameworkVersion` at all.
+>
+> **A second, larger category of fallout, also undocumented in this file**:
+> D2's own wording ("a published revision now accepts NO writes at all,
+> additive or otherwise") is not limited to the old `is_locked` machinery —
+> it closes a door that was open, unconditionally, for every catalogue test
+> in `tests/Feature/Seeders/` that seeds once, edits the source JSON, and
+> re-seeds expecting the second run to apply the change. Before this PR that
+> was always safe (nothing gated it while no `FrameworkVersion` was locked);
+> after this PR the SECOND run is, by construction, a run against an
+> already-populated published baseline, and the write gate blocks it. Seven
+> files hit this and needed a one-line fix — not a rewrite of their actual
+> subject (delete-stale sync, translation-merge semantics, the
+> revision-bump predicate, crash-atomicity, gap-fix-triggers-insertion),
+> which is unchanged and still correctly proven, but each needed its
+> baseline forced to `draft` (the same `DB::table(...)->update(['state' =>
+> 'draft', ...])` technique `SeederLockGuardTest`'s own forced-draft
+> scenario introduced) immediately before the re-seed that exercises it:
+> `RevisionBumpOnMutationTest` (both tests — the no-op case was left
+> un-forced initially and passed for the WRONG reason, the gate rather than
+> the predicate, before being corrected), `CrashLostRevisionBumpTest`,
+> `ItLocaleSeedTest` (first test only), `TranslationSurvivalReseedTest`
+> (both tests — same "passing vacuously" risk as above), `DeleteStalePivotTest`,
+> `ReseedAfterGapFixTest`. `IdempotentSeedTest` needed a different fix (not
+> draft-forcing): its second run is now genuinely blocked, which is
+> correctly idempotent for catalogue content, but the write-gate's OWN
+> `seeder_lock_guard_active` signal is a real, expected `framework_gaps`
+> write on that run — the test now proves idempotence across three runs
+> instead of two, with the signal accounted for.
+
+> **PR 1 review-gate landmine, FIXED (was: annotated not fixed, out of PR 1's scope):**
 > `api/database/seeders/FrameworkCatalogSeeder.php` resolves natural-key rows
 > by CODE ALONE, not by `(revision_id, code)`: `Competency::firstOrNew(['code'
 > => $code])` (`:245`) and `Role::firstOrNew(['code' => $roleCode])` (`:307`).
@@ -198,19 +290,19 @@ Chain strategy: feature-branch-chain
 
 ### Phase 6: RED
 
-- [ ] 6.1 RED rewrite `api/tests/Feature/C4/Seeder/SeederLockGuardTest.php` against the draft/published pair (not deleted — rewritten): draft baseline still syncs (full delete-stale, as before); published baseline performs **zero writes** (no additive insert, no gap-row update) and emits the `seeder_lock_guard_active`-equivalent structured signal + `Log::warning`; `framework_gaps` and `catalog_meta` are unaffected by the gate either way. Keep the existing cross-tenant `withoutGlobalScopes()` assertions where they still mean something.
-- [ ] 6.2 Confirm `api/tests/Feature/C4/Seeder/LockedFillEmptyLocaleTest.php`'s only subject (`fillEmptyLocalesUnderLock()`) will no longer exist post-GREEN — mark the file for deletion in Phase 7, not now (deletion happens once the code it tests is gone).
+- [x] 6.1 RED rewrite `api/tests/Feature/C4/Seeder/SeederLockGuardTest.php` against the draft/published pair (not deleted — rewritten): draft baseline still syncs (full delete-stale, as before); published baseline performs **zero writes** (no additive insert, no gap-row update) and emits the `seeder_lock_guard_active`-equivalent structured signal + `Log::warning`; `framework_gaps` and `catalog_meta` are unaffected by the gate either way. — **corrected**: rewritten against the published-but-empty / published-with-content pair, not a draft/published pair (see the fresh-install contradiction annotation above — the baseline is never naturally draft). The "keep cross-tenant `withoutGlobalScopes()` assertions" instruction had nothing left to keep — see the same annotation. Also added `tests/Feature/C4/Seeder/SeederRevisionScopedLookupTest.php` for the landmine fix (task list did not originally name a file for it).
+- [x] 6.2 Confirm `api/tests/Feature/C4/Seeder/LockedFillEmptyLocaleTest.php`'s only subject (`fillEmptyLocalesUnderLock()`) will no longer exist post-GREEN — mark the file for deletion in Phase 7, not now (deletion happens once the code it tests is gone). — also identified `tests/Feature/Seeders/LockedRoleMetaFillTest.php` as sharing the same fate (undocumented fallout, see annotation above); marked for deletion alongside it.
 
 ### Phase 7: GREEN
 
-- [ ] 7.1 Modify `api/database/seeders/FrameworkCatalogSeeder.php` (`:708`): replace `hasLockedVersions()` with `baselineRevisionIsPublished()`. Draft path: existing delete-stale sync runs unchanged. Published path: zero writes; emit the `seeder_lock_guard_active` `FrameworkGap` row and `Log::warning`, kept with their existing kind/shape.
-- [ ] 7.2 Delete `fillEmptyLocalesUnderLock()` and `recordLockedFillEmptyLocaleGap()` from `FrameworkCatalogSeeder.php` — the new rule has no partially-writable state, so they exist for nothing now.
-- [ ] 7.3 Delete `api/tests/Feature/C4/Seeder/LockedFillEmptyLocaleTest.php`.
-- [ ] 7.4 Run 6.1 GREEN; confirm idempotence and per-role seeded counts (ICO 45, FLL 54, MLL 54, BUL 42, SRX 54) are unchanged against the draft baseline.
+- [x] 7.1 Modify `api/database/seeders/FrameworkCatalogSeeder.php` (`:708`): replace `hasLockedVersions()` with `baselineRevisionIsPublished()`. Draft path: existing delete-stale sync runs unchanged. Published path: zero writes; emit the `seeder_lock_guard_active` `FrameworkGap` row and `Log::warning`, kept with their existing kind/shape. — implemented as `resolveBaselineRevision()` + `writesAreBlocked()` (published AND already has content — see the fresh-install annotation above, not a bare `state === 'published'` check) + `baselineHasContent()`. Every natural-key lookup (`Competency`, `Role`, `BarsIndicator` ×2 call sites) scoped to `(revision_id, code|role_id|competency_id|position)` — the landmine fix. The entire old per-row additive-lock branch structure (`if ($locked && $model->exists)`) is removed; content mutation is now a single `if (! $writesBlocked)` per write site, while `framework_gaps`/`catalog_meta` bookkeeping runs unconditionally (D2 exemption).
+- [x] 7.2 Delete `fillEmptyLocalesUnderLock()` and `recordLockedFillEmptyLocaleGap()` from `FrameworkCatalogSeeder.php` — the new rule has no partially-writable state, so they exist for nothing now. Also deleted the unused `hasLockedVersions()` method and the now-unused `use App\Models\FrameworkVersion;` import.
+- [x] 7.3 Delete `api/tests/Feature/C4/Seeder/LockedFillEmptyLocaleTest.php`. — also deleted `api/tests/Feature/Seeders/LockedRoleMetaFillTest.php` (6.2 annotation).
+- [x] 7.4 Run 6.1 GREEN; confirm idempotence and per-role seeded counts (ICO 45, FLL 54, MLL 54, BUL 42, SRX 54) are unchanged against the draft baseline. — run against the published (fresh-install) baseline instead, per the annotation above; counts verified GREEN (`tests/Feature/C4/Seeder/SeederLockGuardTest.php`'s per-role-counts and idempotence tests). `./vendor/bin/pest tests/Feature/C4/Seeder/` — 9/9 passed, 33 assertions.
 
 ### Phase 8: Gate
 
-- [ ] 8.1 Run the API Verification Commands block. Confirm `scripts/ci-guards.sh` stays green, unmodified — the seeder change is invisible to it by design.
+- [x] 8.1 Run the API Verification Commands block. Confirm `scripts/ci-guards.sh` stays green, unmodified — the seeder change is invisible to it by design. — see the apply report's Verification section for verbatim output.
 
 ---
 
