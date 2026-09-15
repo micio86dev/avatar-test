@@ -388,6 +388,36 @@ Chain strategy: feature-branch-chain
 >       scenario) asserted the OLD gap behaviour (`revision_id` stays null) and was
 >       updated to assert the closed-gap behaviour instead.
 
+> **PR 3b — hardening slice, inserted before PR 4 (RDD lineage `review-5a526c3a5a293368`,
+> four lenses, approved with 23 non-blocking advisories on PR 1–3).** The findings below are
+> correctness or safety defects in the foundation every later PR builds on, so they are fixed
+> now rather than carried:
+>
+> - [ ] H1 (R1-001, R3-007) — once a draft is open, every role/competency code exists twice
+>       (baseline + draft) and tenant-facing catalogue readers still resolve by code without a
+>       revision filter, so live interviews/scoring can read DRAFT content. Scope every reader
+>       to the project's pinned revision, or to the latest published revision where no project
+>       context exists. Never resolve a draft outside the catalogue authoring surface.
+> - [ ] H2 (R3-008) — `OpenDraftRevision` cloning is untested: prove id remapping for pivot,
+>       BARS and default-question rows against a SEEDED baseline, role-less indicators staying
+>       role-less, and `parent_revision_id`.
+> - [ ] H3 (R3-004, R4 concurrent publish) — `PublishRevision` must re-check the locked row is
+>       still `draft` after `FOR UPDATE`; a queued second publish returns a clean 409/422.
+> - [ ] H4 (R3-001, R4 open-draft race, G3.4) — `OpenDraftRevision::open()` concurrent first
+>       edit: the loser of the one-draft unique index continues the winner's draft.
+> - [ ] H5 (R3-002) — controllers reuse the draft id the FormRequest validated against.
+> - [ ] H6 (R3-003) — a DB-level cap of 3 indicators per (revision, role, competency) pair.
+> - [ ] H7 (R3-005) — the immutability trigger also refuses an UPDATE whose OLD row belongs to
+>       a published, non-baseline revision.
+> - [ ] H8 (R3-009) — the CRUD immutability test opens a draft so the draft-scoped
+>       `findOrFail` is what produces the 404.
+> - [ ] H9 (R3-010) — publish sweep checks indicators against the pivot (no indicator set for an
+>       undeclared pair; no role-less indicator for a standard competency).
+> - [ ] H10 (readability R2-001..R2-008) — stale docblocks, named constants for "3 indicators" and
+>       "5 roles", deduplicate the baseline-default mechanism and the controller draft lookup.
+> - Not in 3b: R3-006 is G3; R4-rollback-not-refixable and R4-seeder-silent-noop are accepted
+>   under beta and addressed by `catalogue:import` (PR 4, 15.5).
+
 > **REQUIRED BEFORE ARCHIVE — baseline immutability at the database layer (G3).**
 > PR 3's content-immutability trigger (`2026_09_15_201434_enforce_catalogue_published_content_immutability.php`)
 > exempts the BASELINE revision, and the literal `DEFAULT <baseline id>` on `revision_id`
