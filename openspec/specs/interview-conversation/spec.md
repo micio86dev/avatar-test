@@ -22,10 +22,10 @@ manual smoke), never in a unit test.
 ## Out of Scope
 
 - **`potential` / SA-08 flow** — deferred to a future slice. MTG/LAT competency definitions
-  and their 4 fixed questions are currently `pending_authoring` in the framework catalog
-  (open decision #6 — non-English BARS anchor authoring). C8 delivers the `standard`
-  adaptive path ONLY. No `potential`, no `framework_potential_questions` model, no
-  fixed-sequence block.
+  and their up-to-4 (platform-configured maximum, default 4) questions are currently
+  `pending_authoring` in the framework catalog (open decision #6 — non-English BARS anchor
+  authoring). C8 delivers the `standard` adaptive path ONLY. No `potential`, no
+  `framework_potential_questions` model, no fixed-sequence block.
 
 ---
 

@@ -942,23 +942,29 @@ Chain strategy: feature-branch-chain
 
 > Base: wrapper tracker branch. **Must land before PR 10** — `CLAUDE.md`
 > requires `DESIGN.md` updated before any UI code. Resolves Contradiction 7
-> (seeder ingress loss under D2) as an explicit note, not silently.
+> (seeder ingress loss under D2) as an explicit note, not silently. —
+> **corrected while implementing**: by the time this PR landed, Contradiction 7
+> was no longer open to merely note. It is the same issue as OQ-A (design.md's
+> "Contradictions surfaced" §7 says so directly: "Left as OQ-A rather than
+> invented"), and OQ-A was RESOLVED 2026-09-15 by the product owner
+> (`catalogue:import --into-draft`), delivered in PR 4 (tasks.md task 15.5,
+> already committed). See 33.8 below for the corrected note.
 
 ### Phase 33: Documentation
 
-- [ ] 33.1 Update `DESIGN.md` §8.1 sidebar diagram: add `Catalogue ·p`.
-- [ ] 33.2 Update `DESIGN.md` §8.2 Key Views table: add a Catalogue row (superadmin only, `catalogue.manage`).
-- [ ] 33.3 Add `DESIGN.md` new §8.2.10: the revision header (state, label, Publish action behind `ConfirmDialog`), the vertical section rail (Competencies · Roles · Indicators · Default questions — **not** a tab strip, per §8.2.1's ruling), and the publish confirmation flow.
-- [ ] 33.4 Add a `DESIGN.md` §8.2 sentence on the project-questions affordance: the panel stays in the project edit drawer; the drawer gains a named "Questions" section-rail entry; the projects table gains a per-row deep-link action (OQ-3 answered — no relocation).
-- [ ] 33.5 Correct `CLAUDE.md`'s binding domain constraints: "4 fixed questions" → "up to 4, default 4" for `potential`'s question count.
-- [ ] 33.6 Correct `docs/app_description/02-domain/03-assessment-types.md:23`: the identical correction — the PO confirmed `CLAUDE.md`; this is the same sentence in a second place.
-- [ ] 33.7 Correct `openspec/specs/interview-conversation/spec.md:25`: the identical correction — the third place. Fixing all three in one PR is the point: this repo has already paid for fixing one of three (`AGENTS.md` drifting from `CLAUDE.md`, an indicator-count guard disagreeing with the spec and the data) twice.
-- [ ] 33.8 Note inline in this PR's description: Contradiction 7 (the seeder loses its only ingress after the baseline is published, and D2 deletes `fillEmptyLocalesUnderLock` — the exception `bars-catalogue-completion` D5b added) is left as OQ-A, not resolved by this PR or any other in this change.
+- [x] 33.1 Update `DESIGN.md` §8.1 sidebar diagram: add `Catalogue ·p`.
+- [x] 33.2 Update `DESIGN.md` §8.2 Key Views table: add a Catalogue row (superadmin only, `catalogue.manage`).
+- [x] 33.3 Add `DESIGN.md` new §8.2.10: the revision header (state, label, Publish action behind `ConfirmDialog`), the vertical section rail (Competencies · Roles · Indicators · Default questions — **not** a tab strip, per §8.2.1's ruling), and the publish confirmation flow.
+- [x] 33.4 Add a `DESIGN.md` §8.2 sentence on the project-questions affordance: the panel stays in the project edit drawer; the drawer gains a named "Questions" section-rail entry; the projects table gains a per-row deep-link action (OQ-3 answered — no relocation).
+- [x] 33.5 Correct `CLAUDE.md`'s binding domain constraints: "4 fixed questions" → "up to 4, default 4" for `potential`'s question count. — worded as "up to 4 questions per competency — a platform-configured maximum, default 4" to match the delta spec's `PlatformSettings::maxQuestionsPerCompetency()` framing exactly; `AGENTS.md` is a symlink to `CLAUDE.md`, so no separate edit was needed or made there.
+- [x] 33.6 Correct `docs/app_description/02-domain/03-assessment-types.md:23`: the identical correction — the PO confirmed `CLAUDE.md`; this is the same sentence in a second place.
+- [x] 33.7 Correct `openspec/specs/interview-conversation/spec.md:25`: the identical correction — the third place. Fixing all three in one PR is the point: this repo has already paid for fixing one of three (`AGENTS.md` drifting from `CLAUDE.md`, an indicator-count guard disagreeing with the spec and the data) twice.
+- [x] 33.8 **Corrected, not implemented as originally worded.** This task's original wording ("left as OQ-A, not resolved by this PR or any other in this change") describes a state that no longer held by the time PR 9 was implemented: PR 4 (already committed, per tasks.md's own task 15.5 and the file's top-of-file OQ-A resolution note) delivered `catalogue:import --into-draft`, which is the resolution design.md's "Contradictions surfaced" §7 points at via OQ-A. Writing the originally-specified note here would restate a defect this same file already records as closed — the identical "two documents, one truth" drift `CLAUDE.md` warns about with the `AGENTS.md` symlink and the indicator-count guard. The corrected note, recorded here in place of the stale one: **Contradiction 7 (the seeder loses its only ingress after the baseline is published, and D2 deletes `fillEmptyLocalesUnderLock`) is RESOLVED, not left open** — JSON-authored content reaches a published catalogue via `catalogue:import --into-draft` into a new draft revision, reviewed and published through the backoffice's `PublishRevision` sweep like any other draft edit (PR 4, task 15.5).
 
 ### Phase 34: Gate
 
-- [ ] 34.1 Confirm PR 9 is merged to the wrapper's tracker branch before any PR 10 branch is created (hard ordering dependency, not advisory).
-- [ ] 34.2 Confirm `scripts/ci-guards.sh` stays green — this PR touches none of the files it governs.
+- [x] 34.1 Confirm PR 9 is merged to the wrapper's tracker branch before any PR 10 branch is created (hard ordering dependency, not advisory). — recorded here; the actual merge-before-PR-10 sequencing is enforced when PR 10's branch is created, not by this task itself.
+- [x] 34.2 Confirm `scripts/ci-guards.sh` stays green — this PR touches none of the files it governs.
 
 ---
 
