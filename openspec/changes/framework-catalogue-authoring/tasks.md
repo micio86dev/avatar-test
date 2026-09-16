@@ -649,6 +649,22 @@ Chain strategy: feature-branch-chain
 > - [ ] Z20 — bump `CONVERSATION_PROMPT_VERSION` in `api/.env.example` and the
 >       `config/conversation.php` default together (PR 7 changed the prompt template;
 >       `ConversationConfigTest` pins their parity).
+>
+> Added from the PR 1–8b api review (lineage review-bf4e5675bd476125, approved) and the
+> PR 10–10c backoffice review (lineage review-964fab3e371293be, approved). Repeats of
+> Z7/Z11/Z16/Z18/Z19 are not listed again.
+>
+> - [ ] Z21 (R2-discard-closed-claim-overstated) — `DiscardUnusedDraftRevision.php:49-52`
+>       docblock claims more than the code guarantees; make it true or make the code match.
+> - [ ] Z22 (R3-interviewability-rollout-existing-projects) — `ProjectInterviewability.php:117-127`
+>       blocks every existing project that has a selected competency with no questions the
+>       moment it deploys; ship a backfill (copy defaults) or an explicit reseed step in the
+>       release runbook, with a test that proves the backfill.
+> - [ ] Z23 (R3-turn-classifier-substring-false-primary) — `TurnClassifier.php:96-116`
+>       substring containment marks a follow-up that quotes the next primary as that primary;
+>       tighten the match (e.g. the primary must be the turn's final question) with tests.
+> - [ ] Z24 (backoffice, fixed in the PR 12 branch) — R3-default-questions-no-revision-refresh,
+>       R3-role-competencies-silent-detach, R3-indicators-create-test-unproved.
 
 > **REQUIRED BEFORE ARCHIVE — baseline immutability at the database layer (G3).**
 > PR 3's content-immutability trigger (`2026_09_15_201434_enforce_catalogue_published_content_immutability.php`)
