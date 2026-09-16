@@ -961,6 +961,31 @@ Chain strategy: feature-branch-chain
 
 ---
 
+## PR 8b — `api`: Role×Competency Pivot Authoring
+
+> `catalogue-authoring/spec.md` ("Superadmin CRUD Over Competencies, Roles, And BARS
+> Indicators") requires create/update/delete over `framework_role_competency`, but PR 3
+> shipped role CRUD with no way to change a role's competency set, so a new role can
+> never be made usable. PR 10b surfaced it. Branch `feature/catalogue-role-competencies`
+> from `feature/platform-audit`.
+
+- [ ] 32b.1 Endpoint(s) to attach, detach and reorder a role's competencies in the open
+      draft (draft opened on first write, `withRevisionLockedForWrite`, `content_version`
+      bump, `catalogue.manage`), and `CatalogueRoleResource` exposes the role's competency
+      set so the backoffice can render it.
+- [ ] 32b.2 Rules: a `potential` competency is refused (design.md row `CI_NON_ROLE_BARS_FILES`);
+      attach/detach against a published revision is refused like every other write;
+      duplicate attach is 422 not 500; composite FKs stay revision-scoped.
+- [ ] 32b.3 Detaching a competency whose pair still has indicators in the draft: refuse
+      with 422 naming them (the publish sweep would otherwise report orphans).
+- [ ] 32b.4 `PlatformAuditWriter` records attach/detach/reorder with before/after.
+- [ ] 32b.5 Give `PublishRevision::violations()` a Scramble-readable return annotation so
+      the generated client models the violations tuple (backoffice `publish-violations.ts`
+      currently hand-types it).
+- [ ] 32b.6 Pest (Postgres), PHPStan, coverage ≥ 85%, OpenAPI re-export committed.
+
+---
+
 ## PR 9 — wrapper: `DESIGN.md`, and the "4 fixed" Correction in All Three Documents
 
 > Base: wrapper tracker branch. **Must land before PR 10** — `CLAUDE.md`
@@ -1040,23 +1065,68 @@ Chain strategy: feature-branch-chain
 
 ### Phase 39b: Sections
 
-- [ ] 39b.1 `CatalogueCompetenciesPanel` — list the open/current revision's competencies
+- [x] 39b.1 `CatalogueCompetenciesPanel` — list the open/current revision's competencies
       (code, bilingual name/definition, potential flag if the contract exposes it); create,
-      edit, delete through `/catalogue/competencies`, delete behind `ConfirmDialog`.
-- [ ] 39b.2 `CatalogueRolesPanel` — list roles with their competency set; create, edit,
-      delete, and edit the role→competency assignment through `/catalogue/roles`.
-- [ ] 39b.3 `CatalogueIndicatorsPanel` — per competency, its BARS indicators with the
+      edit, delete through `/catalogue/competencies`, delete behind `ConfirmDialog`. —
+      `type` (`standard`/`potential`) is the exposed potential flag; name shown in the
+      operator's own UI locale, falling back to English.
+- [x] 39b.2 `CatalogueRolesPanel` — list roles with their competency set; create, edit,
+      delete, and edit the role→competency assignment through `/catalogue/roles`. —
+      **contract gap, not built as written**: neither `CatalogueRoleResource` nor
+      `StoreRoleRequest`/`UpdateRoleRequest` carries a competency list or a
+      `competency_ids` field at all (verified against `types/api.ts` and the api source,
+      `RoleController::store()`'s own docblock: "no ... pivot-management endpoint were
+      built" — the same PR3 scope note task 12.1 already recorded). There is nothing to
+      read or write for "competency set" / "role→competency assignment" through this
+      contract. Built code/name/responsibilities CRUD only; `RolesPanel`'s own
+      `assignmentNote` states the gap to the superadmin rather than hiding it. Session
+      instructions say STOP and report a contract gap rather than invent — this is that
+      report, not a silent narrowing.
+- [x] 39b.3 `CatalogueIndicatorsPanel` — per competency, its BARS indicators with the
       `{5, 3, 1}` anchors in both locales; create, edit, delete, reorder through
       `/catalogue/bars-indicators`. The UI never lets a published revision drop below the
-      exactly-3-indicators rule silently: surface the publish sweep's violation instead.
-- [ ] 39b.4 Replace the three placeholders in `pages/catalogue/index.vue`; the first write
+      exactly-3-indicators rule silently: surface the publish sweep's violation instead. —
+      grouped by competency then by role/competency pair; reorder is Move up/down buttons
+      (not drag), each a 3-step PATCH dance per swap (`UpdateBarsIndicatorRequest`
+      validates `position` uniqueness per-request, same collision class
+      `CatalogueDefaultQuestionsPanel`'s own reorder already works around). Delete never
+      blocked client-side even below 3 — the sweep is what refuses publish, per this
+      task's own wording.
+- [x] 39b.4 Replace the three placeholders in `pages/catalogue/index.vue`; the first write
       against a published revision opens a draft (header reflects it) exactly as the
-      default-questions panel does.
-- [ ] 39b.5 Publish refusal (422) names the violated rules — render
-      `PublishRevision::violations()`'s tuple shape instead of a generic banner.
-- [ ] 39b.6 Types only from the generated client; D4 error states on every failure path;
+      default-questions panel does. — each panel's write paths emit `refresh-revision`,
+      reloaded by the page.
+- [x] 39b.5 Publish refusal (422) names the violated rules — render
+      `PublishRevision::violations()`'s tuple shape instead of a generic banner. —
+      `extractPublishViolations()` (`app/utils/publish-violations.ts`) parses the 422 body
+      defensively (the generated `PublishRevisionViolationsResponse` type mismodels the
+      real wire shape — see that file's own docblock for the exact tuple evidence); rule
+      name translated where copy exists, `subject`/`detail` shown verbatim and monospaced
+      (server-computed diagnostic locators, not authored copy, same treatment DESIGN.md
+      already gives BARS transcript excerpts).
+- [x] 39b.6 Types only from the generated client; D4 error states on every failure path;
       it/en for every string; Vitest for each panel; typecheck, lint, test:unit,
-      codegen:check green.
+      codegen:check green. — one narrow, documented exception:
+      `PublishViolation`/`extractPublishViolations()` (39b.5's note above) is hand-typed
+      against `PublishRevision.php`'s own `@return` PHPDoc because the generated type
+      cannot express the real shape; every other request/response type in this PR10b
+      slice derives from the generated client. `bun run typecheck`/`lint`/`test:unit`/
+      `codegen:check` all green — see the apply report's Verification section for
+      verbatim output.
+
+---
+
+## PR 10c — `backoffice`: Role Competency Assignment
+
+> Depends on PR 8b. Same `feature/catalogue-authoring` branch.
+
+- [ ] 39c.1 Sync `openapi.json` + codegen from PR 8b.
+- [ ] 39c.2 `CatalogueRolesPanel` edits a role's competency set (attach, detach, reorder);
+      replace the "not supported yet" notice; detach refusal (32b.3) shows the named
+      indicators.
+- [ ] 39c.3 `publish-violations.ts` uses the generated violations type instead of its
+      hand-written one.
+- [ ] 39c.4 Vitest, typecheck, lint, codegen:check green; it/en for every string.
 
 ---
 
@@ -1069,16 +1139,16 @@ Chain strategy: feature-branch-chain
 
 ### Phase 40: RED
 
-- [ ] 40.1 RED `frontend/tests/unit/pages/interview-token.spec.ts` (extend): a `403` response carrying `redirect_url` navigates there via `useExitRedirect`'s existing `redirectTo` safety rules; a `403` with `redirect_url: null` falls through to `/interview/terminal?reason=403` (today's shipped behavior becomes the null case, not a replacement); the existing 401 spent-link branch is unaffected.
-- [ ] 40.2 RED a threat-matrix test (process integration / external routing row): a project with a `javascript:` or relative `error_redirect_url` value never reaches navigation.
+- [x] 40.1 RED `frontend/tests/unit/pages/interview-token.spec.ts` (extend): a `403` response carrying `redirect_url` navigates there via `useExitRedirect`'s existing `redirectTo` safety rules; a `403` with `redirect_url: null` falls through to `/interview/terminal?reason=403` (today's shipped behavior becomes the null case, not a replacement); the existing 401 spent-link branch is unaffected. Extended in place in the existing `frontend/tests/unit/interview-entry.spec.ts` (the real, already-existing test for this page — `tests/unit/pages/interview-token.spec.ts` does not exist in this repo).
+- [x] 40.2 RED a threat-matrix test (process integration / external routing row): a project with a `javascript:` or relative `error_redirect_url` value never reaches navigation.
 
 ### Phase 41: GREEN
 
-- [ ] 41.1 Modify `frontend/app/pages/interview/[token].vue:110-112`: the 403 branch reads `redirect_url` and routes through `useExitRedirect`'s existing safety rules. Run 40.1, 40.2 GREEN — `error_redirect_url` is already `url`-validated and length-bounded at the FormRequest layer (`Store/UpdateProjectRequest`), so 40.2 should already pass; add coverage if the existing rules do not already reject unsafe values.
+- [x] 41.1 Modify `frontend/app/pages/interview/[token].vue:110-112`: the 403 branch reads `redirect_url` and routes through `useExitRedirect`'s existing safety rules. Run 40.1, 40.2 GREEN — `error_redirect_url` is already `url`-validated and length-bounded at the FormRequest layer (`Store/UpdateProjectRequest`), so 40.2 should already pass; add coverage if the existing rules do not already reject unsafe values. Implemented via a new `app/utils/safe-redirect.ts` (`safeExternalRedirect`) applying the same https-only/well-formed rule as `useExitRedirect`'s internal `redirectTo`, rather than exporting `redirectTo` from `useExitRedirect.ts` itself — see apply-progress for why.
 
 ### Phase 42: Gate
 
-- [ ] 42.1 `bun run typecheck` clean; `bun run test:unit` green.
+- [x] 42.1 `bun run typecheck` clean; `bun run test:unit` green.
 
 ---
 
