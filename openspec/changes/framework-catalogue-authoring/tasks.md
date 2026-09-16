@@ -969,20 +969,57 @@ Chain strategy: feature-branch-chain
 > never be made usable. PR 10b surfaced it. Branch `feature/catalogue-role-competencies`
 > from `feature/platform-audit`.
 
-- [ ] 32b.1 Endpoint(s) to attach, detach and reorder a role's competencies in the open
+- [x] 32b.1 Endpoint(s) to attach, detach and reorder a role's competencies in the open
       draft (draft opened on first write, `withRevisionLockedForWrite`, `content_version`
       bump, `catalogue.manage`), and `CatalogueRoleResource` exposes the role's competency
-      set so the backoffice can render it.
-- [ ] 32b.2 Rules: a `potential` competency is refused (design.md row `CI_NON_ROLE_BARS_FILES`);
+      set so the backoffice can render it. — implemented as ONE idempotent
+      `PUT /catalogue/roles/{role}/competencies` taking the full ordered `competency_ids`
+      list (attach/detach/reorder in one `sync()` against the pivot's own `position`
+      column — the schema already supports it, per `create_role_competency_table.php`).
+      **Corrected, not literally "opened on first write"**: this action targets an
+      EXISTING role named in the URL, the exact shape `RoleController::update()`'s own
+      review-gate correction (PR3, task 12.1) already resolved — auto-opening a fresh
+      draft clone here would copy ~450 rows only to 404 immediately after, since a
+      freshly-cloned role's id can never equal the id in the URL. Uses
+      `existingOpenDraftRevisionId()` (read-only), matching `update()`/`destroy()`
+      exactly. `content_version` is bumped explicitly and ONLY when the set actually
+      changed (`sync()` writes through the pivot directly and fires no `Role`
+      `saved`/`deleted` event, so the trait's own listeners never see it) — a gga review
+      finding on the first commit attempt caught an unconditional bump letting a no-op
+      PUT stop `DiscardUnusedDraftRevision` from ever discarding a genuinely untouched
+      draft; see `BumpsRevisionContentVersion::bumpRevisionContentVersionForRevision()`.
+      `RoleController::index()` eager-loads the relation (a second gga finding: the
+      resource's per-role `competencies` read was one query per role, otherwise).
+- [x] 32b.2 Rules: a `potential` competency is refused (design.md row `CI_NON_ROLE_BARS_FILES`);
       attach/detach against a published revision is refused like every other write;
-      duplicate attach is 422 not 500; composite FKs stay revision-scoped.
-- [ ] 32b.3 Detaching a competency whose pair still has indicators in the draft: refuse
-      with 422 naming them (the publish sweep would otherwise report orphans).
-- [ ] 32b.4 `PlatformAuditWriter` records attach/detach/reorder with before/after.
-- [ ] 32b.5 Give `PublishRevision::violations()` a Scramble-readable return annotation so
+      duplicate attach is 422 not 500; composite FKs stay revision-scoped. — a third gga
+      finding on the first commit attempt: `array`/`list` are not
+      `Validator::shouldStopValidating()` rules, so a non-array `competency_ids` payload
+      (a string, `null`) reached the detach-refusal closure and crashed with an uncaught
+      `TypeError` under `declare(strict_types=1)` — a 500 for exactly the 422 this
+      FormRequest exists to produce. Fixed with an explicit `is_array()` guard; covered by
+      a dedicated test.
+- [x] 32b.3 Detaching a competency whose pair still has indicators in the draft: refuse
+      with 422 naming them (the publish sweep would otherwise report orphans). —
+      implemented as a closure rule on `competency_ids` naming the still-anchored
+      competency CODES (not raw ids) in the failure message.
+- [x] 32b.4 `PlatformAuditWriter` records attach/detach/reorder with before/after. — ONE
+      audit row per write (`catalogue.role.competencies.updated`), `before`/`after` each
+      the role's full ordered `competency_ids` list — attach, detach and reorder are the
+      same one-call diff, not three separate log lines for what the endpoint itself
+      treats as one operation. Skipped, like every other catalogue write's audit call,
+      when the submitted set exactly matches the current one (no-op PUT).
+- [x] 32b.5 Give `PublishRevision::violations()` a Scramble-readable return annotation so
       the generated client models the violations tuple (backoffice `publish-violations.ts`
-      currently hand-types it).
-- [ ] 32b.6 Pest (Postgres), PHPStan, coverage ≥ 85%, OpenAPI re-export committed.
+      currently hand-types it). — `@scramble-return list<array{rule: string, subject:
+      string, detail: string}>` added to BOTH `violations()` and `publish()`: Scramble was
+      tracing straight into `violations()`'s own body (nine `[...$violations, ...
+      $this->someCheck(...)]` concatenations) and modelling it as a nine-slot POSITIONAL
+      TUPLE rather than a flat homogeneous list — confirmed by inspecting the committed
+      `openapi.json` before the fix (a `prefixItems` array of length 9 for the 422 body)
+      and after (a plain `array<{rule,subject,detail}>`).
+- [x] 32b.6 Pest (Postgres), PHPStan, coverage ≥ 85%, OpenAPI re-export committed. — see
+      apply report's Verification section for verbatim output.
 
 ---
 
@@ -1120,13 +1157,26 @@ Chain strategy: feature-branch-chain
 
 > Depends on PR 8b. Same `feature/catalogue-authoring` branch.
 
-- [ ] 39c.1 Sync `openapi.json` + codegen from PR 8b.
-- [ ] 39c.2 `CatalogueRolesPanel` edits a role's competency set (attach, detach, reorder);
+- [x] 39c.1 Sync `openapi.json` + codegen from PR 8b. — pulled from `api`'s
+      `feature/catalogue-role-competencies` (commit 8d80ebf); `codegen:check` green
+      against the live `../api` checkout.
+- [x] 39c.2 `CatalogueRolesPanel` edits a role's competency set (attach, detach, reorder);
       replace the "not supported yet" notice; detach refusal (32b.3) shows the named
-      indicators.
-- [ ] 39c.3 `publish-violations.ts` uses the generated violations type instead of its
-      hand-written one.
-- [ ] 39c.4 Vitest, typecheck, lint, codegen:check green; it/en for every string.
+      indicators. — new `RoleCompetenciesForm.vue` (a second `FormDrawer` per row,
+      `useCatalogue().updateRoleCompetencies`), one idempotent PUT per save; the save
+      is confirmed only when it would detach an already-assigned competency (adding/
+      reordering never destroys anything already in the draft); the 422 detach refusal
+      is rendered verbatim via `translateServerCode`'s raw-value fallback, same
+      "server-computed diagnostic" treatment DESIGN.md gives publish violations.
+- [x] 39c.3 `publish-violations.ts` uses the generated violations type instead of its
+      hand-written one. — the api's OpenAPI model for the publish 422 body was fixed to
+      the real flat `array<{rule, subject, detail}>` shape by 39c.1's sync, so
+      `PublishViolation` is now `PublishRevisionViolationsResponse['violations'][number]`;
+      the 39b.5 hand-written exception is gone.
+- [x] 39c.4 Vitest, typecheck, lint, codegen:check green; it/en for every string. — 160
+      test files / 2226 tests, `bun run typecheck`/`lint`/`codegen:check` all green; every
+      new `catalogue.roles.competencies.*`/`catalogue.serverError.*` key present in both
+      `en.json`/`it.json` (verified programmatically, not just by inspection).
 
 ---
 
