@@ -626,6 +626,29 @@ Chain strategy: feature-branch-chain
 >       stale comments in `InterviewController` (competency resolution), the drop-defaults migration
 >       (pivot `withPivotValue` now exists), `CompetencyResult::indicatorScores()` (serializer ordering
 >       removed), and `DemoSeedCommand`'s "here" vs "there" warning.
+>
+> Added from the PR 1–8 checkpoint review (lineage review-49d7160e052754b0, approved,
+> advisories only). R3-ordered-relation-aggregate (`CompetencyResult.php:118`) is Z11.
+>
+> - [ ] Z14 (R4-sso-gate-burns-link) — `SsoExchangeController.php:171-173` consumes the SSO
+>       link before the `ProjectInterviewability` 403, so a candidate whose project is later
+>       completed can no longer use the link; gate before consuming, with a test.
+> - [ ] Z15 (R4-turn-kind-check-lock) — the `turn_kind` CHECK in
+>       `2026_09_16_110000_add_turn_kind_to_utterances.php:33-36` validates under an ACCESS
+>       EXCLUSIVE lock; add it `NOT VALID` and `VALIDATE CONSTRAINT` separately.
+> - [ ] Z16 (R4-utterance-lock-latency) — `UtteranceController.php:114-125` holds the session
+>       `FOR UPDATE` across classify-then-insert; keep the critical section minimal and bound
+>       it (lock timeout) so a slow write never stalls the live turn loop.
+> - [ ] Z17 (R3-publish-audit-vacuous) — `PlatformAuditWriterTest.php:204-218` does not
+>       prove the `revision.published` row; assert actor, subject and payload. Also
+>       strengthen the dashboard-feed assertion at `:242-261` (R3-dashboard-feed-weak).
+> - [ ] Z18 (R2-001) — readability at `M2m/SsoLinkController.php:27`.
+> - [ ] Z19 (suggestions, optional) — R1-001 nullable-org migration `down()` with platform
+>       rows present; R3 `TurnClassifier.php:128` byte-wise rtrim on multibyte text; R4
+>       `CatalogueImportCommand.php:68-74` TOCTOU; R2-002..R2-005.
+> - [ ] Z20 — bump `CONVERSATION_PROMPT_VERSION` in `api/.env.example` and the
+>       `config/conversation.php` default together (PR 7 changed the prompt template;
+>       `ConversationConfigTest` pins their parity).
 
 > **REQUIRED BEFORE ARCHIVE — baseline immutability at the database layer (G3).**
 > PR 3's content-immutability trigger (`2026_09_15_201434_enforce_catalogue_published_content_immutability.php`)
