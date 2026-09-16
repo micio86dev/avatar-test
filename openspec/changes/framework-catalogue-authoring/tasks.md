@@ -572,6 +572,35 @@ Chain strategy: feature-branch-chain
 > - Not in 3b: R3-006 is G3; R4-rollback-not-refixable and R4-seeder-silent-noop are accepted
 >   under beta and addressed by `catalogue:import` (PR 4, 15.5).
 
+> **REQUIRED BEFORE ARCHIVE — consolidated hardening from the PR 1–4b checkpoint review (RDD
+> lineage `review-4d693d11ef9ebd6d`, four lenses, approved with 11 advisories).** Recorded here
+> rather than as another inter-PR slice: every checkpoint review runs over the whole cumulative
+> diff and will keep surfacing findings, so these are closed together with G3 in one final
+> hardening pass before archive.
+>
+> - [ ] Z1 (R3-export-position-loss) — `catalogue:export` reindexes indicators with
+>       `array_values`, discarding stored positions; a CRUD-authored set at 1,2,3 exports as 0,1,2 and
+>       an export→import round-trip does not preserve positions. Export the stored position.
+> - [ ] Z2 (R3-responsibilities-missing-en) — `StoreRoleRequest` accepts `responsibilities` with
+>       an `it` value and no `en` key; the locale-map invariant requires `en` whenever the map is
+>       present.
+> - [ ] Z3 (R1-001) — `ValidatesLocaleMaps` validates the parent map only as `array`, so keys beyond
+>       `en`/`it` and non-string values are stored. Restrict the map to known locales and strings.
+> - [ ] Z4 (R3-validate-then-lock-500) — FormRequest checks (4th-indicator count, position and code
+>       uniqueness) run before `withRevisionLockedForWrite` takes the lock and are not re-checked
+>       under it; two concurrent stores both pass and the loser 500s on the DB constraint. Re-check
+>       under the lock, or map the constraint violation to 422.
+> - [ ] Z5 (R4-import-bypasses-revision-lock) — `catalogue:import` is the one content writer that
+>       does not take the revision-row lock, so a concurrent discard can race it. Route it through
+>       the same lock.
+> - [ ] Z6 (R2-publish-violations-spread-contract) — `PublishRevision::violations()` spreads nine
+>       helper results and Scramble documents the 422 `violations` as a fixed nine-element tuple.
+>       Give it a `list<…>` return shape so the published OpenAPI contract is a list.
+> - [ ] Z7 (readability) — `NO_PUBLISHED_REVISION = -1` declared twice (loader, FrameworkController);
+>       stale comments in `InterviewController` (competency resolution), the drop-defaults migration
+>       (pivot `withPivotValue` now exists), `CompetencyResult::indicatorScores()` (serializer ordering
+>       removed), and `DemoSeedCommand`'s "here" vs "there" warning.
+
 > **REQUIRED BEFORE ARCHIVE — baseline immutability at the database layer (G3).**
 > PR 3's content-immutability trigger (`2026_09_15_201434_enforce_catalogue_published_content_immutability.php`)
 > exempts the BASELINE revision, and the literal `DEFAULT <baseline id>` on `revision_id`
