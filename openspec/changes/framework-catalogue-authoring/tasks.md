@@ -607,6 +607,21 @@ Chain strategy: feature-branch-chain
 >       under way, each competency start gates only itself. The alternative re-checked the whole
 >       project on every transition and stranded candidates mid-interview. Record this in the
 >       `project-config` delta spec as a scenario so the spec states what the code does.
+> - [ ] Z10 (PR 1–6 checkpoint, R3-mint-refuses-midinterview-candidate) — the three mint/enrol
+>       ingresses refuse a non-interviewable project unconditionally, while the SSO exchange and
+>       `/start` exempt a candidate who already has an `InterviewSession` (Z9). A mid-interview
+>       candidate whose token expired therefore cannot be issued a new link. Apply the same
+>       exemption at mint for a participant who already has a session.
+> - [ ] Z11 (R3-indicator-scores-default-order-aggregate) — the default `orderBy` on
+>       `CompetencyResult::indicatorScores()` makes a direct aggregate on the relation fail on
+>       Postgres ("must appear in GROUP BY"). Move the ordering to the read sites or use
+>       `reorder()` in aggregate paths, with a test.
+> - [ ] Z12 (R3-draft-orphan-on-post-validation-failure) — a freshly cloned draft is discarded only
+>       from `failedValidation()`; a write that fails AFTER validation (409 or any exception)
+>       leaves the clone holding the single draft slot.
+> - [ ] Z13 (R2-misleading-exception-name) — `RevisionPublishedDuringWriteException` /
+>       `revision_published_during_write` is also thrown when a concurrent discard deleted the
+>       draft; name the exception and code for both causes.
 > - [ ] Z7 (readability) — `NO_PUBLISHED_REVISION = -1` declared twice (loader, FrameworkController);
 >       stale comments in `InterviewController` (competency resolution), the drop-defaults migration
 >       (pivot `withPivotValue` now exists), `CompetencyResult::indicatorScores()` (serializer ordering
