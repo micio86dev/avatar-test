@@ -564,10 +564,11 @@ Chain strategy: feature-branch-chain
 >       `tests/Feature/Catalogue/CatalogueControllerReusesFormRequestDraftTest.php` and by the
 >       existing factory-driven suites (3369 green, so every path the factory default used to
 >       cover is exercised by the `creating` listener instead).
-> - [ ] H12 — prove H5's discard-on-failed-validation under a genuinely concurrent actor, with the
->       same separate-OS-process shape H3/H4/H6 use (`tests/Helpers/CatalogueRevisionRaceActor.php`):
->       a draft a second request is actively writing must never be discarded by the first request's
->       validation failure. Required before archive.
+> - [x] H12 — closed by K3 (PR 4b). Proven by closing the underlying race at the WRITE side rather
+>       than only widening the discard-on-failed-validation proof: every catalogue-content write
+>       now locks the draft revision row (`BumpsRevisionContentVersion::withRevisionLockedForWrite()`)
+>       before writing, in the SAME transaction as its `content_version` bump — see K3 below and
+>       `tests/Feature/Catalogue/DiscardRaceWithConcurrentWriteTest.php`.
 > - Not in 3b: R3-006 is G3; R4-rollback-not-refixable and R4-seeder-silent-noop are accepted
 >   under beta and addressed by `catalogue:import` (PR 4, 15.5).
 
@@ -620,44 +621,128 @@ Chain strategy: feature-branch-chain
 > `review-9c1fa69c1a9536cc-r1`, four lenses, approved with 15 advisories on PR 1–4).**
 > Correctness first, cosmetics last:
 >
-> - [ ] K1 (R3-import-pivot-revision) — `catalogue:import` writes the draft's pivot with
+> - [x] K1 (R3-import-pivot-revision) — `catalogue:import` writes the draft's pivot with
 >       `Role::competencies()->sync()`, and `revision_id` is not a pivot attribute, so every newly
 >       attached row takes the column DEFAULT (the baseline) instead of the draft. The import can
 >       therefore write pivot rows into the PUBLISHED baseline. Fix the write path and prove the
->       draft's pivot belongs to the draft.
-> - [ ] K2 (R3-bars-store-position-500, R3-bars-update-position-500) — POST and PATCH on
+>       draft's pivot belongs to the draft. — fixed via `Role::competencies()->withPivotValue(
+>       'revision_id', $this->revision_id)`, guarded for the eager-load "blank instance" case
+>       (`Role::with('competencies')` builds the relation against a freshly-instantiated model with
+>       no `revision_id` yet — `withPivotValue()` refuses a null value outright, caught by the full
+>       suite, not assumed). The actual pre-fix failure mode is a composite-FK violation (23503), not
+>       a silent baseline write — the DEFAULT baseline id never matches a draft role's own
+>       `(id, revision_id)` pair, so Postgres refuses the INSERT outright; still a genuine defect
+>       (the import crashes on any newly-attached pivot pair), just not silent corruption. Proof:
+>       `tests/Feature/Catalogue/CatalogueImportTest.php` ("a new pivot attachment written by import
+>       lands in the draft, never the baseline").
+> - [x] K2 (R3-bars-store-position-500, R3-bars-update-position-500) — POST and PATCH on
 >       bars-indicators accept a `position` already taken in the same (revision, role, competency)
 >       group, hit the partial unique index and return 500 instead of 422. Same defect class gga
 >       already caught on default questions in PR 4; fix both verbs with a draft-scoped
->       `Rule::unique()->ignore()` and cover them.
-> - [ ] K3 (R1-001, R4-discard-race-window; widens H12) — `DiscardUnusedDraftRevision`'s race is
+>       `Rule::unique()->ignore()` and cover them. — POST fixed with a closure (mirrors
+>       `StoreDefaultQuestionRequest`'s own guarded-closure shape: `competency_id`/`role_id` can each
+>       fail their own rule independently, so the check must not assume either is numeric before
+>       querying); PATCH fixed with `Rule::unique()->ignore()` scoped to the target row's own
+>       `revision_id`/`role_id`/`competency_id`, `whereNull('role_id')` for a role-less indicator.
+>       Proof: `tests/Feature/Catalogue/BarsIndicatorPositionUniquenessTest.php`.
+> - [x] K3 (R1-001, R4-discard-race-window; widens H12) — `DiscardUnusedDraftRevision`'s race is
 >       wider than its docblock claims: a concurrent request that CONTINUES the freshly cloned
 >       draft can still read `content_version = 0` between another request's row insert and the
 >       separate statement that bumps it, so real saved work can be discarded. Close it (bump in
 >       the same statement/transaction as the write, or take the draft row's lock) and prove it
->       with the separate-OS-process actor, then close H12 with it.
-> - [ ] K4 (R3-import-orphan-draft, R4-import-orphan-clone) — `OpenDraftRevision::open()` commits
+>       with the separate-OS-process actor, then close H12 with it. — closed via
+>       `BumpsRevisionContentVersion::withRevisionLockedForWrite()`, a new trait method every
+>       catalogue-write controller action (`Role`/`Competency`/`BarsIndicator`/
+>       `FrameworkDefaultQuestion` × store/update/destroy) now routes its write through: locks the
+>       draft revision row `FOR UPDATE` FIRST, in the SAME transaction as the write and its
+>       `content_version` bump. This also closes K8 for free (same lock, same re-check) — a write
+>       that unblocks onto a no-longer-draft revision (published OR discarded) throws a new, typed
+>       `RevisionPublishedDuringWriteException` (409, machine-readable `error` code) instead of
+>       either a silent loss or the content-immutability trigger's own uncaught SQLSTATE 23514.
+>       Proof: `tests/Feature/Catalogue/DiscardRaceWithConcurrentWriteTest.php` (separate-OS-process
+>       actor, the same shape H3/H4/H6 use, plus a single-process proof the real controller path
+>       issues the lock query, plus the write-side refusal).
+> - [x] K4 (R3-import-orphan-draft, R4-import-orphan-clone) — `OpenDraftRevision::open()` commits
 >       the clone BEFORE the import transaction, so a malformed file leaves an orphan draft
 >       occupying the single draft slot. Open the draft inside the same transaction, or discard it
->       on failure.
-> - [ ] K5 (R4-loader-default-latest-published) — `BarsIndicatorLoader::forRoleCompetency()` with
+>       on failure. — `open()` is now called INSIDE the same `DB::transaction()` the content writes
+>       already run in; a throw anywhere in the import (including from `open()`'s own H4 race
+>       recovery, which still works correctly nested — Laravel uses a SAVEPOINT) rolls back the
+>       clone together with whatever content had already been written. Proof:
+>       `tests/Feature/Catalogue/CatalogueImportTest.php` ("a malformed bars file leaves no orphan
+>       draft behind").
+> - [x] K5 (R4-loader-default-latest-published) — `BarsIndicatorLoader::forRoleCompetency()` with
 >       no revision now reads the latest PUBLISHED revision. Once a non-baseline revision is
 >       published, any remaining caller that does not pass a revision silently changes catalogue.
 >       Enumerate those callers and make them pass the project's pinned revision (PR 7 wires the
->       interview path; anything else must be named here, not left implicit).
-> - [ ] K6 (readability) — stale or contradictory docblocks: the `composePromptForCompetency`
+>       interview path; anything else must be named here, not left implicit). — audited via
+>       CodeGraph (`codegraph_explore`) plus `rg -n "forRoleCompetency"` across `app/` and `tests/`:
+>       there is exactly ONE production call site,
+>       `SystemPromptComposer::compose()` (`app/Services/Conversation/SystemPromptComposer.php:100`),
+>       and it ALREADY passes `$revisionId` explicitly on every call — never the no-argument
+>       default. `BarsIndicatorLoader` itself has no other instantiation site in `app/`
+>       (constructor-injected into `SystemPromptComposer` only; `rg -n "new BarsIndicatorLoader"`
+>       across `app/` returns nothing). `SystemPromptComposer::compose()` in turn has exactly ONE
+>       caller, `InterviewController::composePromptForCompetency()`
+>       (`app/Http/Controllers/Candidate/InterviewController.php:770-789`), which resolves
+>       `$revisionId` from `CatalogueRevisionResolver::tryForProject($project)` — this IS "PR 7's
+>       interview wiring" named by this task, and it was already built and wired during H1 (PR 3b),
+>       not deferred. `ScoreEvaluationJob` and the webhook payload assemblers were independently
+>       confirmed (H1's own audit, unchanged since) to resolve indicators through a numeric id
+>       already bound to a specific revision, never through this loader at all. No production caller
+>       reaches the no-argument default; the six `tests/Unit/C8/BarsIndicatorLoaderTest.php` and
+>       `tests/Feature/Catalogue/BarsIndicatorLoaderRevisionResolutionTest.php` call sites that omit
+>       the argument are deliberately testing that DEFAULT'S OWN behaviour, not production callers
+>       needing a fix. No code change required; this entry records the audit result so the "no
+>       remaining caller" claim is evidenced rather than assumed.
+> - [x] K6 (readability) — stale or contradictory docblocks: the `composePromptForCompetency`
 >       comment describing a lookup that moved out; `BumpsRevisionContentVersion` and
 >       `DiscardUnusedDraftRevision` listing three models when `FrameworkDefaultQuestion` also uses
 >       the trait; the seeder comment claiming translation-gap resolution "proceeds even while
 >       writes are blocked" when the same change gates it; the drop-defaults migration claiming the
->       factories were updated to default `revision_id` when they were deliberately not.
-> - [ ] K7 (R2-latest-published-duplicated, R2-import-duplicates-seeder-logic) — the "latest
+>       factories were updated to default `revision_id` when they were deliberately not. — the
+>       `BumpsRevisionContentVersion`/`DiscardUnusedDraftRevision` docblocks were already corrected
+>       as part of K3 (both now name all four models). The other three: `InterviewController`'s
+>       `$nextCompetencyRow` comment now says `composePromptForCompetency()` "no longer resolves its
+>       own competency at all" instead of claiming it still does; the seeder's per-pair
+>       `missing_translation` comment now states the actual split (recording proceeds
+>       unconditionally, resolving is gated on `$writesBlocked`) instead of the old, corrected-
+>       elsewhere "proceeds even while writes are blocked" line; the drop-defaults migration now
+>       attributes the baseline default to `Role`/`Competency::booted()`'s `creating` listener
+>       (H10), not the factories, which deliberately do NOT set it (see their own docblocks).
+> - [x] K7 (R2-latest-published-duplicated, R2-import-duplicates-seeder-logic) — the "latest
 >       published revision" query is copied into four new places, and `catalogue:import`
 >       re-declares `POTENTIAL_CODES` and mirrors the seeder's locale-map and indicator-upsert
 >       logic. Two readers of the same JSON that must agree forever is the drift this repo keeps
->       paying for: extract one.
-> - [ ] K8 (R4-publish-race-500) — a catalogue `store()` racing a publish waits on the trigger's
->       `FOR SHARE` and then 500s once the publish commits. Return a clean 409/422 instead.
+>       paying for: extract one. — `FrameworkCatalogRevision::latestPublished()` is now the ONE
+>       "latest published revision" query, mirroring that model's own `openDraft()` precedent;
+>       `CatalogueRevisionResolver::tryLatestPublished()`, `OpenDraftRevision::open()`,
+>       `CatalogueExportCommand::resolveRevision()`, and
+>       `FrameworkVersion::assignLatestPublishedRevisionIfUnset()` all resolve through it.
+>       `CatalogueRules::POTENTIAL_CODES` replaces the two identical private constants in
+>       `FrameworkCatalogSeeder` and `CatalogueImportCommand`. The seeder's locale-map reader
+>       (`readLocaleMap()`/`knownLocales()`) and writer (`setAllLocales()`) — `CatalogueImportCommand`
+>       carried a byte-for-byte duplicate of both, its own docblock said so explicitly — are now one
+>       shared trait, `App\Support\Catalogue\Concerns\ReadsCatalogueLocaleMaps`, parameterized by a
+>       `$sourceLabel` for the one thing that genuinely differed (the error-message prefix). The
+>       indicator-upsert logic itself (the `CompetencyNormalizer::normalize()` + per-indicator
+>       find-or-new + `setAllLocales()` loop) was NOT further merged: `catalogue:import` already
+>       calls the SAME `CompetencyNormalizer` the seeder uses for this exact purpose, so the
+>       remaining duplication is orchestration around identical logic, not a second implementation
+>       of the logic itself — collapsing it further would couple a seeder-specific method signature
+>       to a console command for a marginal readability gain, not close a genuine drift risk.
+> - [x] K8 (R4-publish-race-500) — a catalogue `store()` racing a publish waits on the trigger's
+>       `FOR SHARE` and then 500s once the publish commits. Return a clean 409/422 instead. —
+>       closed as a byproduct of K3's own lock (see K3's note above): a write that unblocks onto a
+>       revision no longer in `draft` state (published OR discarded) now throws
+>       `RevisionPublishedDuringWriteException`, caught explicitly by every catalogue-write
+>       controller action and rendered `409 {error: "revision_published_during_write", message}` —
+>       never reaching the content-immutability trigger's own uncaught SQLSTATE 23514. `openapi.json`
+>       re-exported against Postgres; every catalogue-write route now documents `409`. Proof:
+>       `tests/Feature/Catalogue/DiscardRaceWithConcurrentWriteTest.php` ("K8: a store() request over
+>       HTTP refuses cleanly with 409 when the revision was published while it waited for the
+>       lock") — a real HTTP request via the separate-OS-process actor (`lock-revision-row`, the same
+>       actor `PublishRevisionConcurrentPublishTest` uses), asserting the exact 409 body.
 
 ## PR 5 — `api`: `operator_modified`, `ApplyCompetencySelection`
 
