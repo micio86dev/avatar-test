@@ -598,23 +598,66 @@ Chain strategy: feature-branch-chain
 
 ### Phase 14: RED
 
-- [ ] 14.1 RED `api/tests/Feature/Catalogue/DefaultQuestionCrudTest.php`: a default authored with `en`+`it` text and a position persists and is orderable among that competency's other defaults, scoped to the open draft; a default missing a required locale is rejected (422).
-- [ ] 14.2 RED `api/tests/Feature/Catalogue/CatalogueExportTest.php`: `Storage::fake()` proves the export command makes zero filesystem writes; it writes only to STDOUT; a published revision's exported JSON round-trips its role×competency×indicator content byte-for-byte.
+- [x] 14.1 RED `api/tests/Feature/Catalogue/DefaultQuestionCrudTest.php`: a default authored with `en`+`it` text and a position persists and is orderable among that competency's other defaults, scoped to the open draft; a default missing a required locale is rejected (422).
+- [x] 14.2 RED `api/tests/Feature/Catalogue/CatalogueExportTest.php`: `Storage::fake()` proves the export command makes zero filesystem writes; it writes only to STDOUT; a published revision's exported JSON round-trips its role×competency×indicator content byte-for-byte.
 
 ### Phase 15: GREEN
 
-- [ ] 15.1 Create `api/app/Http/Requests/Catalogue/{Store,Update}DefaultQuestionRequest.php`: `{en,it}` both required.
-- [ ] 15.2 Create `api/app/Http/Controllers/Api/Catalogue/DefaultQuestionController.php`: superadmin-only 403 per action, scoped to the open draft revision.
-- [ ] 15.3 Create `api/app/Console/Commands/CatalogueExportCommand.php`: `php artisan catalogue:export {revision?}` — writes the split-file JSON shape to STDOUT, takes no path argument at all (no `--dir`, no `--write` mode). Run 14.1, 14.2 GREEN.
-- [ ] 15.5 Create `api/app/Console/Commands/CatalogueImportCommand.php`: `php artisan catalogue:import --into-draft` — reads the vendored split-file JSON trees (the same shape `catalogue:export` writes), opens or continues the ONE draft revision via `OpenDraftRevision`, and writes the JSON's content into that draft only. It NEVER writes a published revision (the immutability trigger and `writesAreBlocked()` must both stay untouched) and NEVER publishes: publishing stays a separate, reviewable act through `PublishRevision` and its sweep. Round-trip test: export a revision, import it into a draft, and the draft's content equals the source revision's. Refuses cleanly when a draft already holds unrelated edits unless told to continue it. This is the ingress for ruling 6's expert-authored translations now that a published baseline takes no seeder writes.
-- [ ] 15.4 Append default-question routes to `api/routes/api.php`; run `DB_CONNECTION=pgsql php artisan scramble:export` + `task openapi:sync` + `bun run codegen:check` in all three repos.
+- [x] 15.1 Create `api/app/Http/Requests/Catalogue/{Store,Update}DefaultQuestionRequest.php`: `{en,it}` both required.
+- [x] 15.2 Create `api/app/Http/Controllers/Api/Catalogue/DefaultQuestionController.php`: superadmin-only 403 per action, scoped to the open draft revision.
+- [x] 15.3 Create `api/app/Console/Commands/CatalogueExportCommand.php`: `php artisan catalogue:export {revision?}` — writes the split-file JSON shape to STDOUT, takes no path argument at all (no `--dir`, no `--write` mode). Run 14.1, 14.2 GREEN. — implemented as one merged JSON envelope (`roles`/`competencies`/`bars`) since a single STDOUT stream cannot carry the multi-file tree directly; `catalogue:import` (15.5) and the round-trip test split it back into the exact file shape.
+- [x] 15.5 Create `api/app/Console/Commands/CatalogueImportCommand.php`: `php artisan catalogue:import --into-draft` — reads the vendored split-file JSON trees (the same shape `catalogue:export` writes), opens or continues the ONE draft revision via `OpenDraftRevision`, and writes the JSON's content into that draft only. It NEVER writes a published revision (the immutability trigger and `writesAreBlocked()` must both stay untouched) and NEVER publishes: publishing stays a separate, reviewable act through `PublishRevision` and its sweep. Round-trip test: export a revision, import it into a draft, and the draft's content equals the source revision's. Refuses cleanly when a draft already holds unrelated edits unless told to continue it. This is the ingress for ruling 6's expert-authored translations now that a published baseline takes no seeder writes. — added a `--path=` testing-only override (default `config('framework_catalog.catalog_path') ?: database_path('framework')`, the same resolution `FrameworkCatalogSeeder` uses) and a `--continue` flag for the dirty-draft refusal; the refusal signal reuses `content_version !== 0`, the same "genuinely untouched" test `DiscardUnusedDraftRevision` already uses. Also added `BumpsRevisionContentVersion` to `FrameworkDefaultQuestion` (a gap the PR3b machinery left open — a draft touched ONLY by a default-question write stayed at `content_version = 0` and looked discardable).
+- [x] 15.4 Append default-question routes to `api/routes/api.php`; run `DB_CONNECTION=pgsql php artisan scramble:export` + `task openapi:sync` + `bun run codegen:check` in all three repos. — `scramble:export` run against Postgres and `openapi.json` committed; per this session's explicit instructions, `task openapi:sync`/`bun run codegen:check` into `frontend`/`backoffice` deliberately NOT run this session (same deferral PR3's 12.6 already recorded) — follow-up work before archive.
 
 ### Phase 16: Gate
 
-- [ ] 16.1 RED then GREEN a threat-matrix test (Git repo selection / push state row, "Applicable — answered by removal"): assert the export command's filesystem-write assertion proves no repository tree is reachable at all.
-- [ ] 16.2 Run the API Verification Commands block; confirm published-revision immutability holds for default questions the same as for anchors (OQ-2 answered: they freeze with the revision).
+- [x] 16.1 RED then GREEN a threat-matrix test (Git repo selection / push state row, "Applicable — answered by removal"): assert the export command's filesystem-write assertion proves no repository tree is reachable at all. — covered by `CatalogueExportTest.php`'s `Storage::fake()` test, the exact RED test this Threat Matrix row names; no separate file needed.
+- [x] 16.2 Run the API Verification Commands block; confirm published-revision immutability holds for default questions the same as for anchors (OQ-2 answered: they freeze with the revision). — `DefaultQuestionCrudTest.php`'s own immutability test proves the CRUD-surface 404 and the DB trigger refusal, mirroring `PublishedRevisionImmutabilityTest.php`.
 
 ---
+
+> **PR 4b — hardening slice, inserted before PR 5 (RDD lineage
+> `review-9c1fa69c1a9536cc-r1`, four lenses, approved with 15 advisories on PR 1–4).**
+> Correctness first, cosmetics last:
+>
+> - [ ] K1 (R3-import-pivot-revision) — `catalogue:import` writes the draft's pivot with
+>       `Role::competencies()->sync()`, and `revision_id` is not a pivot attribute, so every newly
+>       attached row takes the column DEFAULT (the baseline) instead of the draft. The import can
+>       therefore write pivot rows into the PUBLISHED baseline. Fix the write path and prove the
+>       draft's pivot belongs to the draft.
+> - [ ] K2 (R3-bars-store-position-500, R3-bars-update-position-500) — POST and PATCH on
+>       bars-indicators accept a `position` already taken in the same (revision, role, competency)
+>       group, hit the partial unique index and return 500 instead of 422. Same defect class gga
+>       already caught on default questions in PR 4; fix both verbs with a draft-scoped
+>       `Rule::unique()->ignore()` and cover them.
+> - [ ] K3 (R1-001, R4-discard-race-window; widens H12) — `DiscardUnusedDraftRevision`'s race is
+>       wider than its docblock claims: a concurrent request that CONTINUES the freshly cloned
+>       draft can still read `content_version = 0` between another request's row insert and the
+>       separate statement that bumps it, so real saved work can be discarded. Close it (bump in
+>       the same statement/transaction as the write, or take the draft row's lock) and prove it
+>       with the separate-OS-process actor, then close H12 with it.
+> - [ ] K4 (R3-import-orphan-draft, R4-import-orphan-clone) — `OpenDraftRevision::open()` commits
+>       the clone BEFORE the import transaction, so a malformed file leaves an orphan draft
+>       occupying the single draft slot. Open the draft inside the same transaction, or discard it
+>       on failure.
+> - [ ] K5 (R4-loader-default-latest-published) — `BarsIndicatorLoader::forRoleCompetency()` with
+>       no revision now reads the latest PUBLISHED revision. Once a non-baseline revision is
+>       published, any remaining caller that does not pass a revision silently changes catalogue.
+>       Enumerate those callers and make them pass the project's pinned revision (PR 7 wires the
+>       interview path; anything else must be named here, not left implicit).
+> - [ ] K6 (readability) — stale or contradictory docblocks: the `composePromptForCompetency`
+>       comment describing a lookup that moved out; `BumpsRevisionContentVersion` and
+>       `DiscardUnusedDraftRevision` listing three models when `FrameworkDefaultQuestion` also uses
+>       the trait; the seeder comment claiming translation-gap resolution "proceeds even while
+>       writes are blocked" when the same change gates it; the drop-defaults migration claiming the
+>       factories were updated to default `revision_id` when they were deliberately not.
+> - [ ] K7 (R2-latest-published-duplicated, R2-import-duplicates-seeder-logic) — the "latest
+>       published revision" query is copied into four new places, and `catalogue:import`
+>       re-declares `POTENTIAL_CODES` and mirrors the seeder's locale-map and indicator-upsert
+>       logic. Two readers of the same JSON that must agree forever is the drift this repo keeps
+>       paying for: extract one.
+> - [ ] K8 (R4-publish-race-500) — a catalogue `store()` racing a publish waits on the trigger's
+>       `FOR SHARE` and then 500s once the publish commits. Return a clean 409/422 instead.
 
 ## PR 5 — `api`: `operator_modified`, `ApplyCompetencySelection`
 
