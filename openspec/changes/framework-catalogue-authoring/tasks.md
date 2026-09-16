@@ -393,10 +393,7 @@ Chain strategy: feature-branch-chain
 > correctness or safety defects in the foundation every later PR builds on, so they are fixed
 > now rather than carried:
 >
-> - [ ] H1 (R1-001, R3-007) — IMPLEMENTED, TESTED, STAGED — NOT COMMITTED (see final note
->       below; blocked by the `gga` pre-commit gate exhausting its 3-round retry budget for
->       this session, not by any remaining code defect). Original scope: once a draft is open,
->       every role/competency code exists twice
+> - [x] H1 (R1-001, R3-007) — committed at `24df083`. once a draft is open, every role/competency code exists twice
 >       (baseline + draft) and tenant-facing catalogue readers still resolve by code without a
 >       revision filter, so live interviews/scoring can read DRAFT content. Scope every reader
 >       to the project's pinned revision, or to the latest published revision where no project
@@ -508,29 +505,69 @@ Chain strategy: feature-branch-chain
 >       `git commit` directly — `gga run` may pass on a fresh invocation, or the remaining
 >       friction may be intrinsic to the review tool's own budget/timeout behavior rather than
 >       the code.
-> - [ ] H2 (R3-008) — `OpenDraftRevision` cloning is untested: prove id remapping for pivot,
+> - [x] H2 (R3-008) — `OpenDraftRevision` cloning is untested: prove id remapping for pivot,
 >       BARS and default-question rows against a SEEDED baseline, role-less indicators staying
->       role-less, and `parent_revision_id`.
-> - [ ] H3 (R3-004, R4 concurrent publish) — `PublishRevision` must re-check the locked row is
->       still `draft` after `FOR UPDATE`; a queued second publish returns a clean 409/422.
-> - [ ] H4 (R3-001, R4 open-draft race, G3.4) — `OpenDraftRevision::open()` concurrent first
->       edit: the loser of the one-draft unique index continues the winner's draft.
-> - [ ] H5 (R3-002) — controllers reuse the draft id the FormRequest validated against.
-> - [ ] H6 (R3-003) — a DB-level cap of 3 indicators per (revision, role, competency) pair.
-> - [ ] H7 (R3-005) — the immutability trigger also refuses an UPDATE whose OLD row belongs to
->       a published, non-baseline revision.
-> - [ ] H8 (R3-009) — the CRUD immutability test opens a draft so the draft-scoped
->       `findOrFail` is what produces the 404.
-> - [ ] H9 (R3-010) — publish sweep checks indicators against the pivot (no indicator set for an
->       undeclared pair; no role-less indicator for a standard competency).
-> - [ ] H11 (gga on H1) — dead code and an unreachable branch: unused `use App\Jobs\FinalizeInterview;`
+>       role-less, and `parent_revision_id`. — `tests/Feature/Catalogue/OpenDraftRevisionCloningTest.php`.
+> - [x] H3 (R3-004, R4 concurrent publish) — `PublishRevision` must re-check the locked row is
+>       still `draft` after `FOR UPDATE`; a queued second publish returns a clean 422 (rule
+>       `revision_already_published`). Proven with a genuinely separate OS process holding the
+>       `FOR UPDATE` lock open — `tests/Feature/Catalogue/PublishRevisionConcurrentPublishTest.php`.
+> - [x] H4 (R3-001, R4 open-draft race, G3.4) — `OpenDraftRevision::open()` concurrent first
+>       edit: the loser of the one-draft unique index continues the winner's draft. Proven with a
+>       genuinely separate OS process via `tests/Helpers/CatalogueRevisionRaceActor.php` —
+>       `tests/Feature/Catalogue/OpenDraftRevisionConcurrencyTest.php`.
+> - [x] H5 (R3-002) — controllers reuse the draft id the FormRequest validated against, via the
+>       now-public `ResolvesOpenDraftRevision::openDraftRevisionId()`. A failed-validation
+>       request that CREATED the draft now discards it via the new `DiscardUnusedDraftRevision`
+>       (a `content_version` counter, bumped by `BumpsRevisionContentVersion` on every real
+>       Eloquent write, distinguishes a genuinely untouched clone from one a concurrent request
+>       is already using) — `tests/Feature/Catalogue/CatalogueControllerReusesFormRequestDraftTest.php`.
+>       **Evidence gap, deliberate and open (H12):** that discard heuristic is the same shape of
+>       race H3, H4 and H6 each close with a separate-OS-process proof, and it is backed here by an
+>       ordinary feature test only. Until H12 lands, treat "a concurrent request's draft is never
+>       discarded" as argued, not proven.
+> - [x] H6 (R3-003) — a DB-level cap of 3 indicators per (revision, role, competency) pair, and
+>       per (revision, competency) for role-less potential indicators. A first version used a
+>       bare `SELECT count(*)`, insufficient under concurrent writers (READ COMMITTED cannot see
+>       a concurrent uncommitted insert); `pg_advisory_xact_lock()` keyed by the exact group
+>       closes it, proven with a genuinely separate OS process —
+>       `tests/Feature/Catalogue/BarsIndicatorPairCapTest.php`,
+>       `tests/Feature/Catalogue/BarsIndicatorPairCapConcurrencyTest.php`.
+> - [x] H7 (R3-005) — the immutability trigger also refuses an UPDATE whose OLD row belongs to
+>       a published, non-baseline revision — `tests/Feature/Catalogue/PublishedContentCannotBeMovedOutTest.php`.
+> - [x] H8 (R3-009) — the CRUD immutability test opens a draft so the draft-scoped
+>       `findOrFail` is what produces the 404 — `tests/Feature/Catalogue/PublishedRevisionImmutabilityTest.php`.
+> - [x] H9 (R3-010) — publish sweep checks indicators against the pivot (no indicator set for an
+>       undeclared pair; no role-less indicator for a standard competency), and a role count
+>       check (a gap `CatalogueRules::MAX_ROLES`'s own docblock exposed) —
+>       `tests/Feature/Catalogue/PublishSweepUndeclaredPairTest.php`,
+>       `tests/Feature/Catalogue/PublishSweepRoleCountTest.php`.
+> - [x] H11 (gga on H1) — dead code and an unreachable branch: unused `use App\Jobs\FinalizeInterview;`
 >       in `InterviewController` and `use App\Models\Role;` in `StoreProjectRequest` (Pint's
 >       `no_unused_imports` misses both because the short names appear in docblock prose);
 >       `composePromptForCompetency(?Project $project, …)`'s null branch is unreachable from its
 >       only call site; `indicatorCatalogue()` computes `$roleCode` two lines before returning
->       `[]` on that same path. Also hoist the duplicate `authoredQuestionsFor()` call in `/start`.
-> - [ ] H10 (readability R2-001..R2-008) — stale docblocks, named constants for "3 indicators" and
->       "5 roles", deduplicate the baseline-default mechanism and the controller draft lookup.
+>       `[]` on that same path. Also hoisted the duplicated lookups in `/start` (opening greeting,
+>       `composePromptForCompetency()`'s own competency resolution, and the authored-questions
+>       lookup all resolved the identical row independently) into the one `$nextCompetencyRow`
+>       lookup, passed through rather than re-queried. **Criterion widened during delivery:** the
+>       original ask was hoisting ONE duplicated `authoredQuestionsFor()` call; three lookups were
+>       collapsed instead. Recorded so the record shows what was asked and what was delivered.
+> - [x] H10 (readability R2-001..R2-008) — stale docblocks (seeder step-5 comment and
+>       `resolveOrRecordTranslationGap()`, the "5 migrations" wording in both migration tests, the
+>       immutability migration's "CI note below" reference), `App\Support\Catalogue\CatalogueRules`
+>       for "3 indicators" and "5 roles", deduplicated the baseline-default mechanism (kept
+>       `Role`/`Competency::booted()`'s `creating` listener, removed the factories' own duplicate
+>       default) and the controller/FormRequest draft lookup (`FrameworkCatalogRevision::openDraft()`).
+>       Two of those are behaviour-touching, not cosmetic: the removed factory default and the
+>       shared draft lookup are covered by
+>       `tests/Feature/Catalogue/CatalogueControllerReusesFormRequestDraftTest.php` and by the
+>       existing factory-driven suites (3369 green, so every path the factory default used to
+>       cover is exercised by the `creating` listener instead).
+> - [ ] H12 — prove H5's discard-on-failed-validation under a genuinely concurrent actor, with the
+>       same separate-OS-process shape H3/H4/H6 use (`tests/Helpers/CatalogueRevisionRaceActor.php`):
+>       a draft a second request is actively writing must never be discarded by the first request's
+>       validation failure. Required before archive.
 > - Not in 3b: R3-006 is G3; R4-rollback-not-refixable and R4-seeder-silent-noop are accepted
 >   under beta and addressed by `catalogue:import` (PR 4, 15.5).
 
