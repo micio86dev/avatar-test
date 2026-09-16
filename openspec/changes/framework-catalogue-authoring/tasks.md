@@ -1000,32 +1000,63 @@ Chain strategy: feature-branch-chain
 
 ### Phase 35: Foundation
 
-- [ ] 35.1 Run `task openapi:sync` (Postgres, against the merged PR 1–8 `api` state) to pull the merged `openapi.json` into `backoffice/openapi.json`; `bun run codegen`; confirm `bun run codegen:check` green.
+- [x] 35.1 Run `task openapi:sync` (Postgres, against the merged PR 1–8 `api` state) to pull the merged `openapi.json` into `backoffice/openapi.json`; `bun run codegen`; confirm `bun run codegen:check` green. — done directly against `api`'s `feature/platform-audit` branch (aca1b16, the PR 1–8 state as instructed for this session) rather than the wrapper `task openapi:sync` target, per this session's explicit setup instructions; `bun run codegen:check` confirmed green.
 
 ### Phase 36: RED — extraction
 
-- [ ] 36.1 RED `backoffice/app/components/organisms/QuestionListEditor.spec.ts`: competency-grouped list, dual-locale `{en,it}` fields, drag reorder, cap display — the extracted presentational core.
-- [ ] 36.2 Confirm `backoffice/app/components/organisms/ProjectQuestionsPanel.spec.ts` (existing suite) is run as-is first, to establish the pre-refactor baseline before extraction begins.
+- [x] 36.1 RED `backoffice/app/components/organisms/QuestionListEditor.spec.ts`: competency-grouped list, dual-locale `{en,it}` fields, drag reorder, cap display — the extracted presentational core. — confirmed RED (component did not exist) before 37.1.
+- [x] 36.2 Confirm `backoffice/app/components/organisms/ProjectQuestionsPanel.spec.ts` (existing suite) is run as-is first, to establish the pre-refactor baseline before extraction begins. — 19/19 green pre-refactor.
 
 ### Phase 37: GREEN — extraction
 
-- [ ] 37.1 Create `backoffice/app/components/organisms/QuestionListEditor.vue`: extracted from `ProjectQuestionsPanel.vue`'s presentational core (competency-grouped list, dual-locale fields, drag reorder, cap display). Run 36.1 GREEN.
-- [ ] 37.2 Modify `backoffice/app/components/organisms/ProjectQuestionsPanel.vue`: becomes a thin container over `QuestionListEditor`. Run 36.2 (the pre-existing suite) GREEN against the refactor, unchanged.
+- [x] 37.1 Create `backoffice/app/components/organisms/QuestionListEditor.vue`: extracted from `ProjectQuestionsPanel.vue`'s presentational core (competency-grouped list, dual-locale fields, drag reorder, cap display). Run 36.1 GREEN. — also widened `QuestionList.vue`'s prop type from `ProjectQuestion` to the new shared `QuestionListEntry` (not separately itemized above) so it stays reusable by `CatalogueDefaultQuestionsPanel` in Phase 38.
+- [x] 37.2 Modify `backoffice/app/components/organisms/ProjectQuestionsPanel.vue`: becomes a thin container over `QuestionListEditor`. Run 36.2 (the pre-existing suite) GREEN against the refactor, unchanged. — 19/19 unchanged, plus new coverage for remove/reorder-failure/edit-submit paths the extraction exposed as untested. `gga` review (1st pass) found the submit/reorder/remove failure paths collapsed 403/404/409/network into one generic message; corrected to route through the shared `resolveResourceErrorState`/`resourceErrorKey` D4 mapper (same as `load()`), 2nd pass approved.
 
 ### Phase 38: RED + GREEN — the catalogue page
 
-- [ ] 38.1 RED `backoffice/app/components/organisms/CatalogueDefaultQuestionsPanel.spec.ts`: a thin container over `QuestionListEditor`, revision-scoped (no "copy from revision X" affordance — OQ-B not built).
-- [ ] 38.2 Create `backoffice/app/components/organisms/CatalogueDefaultQuestionsPanel.vue`. Run 38.1 GREEN.
-- [ ] 38.3 RED `backoffice/app/pages/catalogue/index.spec.ts`: revision header (state, label, Publish behind `ConfirmDialog`); vertical section rail (Competencies · Roles · Indicators · Default questions), never a tab strip.
-- [ ] 38.4 Create `backoffice/app/pages/catalogue/index.vue`, following `pages/avatar-templates/index.vue`'s shape. Run 38.3 GREEN.
-- [ ] 38.5 RED nav/guard test: the Catalogue nav entry is present only for `catalogue.manage`; direct navigation to `/catalogue` is blocked for a non-superadmin, and the nav entry was never shown to them.
-- [ ] 38.6 Modify `backoffice/app/components/organisms/SidebarNav.vue`: add `{ to: '/catalogue', labelKey: 'nav.catalogue', requires: 'catalogue.manage', scope: 'platform' }`.
-- [ ] 38.7 Modify `backoffice/app/middleware/03.abilities.global.ts`: add `catalogue: 'catalogue.manage'` (keyed by first path segment — covers `/catalogue`, `/en/catalogue`, and future children). Run 38.5 GREEN.
+- [x] 38.1 RED `backoffice/app/components/organisms/CatalogueDefaultQuestionsPanel.spec.ts`: a thin container over `QuestionListEditor`, revision-scoped (no "copy from revision X" affordance — OQ-B not built). — placed under `backoffice/tests/unit/components/organisms/` per this repo's Vitest `include` glob (`tests/unit/**/*.spec.ts`), same convention as `ProjectQuestionsPanel.spec.ts`; a literal `app/`-colocated spec would never run.
+- [x] 38.2 Create `backoffice/app/components/organisms/CatalogueDefaultQuestionsPanel.vue`. Run 38.1 GREEN. — also created `backoffice/app/composables/useCatalogue.ts` and `useCatalogueDefaultQuestions.ts` (not separately itemized above, required for this container and for the page's revision header/publish action) and extracted `backoffice/app/utils/action-error-message.ts` from `ProjectQuestionsPanel.vue`'s own D4 mapping (also not separately itemized — a small DRY refactor to avoid a second copy of the same 403/404/409 distinction this container also needs). Two real API divergences from `ProjectQuestionsPanel`, both driven by the generated client: `POST /catalogue/default-questions` requires `position` (computed client-side, the server assigns none); there is no bulk reorder endpoint for catalogue defaults (PR3's own scope note), so reorder is N individual `PATCH` calls, and on any failure this reloads from the server rather than trusting a local rollback (a partial batch can leave the server ahead of a blind revert).
+- [x] 38.3 RED `backoffice/app/pages/catalogue/index.spec.ts`: revision header (state, label, Publish behind `ConfirmDialog`); vertical section rail (Competencies · Roles · Indicators · Default questions), never a tab strip. — placed at `backoffice/tests/unit/pages/catalogue/index.spec.ts`, same Vitest-include reasoning as 38.1.
+- [x] 38.4 Create `backoffice/app/pages/catalogue/index.vue`, following `pages/avatar-templates/index.vue`'s shape. Run 38.3 GREEN. — **DESIGN.md ambiguity resolved, noted per this session's instructions**: "following avatar-templates/index.vue's shape" (page scaffolding: custom h1+intro header, no `PageHeader`, `definePageMeta`/`useHead` noindex, `onMounted` load) is read as page-level convention, not a literal second instance of that page's own list layout — the BODY follows §8.2.1's vertical-rail ruling instead, via the same reka-ui `Tabs`/`orientation="vertical"` primitive `/settings/index.vue` already uses, which §8.2.10 explicitly cross-references. **Competencies/Roles/Indicators sections render an honest "not available yet" placeholder, not a read or write surface** — flagged as a real DESIGN.md-vs-design.md/tasks.md gap, not silently resolved: DESIGN.md's descriptive text calls these three "list" shapes, but neither design.md's File Changes table nor this file's own Phase 35–39 breakdown names a single file for a competency/role/indicator list or CRUD component, only `CatalogueDefaultQuestionsPanel`. Building three unrequested read surfaces (own composables, own components, own i18n) was judged the wrong side of that ambiguity to guess on for an already `400-line budget risk: High` PR; the honest placeholder keeps the rail's four-section shape §8.2.10 requires without inventing scope no task names.
+- [x] 38.5 RED nav/guard test: the Catalogue nav entry is present only for `catalogue.manage`; direct navigation to `/catalogue` is blocked for a non-superadmin, and the nav entry was never shown to them.
+- [x] 38.6 Modify `backoffice/app/components/organisms/SidebarNav.vue`: add `{ to: '/catalogue', labelKey: 'nav.catalogue', requires: 'catalogue.manage', scope: 'platform' }`.
+- [x] 38.7 Modify `backoffice/app/middleware/03.abilities.global.ts`: add `catalogue: 'catalogue.manage'` (keyed by first path segment — covers `/catalogue`, `/en/catalogue`, and future children). Run 38.5 GREEN.
 
 ### Phase 39: Gate
 
-- [ ] 39.1 Modify `backoffice/i18n/locales/{en,it}.json`: every new string, both locales — no hardcoded copy.
-- [ ] 39.2 `bun run typecheck` clean; `bun run test:unit` green; `bun run codegen:check` green in all three repos.
+- [x] 39.1 Modify `backoffice/i18n/locales/{en,it}.json`: every new string, both locales — no hardcoded copy. — `nav.catalogue` plus a new top-level `catalogue` namespace (`sections`, `revision`, `defaultQuestions`); the shared `QuestionListEditor`'s own copy continues to read the existing `projectQuestions.*` keys (unchanged, intentional — the words are project-agnostic, see the component's own docblock).
+- [x] 39.2 `bun run typecheck` clean; `bun run test:unit` green; `bun run codegen:check` green in all three repos. — `typecheck`/`test:unit` (151 files, 2130 tests)/`lint`/`codegen:check` all green in `backoffice`; `frontend` and `api` untouched this session (out of PR10's own scope) so their own `codegen:check` was not re-run here — see the apply report.
+
+---
+
+## PR 10b — `backoffice`: Competency, Role and BARS Indicator Authoring Sections
+
+> The original request was superadmin CRUD for competencies, roles, BARS indicators AND
+> default questions. The API side shipped in PR 3 (`/catalogue/competencies`, `/roles`,
+> `/bars-indicators`, `/revisions/current`, `/revisions/publish`), but Phases 35–39 named
+> only `CatalogueDefaultQuestionsPanel`, so PR 10 rendered the other three rail sections as
+> placeholders. This PR closes that planning gap on the same `feature/catalogue-authoring`
+> branch. DESIGN.md §8.2.10 already describes the three sections as list shapes.
+
+### Phase 39b: Sections
+
+- [ ] 39b.1 `CatalogueCompetenciesPanel` — list the open/current revision's competencies
+      (code, bilingual name/definition, potential flag if the contract exposes it); create,
+      edit, delete through `/catalogue/competencies`, delete behind `ConfirmDialog`.
+- [ ] 39b.2 `CatalogueRolesPanel` — list roles with their competency set; create, edit,
+      delete, and edit the role→competency assignment through `/catalogue/roles`.
+- [ ] 39b.3 `CatalogueIndicatorsPanel` — per competency, its BARS indicators with the
+      `{5, 3, 1}` anchors in both locales; create, edit, delete, reorder through
+      `/catalogue/bars-indicators`. The UI never lets a published revision drop below the
+      exactly-3-indicators rule silently: surface the publish sweep's violation instead.
+- [ ] 39b.4 Replace the three placeholders in `pages/catalogue/index.vue`; the first write
+      against a published revision opens a draft (header reflects it) exactly as the
+      default-questions panel does.
+- [ ] 39b.5 Publish refusal (422) names the violated rules — render
+      `PublishRevision::violations()`'s tuple shape instead of a generic banner.
+- [ ] 39b.6 Types only from the generated client; D4 error states on every failure path;
+      it/en for every string; Vitest for each panel; typecheck, lint, test:unit,
+      codegen:check green.
 
 ---
 
