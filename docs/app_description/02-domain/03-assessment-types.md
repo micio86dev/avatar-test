@@ -20,7 +20,7 @@ The platform supports two interview modes with distinct competency rules and que
 | Aspect | Behaviour |
 |---------|---------------|
 | Competencies | Only **MTG** (Managing) and/or **LAT** (Leadership Attributes) |
-| Questions | **4 predefined questions** per competency, followed by AI follow-ups |
+| Questions | **Up to 4 predefined questions** per competency (platform-configured maximum, default 4), followed by AI follow-ups |
 | Flow | A more rigid structure than the standard type |
 | Typical target | High-potential identification |
 
