@@ -578,50 +578,115 @@ Chain strategy: feature-branch-chain
 > diff and will keep surfacing findings, so these are closed together with G3 in one final
 > hardening pass before archive.
 >
-> - [ ] Z1 (R3-export-position-loss) — `catalogue:export` reindexes indicators with
+> - [x] Z1 (R3-export-position-loss) — `catalogue:export` reindexes indicators with
 >       `array_values`, discarding stored positions; a CRUD-authored set at 1,2,3 exports as 0,1,2 and
->       an export→import round-trip does not preserve positions. Export the stored position.
-> - [ ] Z2 (R3-responsibilities-missing-en) — `StoreRoleRequest` accepts `responsibilities` with
+>       an export→import round-trip does not preserve positions. Export the stored position. —
+>       fixed: `CatalogueExportCommand::indicatorsByCompetencyCode()` now emits each entry's stored
+>       `position`; `CompetencyNormalizer::normalizeBars()` reads it back, falling back to array
+>       order only when absent (the vendored trees). `api/tests/Feature/Catalogue/CatalogueExportTest.php`
+>       (2 new tests), commit `4709a01`.
+> - [x] Z2 (R3-responsibilities-missing-en) — `StoreRoleRequest` accepts `responsibilities` with
 >       an `it` value and no `en` key; the locale-map invariant requires `en` whenever the map is
->       present.
-> - [ ] Z3 (R1-001) — `ValidatesLocaleMaps` validates the parent map only as `array`, so keys beyond
->       `en`/`it` and non-string values are stored. Restrict the map to known locales and strings.
-> - [ ] Z4 (R3-validate-then-lock-500) — FormRequest checks (4th-indicator count, position and code
+>       present. — fixed in the shared `ValidatesLocaleMaps::localeMapRules()` trait (`required_with:{field}`
+>       instead of a bare `sometimes` on `.en` when the map itself is optional) — also closes the
+>       identical gap on every OTHER FormRequest using `required: false`
+>       (`Update{Role,Competency,BarsIndicator}Request`), not only `StoreRoleRequest`.
+>       `api/tests/Feature/Catalogue/CatalogueFormRequestTwinTest.php` (2 new tests), commit `4709a01`.
+> - [x] Z3 (R1-001) — `ValidatesLocaleMaps` validates the parent map only as `array`, so keys beyond
+>       `en`/`it` and non-string values are stored. Restrict the map to known locales and strings. —
+>       fixed: the parent field rule now refuses any key outside the declared `$locales` allowlist.
+>       `api/tests/Feature/Catalogue/CatalogueFormRequestTwinTest.php` (1 new test), commit `4709a01`.
+> - [x] Z4 (R3-validate-then-lock-500) — FormRequest checks (4th-indicator count, position and code
 >       uniqueness) run before `withRevisionLockedForWrite` takes the lock and are not re-checked
 >       under it; two concurrent stores both pass and the loser 500s on the DB constraint. Re-check
->       under the lock, or map the constraint violation to 422.
-> - [ ] Z5 (R4-import-bypasses-revision-lock) — `catalogue:import` is the one content writer that
+>       under the lock, or map the constraint violation to 422. — fixed via the "map to 422" option:
+>       new `App\Support\Catalogue\CatalogueConstraintViolation` maps a recognized DB constraint/trigger
+>       violation to the same stable error code the FormRequest layer already uses; wired into
+>       `Role`/`Competency`/`BarsIndicator`/`DefaultQuestion` controllers' `store()`/`update()`.
+>       Unit coverage plus a genuine 2-OS-process HTTP race proof for the pair-cap case
+>       (`api/tests/Feature/Catalogue/BarsIndicatorPairCapConcurrentHttpTest.php`), commit `07391c3`.
+> - [x] Z5 (R4-import-bypasses-revision-lock) — `catalogue:import` is the one content writer that
 >       does not take the revision-row lock, so a concurrent discard can race it. Route it through
->       the same lock.
-> - [ ] Z6 (R2-publish-violations-spread-contract) — `PublishRevision::violations()` spreads nine
+>       the same lock. — fixed: the whole content-writing phase now runs inside
+>       `Competency::withRevisionLockedForWrite($draft->id, ...)` (a nested transaction/savepoint),
+>       failing closed with `RevisionPublishedDuringWriteException` if the lock unblocks onto a
+>       revision no longer draft. Proven with a genuine 2-OS-process race
+>       (`api/tests/Feature/Catalogue/CatalogueImportRevisionLockTest.php`), commit `07391c3`.
+> - [x] Z6 (R2-publish-violations-spread-contract) — `PublishRevision::violations()` spreads nine
 >       helper results and Scramble documents the 422 `violations` as a fixed nine-element tuple.
->       Give it a `list<…>` return shape so the published OpenAPI contract is a list.
-> - [ ] Z8 (PR 5 disclosed residual, decided by the orchestrator under the product owner's
+>       Give it a `list<…>` return shape so the published OpenAPI contract is a list. — VERIFIED
+>       ALREADY FIXED (PR8b, 32b.5): both `violations()` and `publish()` already carry an explicit
+>       `@scramble-return list<array{rule:string, subject:string, detail:string}>`
+>       (`api/app/Actions/Catalogue/PublishRevision.php:39-41,63-79`), and the committed
+>       `api/openapi.json`'s `/catalogue/revisions/publish` 422 schema is `type: array, items: {...}`
+>       — no `prefixItems` anywhere in the file. No code change needed.
+> - [x] Z8 (PR 5 disclosed residual, decided by the orchestrator under the product owner's
 >       "the operator's work is sacred" principle) — `ApplyCompetencySelection::restore()` resurrects
 >       EVERY trashed row on reselection, including questions the operator deleted on purpose,
 >       because nothing records why a row was soft-deleted. Deleting is operator work exactly like
 >       writing. Record the cause (e.g. `deleted_by_deselection`) and restore only rows removed by a
->       deselection; an individually deleted question stays deleted.
-> - [ ] Z9 (PR 6 interpretation, decided) — the whole-project interviewability gate applies only
+>       deselection; an individually deleted question stays deleted. — fixed: new
+>       `project_questions.deleted_by_deselection` column, stamped by `softDeleteLive()`'s own bulk
+>       soft-delete and CLEARED by `restore()` on the row it brings back (a gga review finding on the
+>       first cut: leaving it `true` reopened the bug on a restore→individual-delete→reselect second
+>       cycle). `api/tests/Feature/Project/ApplyCompetencySelectionTest.php` (2 new tests, one
+>       specifically for the second-cycle case, confirmed genuinely RED against the unfixed code),
+>       commit `74c71e8`.
+> - [x] Z9 (PR 6 interpretation, decided) — the whole-project interviewability gate applies only
 >       at a TRUE first start (no `InterviewSession` anywhere on the project); once an interview is
 >       under way, each competency start gates only itself. The alternative re-checked the whole
 >       project on every transition and stranded candidates mid-interview. Record this in the
->       `project-config` delta spec as a scenario so the spec states what the code does.
-> - [ ] Z10 (PR 1–6 checkpoint, R3-mint-refuses-midinterview-candidate) — the three mint/enrol
+>       `project-config` delta spec as a scenario so the spec states what the code does. — VERIFIED
+>       ALREADY IMPLEMENTED in code (`api/app/Http/Controllers/Candidate/InterviewController.php:163-198`,
+>       the exact "TWO different gates, deliberately" comment). Added the scenario this task asks for
+>       to `openspec/changes/framework-catalogue-authoring/specs/project-config/spec.md` ("Once a
+>       participant has any session on the project, a later competency's own emptying gates only
+>       itself") — a wrapper-repo edit, not committed from the api session per this session's scope.
+> - [x] Z10 (PR 1–6 checkpoint, R3-mint-refuses-midinterview-candidate) — the three mint/enrol
 >       ingresses refuse a non-interviewable project unconditionally, while the SSO exchange and
 >       `/start` exempt a candidate who already has an `InterviewSession` (Z9). A mid-interview
 >       candidate whose token expired therefore cannot be issued a new link. Apply the same
->       exemption at mint for a participant who already has a session.
-> - [ ] Z11 (R3-indicator-scores-default-order-aggregate) — the default `orderBy` on
+>       exemption at mint for a participant who already has a session. — fixed: new
+>       `ProjectInterviewability::evaluateForCandidate()`, wired into `EntryLinkController`,
+>       `M2m\SsoLinkController`, `M2m\ParticipantController`. gga review finding, blocking (1st
+>       pass): the lookup queried `Participant` (plain `Model`, no tenant global scope) by
+>       `project_id` alone — added an explicit `organization_id` filter, with a regression test
+>       proving a participant row that disagrees on `organization_id` is ignored.
+>       `api/tests/Feature/Interview/InterviewabilityIngressRefusalTest.php` (4 new tests, one
+>       confirmed genuinely RED against the pre-fix query), commit `963d8ba`.
+> - [x] Z11 (R3-indicator-scores-default-order-aggregate) — the default `orderBy` on
 >       `CompetencyResult::indicatorScores()` makes a direct aggregate on the relation fail on
 >       Postgres ("must appear in GROUP BY"). Move the ordering to the read sites or use
->       `reorder()` in aggregate paths, with a test.
-> - [ ] Z12 (R3-draft-orphan-on-post-validation-failure) — a freshly cloned draft is discarded only
+>       `reorder()` in aggregate paths, with a test. — investigated: a bare `avg()`/`sum()`/`count()`
+>       on the relation, and Eloquent's `withAvg()`/`withCount()`, do NOT reproduce this in the
+>       installed Laravel 13.20 (both `Builder::setAggregate()` and `QueriesRelationships::
+>       withAggregate()` already strip `orders` themselves). The real trap is a HAND-WRITTEN
+>       `groupBy()` + `selectRaw('avg(...)')` query built directly on the relation, which neither
+>       helper protects — reproduced and fixed with `reorder()`. No current call site hits this (the
+>       scoring mean is computed in PHP, not via DB aggregate); added a docblock warning on
+>       `indicatorScores()` plus a test proving both the failure and the fix, for the first future
+>       caller. `api/tests/Feature/Scoring/CompetencyResultIndicatorScoresAggregateTest.php`, commit
+>       `7b39415`.
+> - [x] Z12 (R3-draft-orphan-on-post-validation-failure) — a freshly cloned draft is discarded only
 >       from `failedValidation()`; a write that fails AFTER validation (409 or any exception)
->       leaves the clone holding the single draft slot.
-> - [ ] Z13 (R2-misleading-exception-name) — `RevisionPublishedDuringWriteException` /
+>       leaves the clone holding the single draft slot. — fixed: `ResolvesOpenDraftRevision::
+>       openedNewDraftThisRequest()` made public; each of the 4 catalogue controllers'
+>       `store()` gained a `finally` block calling the already-self-guarding
+>       `DiscardUnusedDraftRevision::discard()` unconditionally when this request opened a fresh
+>       draft — safe on every exit path (success no-ops via `content_version`). Proven via a
+>       deterministic reproduction (real `FormRequest::validateResolved()` genuinely clones the
+>       draft, then a raw-SQL insert simulates a concurrent writer's already-committed collision,
+>       then the real controller method runs) — confirmed genuinely RED without the fix.
+>       `api/tests/Feature/Catalogue/CatalogueDraftDiscardOnPostValidationFailureTest.php`, commit
+>       `70b0cd1`.
+> - [x] Z13 (R2-misleading-exception-name) — `RevisionPublishedDuringWriteException` /
 >       `revision_published_during_write` is also thrown when a concurrent discard deleted the
->       draft; name the exception and code for both causes.
+>       draft; name the exception and code for both causes. — fixed: new `RevisionWriteConflictCause`
+>       enum (`Published`/`Discarded`), set at the `withRevisionLockedForWrite()` throw site;
+>       `errorCode()` returns `revision_published_during_write` or `revision_discarded_during_write`
+>       accordingly. Class name kept (renaming touches every catalogue controller catch + the
+>       exported OpenAPI 409 shape for no behavioral gain). `api/tests/Unit/Models/Concerns/
+>       BumpsRevisionContentVersionCauseTest.php`, commit `2e363b5`.
 > - [ ] Z7 (readability) — `NO_PUBLISHED_REVISION = -1` declared twice (loader, FrameworkController);
 >       stale comments in `InterviewController` (competency resolution), the drop-defaults migration
 >       (pivot `withPivotValue` now exists), `CompetencyResult::indicatorScores()` (serializer ordering
@@ -630,41 +695,144 @@ Chain strategy: feature-branch-chain
 > Added from the PR 1–8 checkpoint review (lineage review-49d7160e052754b0, approved,
 > advisories only). R3-ordered-relation-aggregate (`CompetencyResult.php:118`) is Z11.
 >
-> - [ ] Z14 (R4-sso-gate-burns-link) — `SsoExchangeController.php:171-173` consumes the SSO
+> - [x] Z14 (R4-sso-gate-burns-link) — `SsoExchangeController.php:171-173` consumes the SSO
 >       link before the `ProjectInterviewability` 403, so a candidate whose project is later
->       completed can no longer use the link; gate before consuming, with a test.
-> - [ ] Z15 (R4-turn-kind-check-lock) — the `turn_kind` CHECK in
+>       completed can no longer use the link; gate before consuming, with a test. — fixed:
+>       reordered so project resolution + interviewability (with its existing InterviewSession
+>       exemption) run BEFORE jti consumption; every other gate (entry gates, role_code,
+>       participant status) still burns the jti on failure, unchanged, per the class's own "by
+>       design" doctrine for those. Proven end to end (refused once, fixed, SAME token succeeds)
+>       and confirmed genuinely RED against the pre-fix ordering.
+>       `api/tests/Feature/C6/SsoExchange403Test.php`, commit `2e6862f`.
+> - [x] Z15 (R4-turn-kind-check-lock) — the `turn_kind` CHECK in
 >       `2026_09_16_110000_add_turn_kind_to_utterances.php:33-36` validates under an ACCESS
->       EXCLUSIVE lock; add it `NOT VALID` and `VALIDATE CONSTRAINT` separately.
-> - [ ] Z16 (R4-utterance-lock-latency) — `UtteranceController.php:114-125` holds the session
+>       EXCLUSIVE lock; add it `NOT VALID` and `VALIDATE CONSTRAINT` separately. — fixed:
+>       `NOT VALID`/`VALIDATE CONSTRAINT` split PLUS `public $withinTransaction = false` — a gga
+>       review finding, blocking: Laravel's default single-transaction wrapping holds the SAME
+>       lock through both statements regardless of the split, making it a no-op without this (this
+>       repo's own `add_provider_session_ref_to_utterances` migration already names the trap).
+>       `api/tests/Feature/Migration/UtteranceTurnKindCheckTest.php` (structural guard on
+>       `withinTransaction`, confirmed genuinely RED without it, plus constraint-enforcement and
+>       `convalidated` tests), commit `99d7a61`.
+> - [x] Z16 (R4-utterance-lock-latency) — `UtteranceController.php:114-125` holds the session
 >       `FOR UPDATE` across classify-then-insert; keep the critical section minimal and bound
->       it (lock timeout) so a slow write never stalls the live turn loop.
-> - [ ] Z17 (R3-publish-audit-vacuous) — `PlatformAuditWriterTest.php:204-218` does not
+>       it (lock timeout) so a slow write never stalls the live turn loop. — fixed: `SET LOCAL
+>       lock_timeout` (2000ms, under the product's own voice-latency NFR) inside the transaction;
+>       critical section unchanged (already minimal — lock, one COUNT query, one INSERT); the
+>       resulting `55P03` maps to a distinct, retriable 503 `utterance_lock_timeout` instead of
+>       the generic 500. Proven with a genuinely separate Postgres session (a second raw PDO
+>       connection, no separate OS process needed since the block happens server-side) holding
+>       the row lock while the real HTTP request blocks on it; asserted the response times out
+>       within a bounded window (confirmed via a mutation test that a wrong timeout value fails
+>       the same assertion). `api/tests/Feature/C7a/UtteranceLockTimeoutTest.php`, commit
+>       `7ccb974`.
+> - [x] Z17 (R3-publish-audit-vacuous) — `PlatformAuditWriterTest.php:204-218` does not
 >       prove the `revision.published` row; assert actor, subject and payload. Also
->       strengthen the dashboard-feed assertion at `:242-261` (R3-dashboard-feed-weak).
-> - [ ] Z18 (R2-001) — readability at `M2m/SsoLinkController.php:27`.
+>       strengthen the dashboard-feed assertion at `:242-261` (R3-dashboard-feed-weak). — fixed:
+>       the publish test's `if ($response->status() === 200)` wrapper removed (PAWPUB1 is a
+>       harmless unassigned competency none of `PublishRevision::violations()`'s checks examine,
+>       so publish is always achievable) and now asserts the actual `after` payload
+>       (`revision_id`/`label`/`published_at`), not just row existence. The dashboard-feed test now
+>       asserts the feed's actual content (exactly the tenant's own participant) instead of a bare
+>       200. Discovered and fixed a genuine test-infrastructure trap along the way: authenticating
+>       two identities in one test needs BOTH `app('tymon.jwt')->unsetToken()` AND
+>       `app('auth')->forgetGuards()` between logins, confirmed via an isolated minimal
+>       reproduction, or every later request keeps resolving the FIRST identity regardless of its
+>       own Bearer token — the original vacuous test never surfaced this because it never checked
+>       WHICH identity answered. commit `0e4e437`.
+> - [x] Z18 (R2-001) — readability at `M2m/SsoLinkController.php:27`. — fixed: reordered the
+>       comment above `evaluateForCandidate()` so the "single query for one refusal either way"
+>       claim sits next to the Z9/Z10 exemption it actually depends on; comment-only, no
+>       behavior change. commit `ab49ada`.
 > - [ ] Z19 (suggestions, optional) — R1-001 nullable-org migration `down()` with platform
 >       rows present; R3 `TurnClassifier.php:128` byte-wise rtrim on multibyte text; R4
->       `CatalogueImportCommand.php:68-74` TOCTOU; R2-002..R2-005.
+>       `CatalogueImportCommand.php:68-74` TOCTOU; R2-002..R2-005. — PARTIAL, this session's
+>       assigned scope was the R3 item only: `rtrim()` → `preg_replace('/[.!?,;:。！？]+$/u',
+>       ...)` — `rtrim()`'s mask is byte-wise, not multibyte-aware, and corrupts a CJK ideograph
+>       sharing a byte value with a multibyte punctuation mark's own bytes (empirically confirmed
+>       on `一。`). Regression test via reflection on `normalize()`, since `classify()`'s own
+>       containment check corrupts both sides identically and cannot observe the defect on its
+>       own. `api/tests/Unit/Interview/TurnClassifierTest.php`, commit `5738b95`. Left unchecked
+>       — R1-001 (migration `down()`), R4 (`CatalogueImportCommand.php` TOCTOU) and R2-002..
+>       R2-005 remain untouched, outside this session's assigned scope.
 > - [ ] Z20 — bump `CONVERSATION_PROMPT_VERSION` in `api/.env.example` and the
 >       `config/conversation.php` default together (PR 7 changed the prompt template;
->       `ConversationConfigTest` pins their parity).
+>       `ConversationConfigTest` pins their parity). — BLOCKED: `api/.env.example` is denied by this
+>       session's sandbox (Read/Edit tools refuse the path outright), per this session's explicit
+>       instructions not worked around. Both sides currently read `conv-2026-09-04` and
+>       `ConversationConfigTest`'s own parity test (d) passes as-is — there is no CURRENT drift
+>       between the two files, only a version string that needs bumping together (PR 7's template
+>       change). Never touched `config/conversation.php` alone, which would break the very parity
+>       this test guards. Needs a session with `.env.example` access.
 >
 > Added from the PR 1–8b api review (lineage review-bf4e5675bd476125, approved) and the
 > PR 10–10c backoffice review (lineage review-964fab3e371293be, approved). Repeats of
 > Z7/Z11/Z16/Z18/Z19 are not listed again.
 >
-> - [ ] Z21 (R2-discard-closed-claim-overstated) — `DiscardUnusedDraftRevision.php:49-52`
+> - [x] Z21 (R2-discard-closed-claim-overstated) — `DiscardUnusedDraftRevision.php:49-52`
 >       docblock claims more than the code guarantees; make it true or make the code match.
-> - [ ] Z22 (R3-interviewability-rollout-existing-projects) — `ProjectInterviewability.php:117-127`
+>       — fixed: the "every catalogue-content write" claim was false —
+>       `ForgetFrameworkLocaleCommand` writes `Role`/`Competency`/`BarsIndicator` rows on ANY
+>       revision, including an open draft, through a plain `->save()` that never takes
+>       `withRevisionLockedForWrite()`'s lock (verified empirically via a `DB::listen()`
+>       lock-query count before touching the docblock). Narrowed the claim to the four catalogue
+>       controllers and `catalogue:import` (which do take the lock) and disclosed
+>       `ForgetFrameworkLocaleCommand` as a genuine, accepted exception, with the reasoning for
+>       leaving it unlocked rather than retrofitting a per-revision lock into its whole-platform
+>       iteration shape. Regression test proves both halves: zero lock queries, and
+>       `content_version` still bumps via the ordinary `saved` event regardless.
+>       `api/tests/Feature/Console/ForgetLocaleCommandTest.php`, commit `1cf8d20`.
+> - [x] Z22 (R3-interviewability-rollout-existing-projects) — `ProjectInterviewability.php:117-127`
 >       blocks every existing project that has a selected competency with no questions the
 >       moment it deploys; ship a backfill (copy defaults) or an explicit reseed step in the
->       release runbook, with a test that proves the backfill.
-> - [ ] Z23 (R3-turn-classifier-substring-false-primary) — `TurnClassifier.php:96-116`
+>       release runbook, with a test that proves the backfill. — fixed as an ARTISAN COMMAND
+>       (`beai:backfill-project-questions [--org=] [--dry-run]`) run from the release runbook,
+>       not a migration: the decision needs `ApplyCompetencySelection`'s own business logic
+>       (pinned revision, per-assessment-type cap, restore/no-op/copy branch), which does not
+>       belong duplicated into a schema migration, and a migration runs unattended with no room
+>       to preview impact first. Exposed
+>       `ApplyCompetencySelection::ensureCompetencyHasQuestions()` as a public wrapper over the
+>       existing private decision method so the backfill reuses the SAME branches a fresh
+>       selection takes — including the Z8 exemption that never resurrects an operator-deleted
+>       row — instead of a second, drifting copy. `--dry-run` runs the identical write path
+>       inside a transaction it then rolls back, so a preview can never diverge from a real run.
+>       A competency whose pinned revision has no catalogue defaults at all is reported by name
+>       as "still incomplete" rather than silently left broken — never attempted as a migration
+>       (judged unsafe: cross-tenant, business-logic-dependent, unattended, no preview). Tests
+>       cover copying defaults, reporting a catalogue-empty competency without erroring,
+>       `--dry-run` writing nothing, idempotent re-runs, restoring a deselection-trashed row over
+>       a fresh copy, and `--org` scoping. `api/tests/Feature/Console/
+>       BackfillProjectQuestionsCommandTest.php`, commit `adf52f2`.
+> - [x] Z23 (R3-turn-classifier-substring-false-primary) — `TurnClassifier.php:96-116`
 >       substring containment marks a follow-up that quotes the next primary as that primary;
 >       tighten the match (e.g. the primary must be the turn's final question) with tests.
+>       — fixed: `str_contains()` → `str_ends_with()` — the next unmatched primary must now be
+>       the turn's own trailing content, not merely somewhere inside it, closing the false
+>       positive where a follow-up only QUOTES the upcoming primary ("we may later ask: :primary.
+>       But first...") without actually asking it. Still accepts the retry-apology prefix wrapper
+>       (the primary IS the turn's last clause there). The one pre-existing test asserting genuine
+>       mid-string containment (primary followed by "Take your time.") tested exactly the
+>       false-positive shape this closes, so its fixture lost the trailing filler and now proves
+>       the prefix-only wrapper case instead. Regression tests for both the false-positive and the
+>       retry case. `api/tests/Unit/Interview/TurnClassifierTest.php`, commit `384ba9b`.
 > - [ ] Z24 (backoffice, fixed in the PR 12 branch) — R3-default-questions-no-revision-refresh,
 >       R3-role-competencies-silent-detach, R3-indicators-create-test-unproved.
+> - [x] Z25 (backoffice, lineage review-10843434416cdd27, approved; fixed in `33fb85a`, `0d4e491`) —
+>       R3-default-questions-load-failure-claims-empty (`CatalogueDefaultQuestionsPanel.vue:38-40`:
+>       a failed load renders the empty state instead of the error state) and
+>       R3-indicator-move-no-inflight-guard (`CatalogueIndicatorsPanel.vue:60-78`: move up/down
+>       stays enabled during the multi-request swap, so a double click can race it).
+> - [ ] Z27 (api) — a catalogue locale value (e.g. a role's optional `it` name) cannot be
+>       cleared over HTTP: `ValidatesLocaleMaps` rejects `null`/`''`, and
+>       `HasTranslations::setTranslations()` merges, so omitting the key keeps the old value
+>       (only `ForgetFrameworkLocaleCommand` can remove a locale). Decide the clear semantics
+>       (e.g. `nullable` → `forgetTranslation`), then let `RoleForm.vue:212-219` send it.
+> - [x] Z26 (backoffice, lineage review-444ad9407f86043d, approved; the test part fixed in
+>       `5e3b0cf`, the RoleForm part moved to Z27 because the API cannot express a clear) —
+>       R3-catalogue-page-setdata-script-setup (`tests/unit/pages/catalogue/index.spec.ts:262-280`
+>       drives `<script setup>` state through `setData`, which does not reach it; drive the
+>       UI instead) and, optional, R3-role-form-cannot-clear-optional-locale
+>       (`RoleForm.vue:212-219`: an optional `it` value cannot be cleared once set).
 
 > **REQUIRED BEFORE ARCHIVE — baseline immutability at the database layer (G3).**
 > PR 3's content-immutability trigger (`2026_09_15_201434_enforce_catalogue_published_content_immutability.php`)
@@ -677,14 +845,41 @@ Chain strategy: feature-branch-chain
 > which is a test-suite convenience, not a product rule.
 >
 > - [ ] G3.1 Give the suite a non-baseline scratch revision (fixture/factory state) and
->       migrate tests that write catalogue content off the baseline.
+>       migrate tests that write catalogue content off the baseline. — BLOCKED, not attempted:
+>       investigated in depth (2026-09-16 api session). The `is_baseline` trigger exemption is a
+>       blanket bypass; narrowing it safely (G3.3) needs an EXPLICIT signal — a per-row "is the
+>       baseline still empty" check breaks after the seeder's own FIRST content row within one
+>       seeding run, because a Postgres trigger fires per-row, not once per logical operation, so a
+>       session-scoped GUC set only around the seeder's write phase is the only mechanism found that
+>       survives a multi-row seed. Separately, ~46 test files build `Role`/`Competency`/`BarsIndicator`
+>       fixtures via the baseline-default model listener (measured via `rg`, not guessed) and would need
+>       migrating to a scratch revision once that default stops resolving to a writable baseline; at
+>       least one (`api/tests/Feature/Api/PotentialCompetenciesEndpointTest.php`, "driven by TYPE not
+>       hardcoded codes") has a scenario fundamentally incompatible with G3's own goal — it adds
+>       content DIRECTLY to the published baseline post-seed, which is exactly what G3 exists to
+>       forbid — and needs a REDESIGNED scenario (open + publish a second revision), not a mechanical
+>       `revision_id` substitution. Attempting this under time pressure risked either leaving the
+>       baseline still writable (defeating G3.3) or breaking the then-3480-passing suite. Needs a
+>       dedicated follow-up session or an explicit decision on the exemption mechanism.
 > - [ ] G3.2 Give `BarsIndicator` a factory; stop constructing it via per-file
->       `forceFill`/raw inserts; drop the remaining `DEFAULT`s.
+>       `forceFill`/raw inserts; drop the remaining `DEFAULT`s. — PARTIAL: `BarsIndicatorFactory`
+>       added (`api/database/factories/BarsIndicatorFactory.php`, `HasFactory` wired onto the model,
+>       commit `4709a01`), used by this session's own new Z1/Z4 tests via a per-test scratch draft
+>       revision. The DB-level `DEFAULT <baseline id>` on `revision_id` is NOT dropped and per-file
+>       `forceFill`/raw-insert call sites are NOT migrated — both depend on G3.1/G3.3 first (see G3.1's
+>       note); dropping the default before the baseline is genuinely immutable would just move today's
+>       DEFAULT-based baseline writes onto a still-writable baseline via the model listener instead.
 > - [ ] G3.3 Extend the trigger to the baseline, with the seeder's one-time bootstrap of
 >       an EMPTY baseline as the only permitted path (explicit, tested, not a blanket
->       bypass).
-> - [ ] G3.4 Close `OpenDraftRevision`'s concurrent first-edit race (second caller gets
->       a 500 from the one-draft unique index instead of continuing the draft).
+>       bypass). — BLOCKED, not attempted: see G3.1's note (same investigation, same blocker — the
+>       exemption mechanism needs an explicit decision before this can be implemented safely).
+> - [x] G3.4 Close `OpenDraftRevision`'s concurrent first-edit race (second caller gets
+>       a 500 from the one-draft unique index instead of continuing the draft). — VERIFIED ALREADY
+>       FIXED: this is H4 (PR3b), which explicitly names G3.4 in its own title. The loser of the race
+>       continues the winner's draft (`api/app/Actions/Catalogue/OpenDraftRevision.php:66-82`,
+>       `isOneDraftUniqueViolation()`), proven with a genuine separate-OS-process race
+>       (`api/tests/Feature/Catalogue/OpenDraftRevisionConcurrencyTest.php`, confirmed still passing
+>       in this session's full-suite runs). No code change needed.
 
 ## PR 4 — `api`: Catalogue Default Questions + Export Command
 
@@ -1224,10 +1419,10 @@ Chain strategy: feature-branch-chain
 
 ### Phase 43: E2E
 
-- [ ] 43.1 `backoffice/tests/e2e/catalogue-edit-publish.spec.ts` (chromium + webkit): superadmin edits an anchor, publishes, sees it frozen (a subsequent write attempt to the published revision is refused); an org admin gets no nav entry and is blocked on direct navigation to `/catalogue`.
-- [ ] 43.2 `backoffice/tests/e2e/catalogue-unsupported-gate.spec.ts` (mobile project): `/catalogue` → `/unsupported`, following the existing SA-11 pattern.
+- [x] 43.1 `backoffice/tests/e2e/catalogue-edit-publish.spec.ts` (chromium + webkit): superadmin edits an anchor, publishes, sees it frozen (a subsequent write attempt to the published revision is refused); an org admin gets no nav entry and is blocked on direct navigation to `/catalogue`. — also covers, in the same file, competency create/edit/delete behind `ConfirmDialog`, role competency assignment including the detach confirmation, BARS indicator create, and a publish 422 rendering the full violations list (translated rule name + raw fallback). A default-question write auto-opening a draft is covered in its own `describe` block in the same file, exercising the Unit 1 `refresh-revision` fix end to end. The project edit drawer's predefined-questions panel (post-`QuestionListEditor`-extraction regression proof) is covered separately in `backoffice/tests/e2e/project-questions-panel.spec.ts` — a `/projects` concern, not a `/catalogue` one, kept out of this file for that reason.
+- [x] 43.2 **Not implemented as a standalone `catalogue-unsupported-gate.spec.ts`.** `playwright.config.ts`'s `mobile` project restricts `testMatch` to `unsupported-gate.spec.ts` only (documented in that file's own comment on why `/clients` was added there rather than in `clients.spec.ts`) — a scenario living only in a new file would never actually run under the `mobile` project. `/catalogue` added to that file's existing `ADMIN_ROUTES` list instead, the same already-`mobile`-covered mechanism `/clients` uses; confirmed green under the `mobile` project.
 
 ### Phase 44: Gate
 
-- [ ] 44.1 Full Playwright suite green across chromium, webkit, and the mobile project.
-- [ ] 44.2 Confirm every proposal Success Criteria item is now met end-to-end; confirm `bun run codegen:check` green in all three repos as the final drift-free check.
+- [x] 44.1 Full Playwright suite green across chromium, webkit, and the mobile project. — `bunx playwright test` (all specs, all 3 projects): 261 passed, 0 failed.
+- [x] 44.2 **Partially confirmed, scope stated rather than assumed.** This session's scope was the `backoffice` repo only (PR 12), so only the criteria observable from it were re-verified end-to-end: superadmin CRUD over competencies/roles/indicators/default-questions, org admin 403 + no nav entry, publish freezing a revision (a subsequent write refused), the mobile `/unsupported` redirect, and every string used by the new specs resolving in `en`/`it` (existing catalogue locale keys, unchanged by this PR). `bun run codegen:check` confirmed green in `backoffice` only — `frontend`/`api` were not touched this session, matching PR10's own task 39.2 precedent for the same scope boundary. The API-side/cross-repo criteria (byte-identical anchor resolution across the migration, audit-log entries, the DB-level literal counts, `scripts/ci-guards.sh`) are outside this session's repo scope and were not re-run here.

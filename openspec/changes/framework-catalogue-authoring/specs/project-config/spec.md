@@ -257,6 +257,30 @@ who did nothing wrong.
 - THEN the candidate's already-running session continues uninterrupted
 - AND the predicate only blocks a NEW session start, not the one in progress
 
+#### Scenario: Once a participant has any session on the project, a later competency's own emptying gates only itself
+
+**Interpretation decided (Z9, framework-catalogue-authoring, REQUIRED BEFORE
+ARCHIVE):** the WHOLE-PROJECT gate (every currently-selected competency has
+a live question) applies only at a participant's TRUE first `/start` — no
+`InterviewSession` exists anywhere on the project for that participant yet.
+Once at least one session exists (mid-interview), each competency's OWN
+fresh start is gated only by ITS OWN live-question state, never by the rest
+of the project. The alternative — re-checking the whole project on every
+competency transition — was tried and rejected: it would strand a candidate
+who already finished competency 1 and is moving to competency 2 solely
+because competency 5, not yet reached, later lost its only question.
+
+- GIVEN a candidate already has an `InterviewSession` for competency PRS on
+  a project selecting [PRS, COL, SLF]
+- AND the operator later empties competency SLF's questions (SLF has not
+  been reached yet), making the PROJECT as a whole non-interviewable
+- WHEN the candidate finishes PRS and starts a fresh session for COL, which
+  still has a live question
+- THEN the COL start succeeds — COL's own live-question state is satisfied,
+  and SLF's emptied state does not block it
+- AND only when the candidate later reaches SLF does its own fresh start
+  refuse with `PROJECT_NOT_INTERVIEWABLE`
+
 #### Scenario: Minting succeeds once the project is interviewable
 
 - GIVEN the same project, with a question then added back to COL
