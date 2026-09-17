@@ -864,6 +864,22 @@ Chain strategy: feature-branch-chain
 >       hardcoded to `in_attesa` on create, `a7da2eb`. Full coverage (94.0%), Pint, PHPStan,
 >       `ci-guards.sh`, and a fresh Postgres OpenAPI export (byte-identical, `openapi.json`
 >       committed with the 409/`status` schema changes) all verified against the final state.
+> - [x] Z22c (api, lineage review-aa64c2e793b3a3ea → recovered as -r1, approved) — CRITICAL
+>       R4-interviewability-deploy-cutover corrected in `e23099c`: `interview.interviewability_gate`
+>       (`BEAI_INTERVIEWABILITY_GATE`, default on) disables the gate in `ProjectInterviewability`
+>       only; fresh selections auto-fill from the latest published defaults. Release runbook:
+>       gate off → deploy → author defaults → publish → backfill `--dry-run` → backfill → gate on.
+>       Human follow-up: add `BEAI_INTERVIEWABILITY_GATE=true` to `api/.env.example`.
+> - [ ] Z29 (api, lineages review-aa64c2e793b3a3ea and -r1, WARNINGs) —
+>       R4-utterance-lock-contends-with-end (`UtteranceController.php:140-150`, `/end` waits on
+>       the same row lock); R3-turn-classifier-suffix-no-word-boundary (`TurnClassifier.php:127`,
+>       suffix match without a word boundary); R2-import-docblock-writes-blocked-claim
+>       (`CatalogueImportCommand.php:36-40`); R2-constraint-violation-shape-claim
+>       (`CatalogueConstraintViolation.php:22-25`); R3-locked-translation-path-removed
+>       (`FrameworkCatalogSeeder.php:240-243`). Suggestions: R3-restore-cap-ignores-live-rows,
+>       R4-row-by-row-insert-extends-lock-hold, R3-lock-timeout-test-commits-refreshdb-txn,
+>       R3-import-sync-orphans-indicators, R2-pair-cap-literal-duplicated,
+>       R2-stale-step-6b-reference, R2-duplicated-catalogue-controller-boilerplate.
 > - [ ] Z27 (api) — a catalogue locale value (e.g. a role's optional `it` name) cannot be
 >       cleared over HTTP: `ValidatesLocaleMaps` rejects `null`/`''`, and
 >       `HasTranslations::setTranslations()` merges, so omitting the key keeps the old value
