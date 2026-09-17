@@ -13,16 +13,19 @@ the catalogue. They are a starting point, not a fixed script:
 - Inside the platform, defaults live in `framework_default_questions`, one row
   per question, versioned with the catalogue revision and edited through the
   catalogue API. This file is the reviewable, authored source for that content.
-  `catalogue:import` / `catalogue:export` do **not** carry default questions
-  today, so this file is not loaded automatically.
+  `catalogue:import` / `catalogue:export` do **not** carry default questions —
+  `catalogue:seed-default-questions` (api) is the loader: it reads the
+  vendored copy at `api/database/framework/default-questions.json`, writes
+  each competency's questions into the open draft, and can publish it.
 
-## Why this file is not in `framework/`
+## Vendoring
 
 The Cross-Stack Consistency job (`.github/workflows/wrapper-ci.yml`, step (d))
 requires every `*.json` under `framework/` to also exist, identical, in
-`api/database/framework/`. A file placed there without a vendored copy fails CI.
-Like the house-voice standard next to it, this file sits in the sibling
-`framework-authoring/` directory until something in the API reads it.
+`api/database/framework/` — the same rule `roles.json`/`competencies.json`/
+`bars/*.json` already follow. `api/database/framework/default-questions.json`
+is that vendored copy; keep the two in sync by hand until an export path
+exists, exactly like the other framework JSON files.
 
 ## Shape
 
@@ -76,7 +79,7 @@ This is a BEI (Behavioral Event Interview). Every question asks about
 ## Checking
 
 ```sh
-jq . docs/app_description/02-domain/framework-authoring/default-questions.json
+jq . docs/app_description/02-domain/framework/default-questions.json
 ```
 
 Beyond parsing, check that every code in `framework/competencies.json` is
