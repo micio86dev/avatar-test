@@ -637,6 +637,7 @@ After the last answer is submitted:
 │  Clients      ·p │                                        │
 │  Avatar tmpl. ·p │                                        │
 │  Settings     ·p │                                        │
+│  Catalogue    ·p │                                        │
 └──────────────────┴────────────────────────────────────────┘
 
 ·c = client scope   ·p = platform scope
@@ -671,6 +672,7 @@ Content padding: `--spacing-section` horizontal, `--spacing-panel` vertical.
 | Evaluation report | BARS competency grid: each competency with indicator scores (1–5), mean score, reliability, excerpts |
 | Clients | **Superadmin only** (`clients.viewAny`). Every organization with its platform-wide statistics — client since, projects, candidates, completed, errored, last activity — and a per-row "Act as" that selects which client the superadmin is looking at. The one deliberate cross-tenant read surface in the product; see §8.2.8 |
 | Avatar templates | **Superadmin only** (`avatarTemplates.viewAny`). Provider template configuration |
+| Catalogue | **Superadmin only** (`catalogue.manage`). Revision-scoped authoring of framework competencies, roles, BARS indicators, and default questions, plus the draft/publish lifecycle; see §8.2.10 |
 | Settings | Organization profile, branding, API keys, webhook config, user management (RBAC), LLM credentials, and a superadmin-only Platform section |
 | Data management | GDPR data deletion requests; export |
 
@@ -686,6 +688,13 @@ Content padding: `--spacing-section` horizontal, `--spacing-panel` vertical.
 > resolves on the caller's own `organization_id`, which is null for a
 > superadmin, so a by-id write path is a separate change. Provisioning stays
 > `ProvisionOrganizationCommand`.
+
+**The per-project questions panel stays where it is.** `ProjectQuestionsPanel`
+remains mounted in the project edit drawer, not relocated to `/catalogue` or its
+own route: the drawer gains a named "Questions" entry in its own section rail,
+and the Projects table gains a per-row action that deep-links straight to it. A
+625-line component with its own test suite does not move to fix a
+discoverability gap that a rail entry and a deep link already answer.
 
 ### 8.2.1 Settings — section rail (not a tab strip)
 
@@ -921,6 +930,34 @@ same outcome — the page blinks and nothing changes, with no explanation. The
 argument above establishes why a reload is SAFE; it does not establish that a
 silent one is HONEST, and those are different claims. Resolving it belongs here,
 applied to both surfaces at once, not fixed in one component.
+
+### 8.2.10 Catalogue authoring — revision header, section rail, publish
+
+`/catalogue` is a standalone, superadmin-only page (`catalogue.manage`), the
+same shape as `/avatar-templates`. It has no client scope at all — the catalogue
+is platform content, not one organization's data — so it carries no "Act as"
+dependency and does not appear for anyone who is not a superadmin.
+
+**Revision header.** The page opens with a header showing the open revision's
+state (`draft` / `published`), its label, and a Publish action. Publish is
+irreversible — a published revision never accepts another write, additive or
+otherwise — so it sits behind `ConfirmDialog`, the same destructive-action gate
+used elsewhere in the product.
+
+**Section rail, not a tab strip.** Below the header, the page follows §8.2.1's
+ruling: Competencies, Roles, Indicators, and Default questions are a **vertical
+section rail**, never a horizontal tab strip. These are four distinct authoring
+surfaces with different shapes (list, list, list, competency-grouped question
+editor), not peer views of one dataset, which is exactly the case §8.2.1
+already argues against a tab strip for.
+
+**The default-questions editor is an extraction, not a second component.** Its
+presentational core — competency-grouped list, dual-locale `{en, it}` fields,
+drag reorder, cap display — is `components/organisms/QuestionListEditor.vue`.
+Both the per-project `ProjectQuestionsPanel` and this page's
+`CatalogueDefaultQuestionsPanel` are thin containers over that one editor
+(container/presentational, per §5's rules), so the two surfaces cannot drift
+into two different editors that happen to look alike.
 
 ### 8.3 BARS Report View
 

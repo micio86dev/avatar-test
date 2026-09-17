@@ -154,7 +154,8 @@ owning slices (C2+), **not C1**. Do not install or wire any of them during C1.
 - **Standard competencies (18):** PRS, STG, INN, JDG, DRV, CSF, SLF, OPX, TMG, INS,
   COM, COL, INF, NET, RES, LRN, ITG, INC. Plus **MTG / LAT** only for `potential`.
 - **Assessment types (mutually exclusive):** `standard` (readiness, role competencies,
-  adaptive questions) and `potential` (only MTG/LAT, 4 fixed questions + AI follow-ups).
+  adaptive questions) and `potential` (only MTG/LAT, up to 4 questions per
+  competency — a platform-configured maximum, default 4 — plus AI follow-ups).
   Type is **immutable** after go-live.
 - **BARS scoring:** each competency has **exactly 3 indicators** — ratified in
   `openspec/specs/framework-catalog/spec.md` ("MUST have exactly 3 indicators", with

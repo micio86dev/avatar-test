@@ -55,39 +55,30 @@ D22 conventions (3NF, indexed).
 The system MUST provide a `framework_versions` table that extends the C2
 `TenantModel` pattern, scoped per organization via `organization_id`. The
 table MUST record: `organization_id`, a catalog `version` identifier, a
-`label` (human display name for the draft, nullable string), `is_locked`
-(bool, default false), and timestamps.
+`label` (human display name, nullable), `is_locked` (bool, default false),
+`revision_id` (FK to `framework_catalog_revisions`, set when the version is
+resolved), and timestamps.
 
-In C3, `FrameworkVersion` is a **DRAFT label** — `is_locked` is a
-forward-looking flag that C4 activates on pin. C3 does NOT enforce
-immutability; the `is_locked=true` guard is built and activated by C4
-when it takes the immutable snapshot at pin time.
+`FrameworkVersion` MUST resolve to a `framework_catalog_revisions` row rather
+than standing alone as a flag. `is_locked` remains the one-way toggle a
+project pin flips (unchanged); `revision_id` is what scoring and the
+composer actually read to reach catalogue rows. A `FrameworkVersion` MUST NOT
+be creatable or resolvable against a `draft` revision — only a `published`
+revision may be pinned, so a pin never points at content that can still
+change under it.
 
-The composite index on `framework_versions` MUST lead with `organization_id`
-(per D22 multi-tenancy convention).
+The composite index on `framework_versions` MUST lead with `organization_id`.
+A `FrameworkVersion` record MUST become immutable once referenced by any
+downstream record (project → `framework_version_id`). The system MUST NOT
+permit deletion or mutation of a locked `FrameworkVersion`.
 
-A `FrameworkVersion` record MUST become immutable once it is referenced by
-any downstream record (project → framework_version_id, set by C4). The system
-MUST NOT permit deletion or mutation of a locked `FrameworkVersion`. The
-`immutabilityGuard()` on the model provides the enforcement hook; C4 sets
-`is_locked=true` and the guard becomes active.
+`FrameworkVersion` MUST expose a `projects()` `hasMany(Project::class)`
+relation.
 
-**Exception type (required C4 fix):** The `deleting` and `updating` hooks in `FrameworkVersion.booted()`
-currently throw a bare `RuntimeException`, which produces HTTP 500 on API paths. C4 MUST replace
-these with a `LockedFrameworkVersionException` (a domain exception implementing `Renderable` or
-with a `render()` method) that returns HTTP 422 or HTTP 403. This mirrors the `ImmutableProjectException`
-pattern. API attempts to mutate or delete a locked FV MUST return the HTTP code specified in the
-spec scenario below, NOT HTTP 500.
-
-**Relation wired by C4 (added by C4):** `FrameworkVersion` MUST expose a
-`projects()` `hasMany(Project::class)` relation returning all projects that
-have pinned this version. The C3 placeholder (empty or stub `projects()`) MUST
-be replaced by a real Eloquent `hasMany`. This relation is used by the seeder
-lock-guard and by any downstream query that needs to enumerate projects per
-locked version.
-
-C4 wires the project → `framework_version_id` FK and takes the catalog snapshot;
-C9 reads anchor text via that FK. These are downstream concerns and are OUT OF SCOPE for C3.
+(Previously: `FrameworkVersion` was a bare `is_locked` flag with no reference
+to what content it actually pinned; scoring read the single live catalogue
+directly. This is the correctness gap D1 exists to close — an evaluation's
+recorded `framework_version` is now re-derivable to exact anchor text.)
 
 #### Scenario: Two organizations pin different framework versions
 
@@ -106,7 +97,7 @@ C9 reads anchor text via that FK. These are downstream concerns and are OUT OF S
 
 #### Scenario: A referenced FrameworkVersion cannot be deleted
 
-- GIVEN a FrameworkVersion record that C4 has associated with a project
+- GIVEN a FrameworkVersion record associated with a project
 - WHEN a delete is attempted on that FrameworkVersion
 - THEN the delete is rejected (constraint or guard)
 - AND the FrameworkVersion record remains intact
@@ -118,7 +109,26 @@ C9 reads anchor text via that FK. These are downstream concerns and are OUT OF S
 - THEN the relation returns a collection containing P1 and P2
 - AND no projects from other FrameworkVersions are included
 
----
+#### Scenario: A FrameworkVersion resolves to a specific revision's rows
+
+- GIVEN FrameworkVersion FV1 has `revision_id = R1` (published)
+- WHEN a scoring job or the interview composer resolves FV1's catalogue rows
+- THEN it reads competencies, roles, and BARS indicators scoped to `R1` only
+- AND a later published revision R2 has no effect on FV1's resolution
+
+#### Scenario: Pinning a draft revision is rejected
+
+- GIVEN revision R2 is still `draft`
+- WHEN a project creation attempts to pin a FrameworkVersion against R2
+- THEN the request is rejected — only a `published` revision may be pinned
+
+#### Scenario: A pre-migration evaluation still resolves its exact anchor text
+
+- GIVEN an evaluation scored before this change recorded `framework_version`
+  against the pre-revision schema
+- WHEN the baseline revision migration runs
+- THEN that evaluation's `framework_version` resolves, via the baseline
+  revision, to byte-identical anchor text as before the migration
 
 ### Requirement: Complete Role×Competency BARS Coverage
 
@@ -443,257 +453,76 @@ no source field carried an `it` value.)
 
 ### Requirement: Idempotent Catalog Seeder (sync delete-stale)
 
-The system MUST provide a `FrameworkCatalogSeeder` that seeds the global
-catalog from the split-file JSON shape (`competencies.json` + `bars/{ROLE}.json`).
-The seeder MUST be idempotent: running it N times MUST produce the same
-database state as running it once. Duplicate rows MUST NOT be created.
+The system MUST provide a `FrameworkCatalogSeeder` that seeds the **baseline
+revision** from the split-file JSON shape. The seeder MUST be idempotent:
+running it N times against a `draft` baseline MUST produce the same database
+state as running it once, using natural-key upserts and delete-stale
+(`sync` for the `framework_role_competency` pivot; delete-stale for
+`framework_bars_indicators` positions no longer present in the JSON).
 
-The seeder MUST use natural-key upserts (role code, competency code,
-role×competency×indicator position) AND MUST delete stale rows **unless a
-locked FrameworkVersion exists** (see guard clause below):
-- `framework_role_competency` pivot: use `sync` (not `syncWithoutDetaching`) — stale
-  pivots for competencies removed from a role in the JSON are deleted.
-- `framework_bars_indicators`: after upserting the current set for a (role, competency)
-  pair, delete any rows with positions not present in the current JSON.
+**Revision immutability supersedes the prior per-row lock-guard (D2).** The
+seeder MUST check whether the baseline revision is `published`. If it is
+`draft`, full delete-stale and mutation proceeds as before. If it is
+`published`, the seeder MUST perform **zero writes** — no additive insert, no
+gap-row update — and MUST emit a `seeder_lock_guard_active`-equivalent
+structured signal so an operator knows the run was a no-op. `framework_gaps`
+and `catalog_meta` bookkeeping are unaffected by this gate (they are not
+catalogue content).
 
-**Seeder lock-guard (added by C4) — FULLY ADDITIVE when locked:** Before executing any delete-stale
-or mutation operation against the catalog tables, the seeder MUST check whether any `FrameworkVersion`
-record has `is_locked = true` (query MUST use `withoutGlobalScopes()` — no HTTP request/tenant is
-set during artisan seeding). If at least one locked `FrameworkVersion` exists, the seeder MUST
-become PURELY ADDITIVE:
+(Previously: the seeder checked a platform-wide `is_locked=true` flag on any
+`FrameworkVersion` and, if present, ran in a nuanced per-row ADDITIVE mode —
+new rows inserted, existing rows and mutations suppressed via a per-call-site
+`$model->exists` gate, with over a dozen scenarios covering pivot
+preservation, stale-unassigned competencies, and new-locale suppression. That
+nuance is replaced entirely: a `published` revision now accepts NO writes at
+all, additive or otherwise, because immutability is enforced per-revision
+rather than inferred from any FrameworkVersion being locked anywhere on the
+platform.)
 
-1. ALL destructive deletes MUST be skipped (delete-stale calls and `sync`-detach operations on
-   `framework_role_competency` pivots and `framework_bars_indicators` rows). This includes the
-   stale-unassigned-competency delete block inside the BARS loop: when a competency is absent from
-   `$currentAssignedIds` (which is JSON-derived — NOT DB-pivot-derived), the `BarsIndicator::delete()`
-   MUST be suppressed, but the `continue` (which skips BARS processing for that competency) MUST be
-   preserved. The existing indicator rows and DB pivot for a JSON-removed-but-DB-preserved competency
-   MUST remain byte-for-byte untouched.
-2. ALL mutations of existing CATALOG rows MUST be skipped — `setTranslation()`, the update half of
-   `updateOrCreate()`, and any other write that would change an already-persisted row in
-   `framework_roles`, `framework_competencies`, `framework_bars_indicators`, `framework_role_competency`,
-   or their translation columns MUST be bypassed via a per-call-site `$model->exists` gate:
-   if the model already exists (`$model->exists === true`), capture the id and skip; only new rows
-   (`$model->exists === false`) may be mutated and saved. Existing rows MUST remain byte-for-byte
-   unchanged.
-3. Only genuinely NEW rows (not yet present by natural key) MAY be inserted.
-4. The seeder MUST emit a clear, structured signal (log entry and/or gap record with
-   `kind: seeder_lock_guard_active`) so the operator is aware the guard fired.
-
-**EXEMPT from suppression — `framework_gaps`, `catalog_meta`, and the lock-guard signal:**
-`FrameworkGap::updateOrCreate(...)` and `CatalogMeta::bump()` MUST continue normally even when the
-lock-guard is active. These are operational and tracking rows, NOT catalog content. The suppression
-applies ONLY to existing catalog rows (roles, competencies, indicators, pivots, and their
-translations).
-
-The `seeder_lock_guard_active` signal — emitted as a log entry and/or a `FrameworkGap` record with
-`kind: seeder_lock_guard_active` — is ALSO EXEMPT from mutation-suppression. It is an operational
-signal (not catalog content) and MUST be emitted ONCE, immediately after the `hasLockedVersions()`
-check returns `true` at the top of `run()`, before any catalog processing begins. The signal is not
-suppressed by the guard it is reporting.
-
-**New-locale suppression (explicit):** While ANY FV is locked, adding a new locale translation to
-an EXISTING catalog row IS a mutation of that row. It is SUPPRESSED (the per-call-site `$model->exists`
-gate skips the `setTranslation` call for pre-existing rows). New-translation authoring for existing
-catalog rows waits until no FV is locked. Byte-for-byte preservation of existing rows wins. This
-suppression MUST NOT be silent: the same `seeder_lock_guard_active` signal (log entry and/or
-`framework_gaps` record) required above MUST fire, and it MUST be inspectable that IT strings
-present in the source JSON were NOT written because of an active lock — an operator re-running the
-seeder against a locked FV MUST be able to tell, without reading source code, that translation
-authoring did not take effect.
-
-**`CatalogMeta::bump()` in additive mode:** `bump()` MUST be called only when at least one genuinely
-new row was inserted during this seeder run. If the seeder ran in additive mode but inserted no new
-rows, `CatalogMeta::bump()` MUST NOT be called (no structural change occurred). This is correct:
-the bump signals new catalog content arrived, not that mutations were suppressed.
-
-**Semantic**: an anchor text edit in the source JSON after a FV is locked is silently IGNORED while
-any FV is locked. This is correct, intentional behavior — the locked catalog rows must remain
-unchanged to preserve C9 scoring determinism. New competencies/indicators added to the JSON are
-still inserted (additive). This asymmetry (insert-allowed, mutate-forbidden) is the core contract.
-
-If no locked `FrameworkVersion` exists, full delete-stale + mutation behavior MUST proceed as
-before (existing behavior unchanged).
-
-This delete-stale behavior is INTENTIONAL for a working draft: re-seeding
-reflects the JSON exactly, eliminating orphan rows. Snapshots taken at C4
-pin time are what remain immutable — not the draft catalog.
-
-For every role that has a BARS file, the seeder MUST compare the role's
-assigned competencies (from `framework_role_competency`) against the keys present in
-that role's BARS file. Each assigned competency NOT present as a key in the
-BARS file MUST be recorded as a gap entry `{kind: competency_no_bars,
-role_code: ROLE, competency_code: CODE}`.
-
-The seeder MUST gracefully skip a missing BARS file and MUST log or record
-a structured gap entry `{kind: role_no_bars}` flagging the missing data. It
-MUST NOT throw an exception or halt for a missing file. After skipping, the
-affected role's competency records MUST still be seeded (from `competencies.json`)
-if present.
-
-The seeder MUST tolerate a future unified competency object shape (where
-competency metadata and BARS anchors are co-located) without requiring code
-changes to the split-file path.
-
-#### Scenario: First run seeds roles and competencies from JSON
+#### Scenario: First run seeds roles and competencies into the draft baseline
 
 - GIVEN the JSON files competencies.json and bars/ICO.json are present
+- AND the baseline revision is `draft`
 - WHEN the FrameworkCatalogSeeder runs for the first time
-- THEN roles and competencies matching the JSON are present in the DB
-- AND ICO BARS indicators are present with correct anchor text
+- THEN roles and competencies matching the JSON are present, scoped to the
+  baseline revision
 
-#### Scenario: Second run produces no duplicates (idempotency)
+#### Scenario: Second run against a draft baseline produces no duplicates
 
-- GIVEN the seeder has already run once
+- GIVEN the seeder has already run once against a `draft` baseline
 - WHEN the seeder runs again without any data change
-- THEN the row counts for framework_roles, framework_competencies, and framework_bars_indicators are identical
-- AND no duplicate rows exist
+- THEN row counts are identical and no duplicate rows exist
 
-#### Scenario: Missing BARS file for a role is skipped gracefully (fixture)
+#### Scenario: Delete-stale removes a competency's pivot and indicators (draft only)
 
-- GIVEN a fixture role has no bars/{ROLE}.json file on disk (post-completion, no real declared role lacks a BARS file — this exercises the defensive path only)
-- WHEN the FrameworkCatalogSeeder runs
-- THEN the seeder does NOT throw an exception
-- AND the role's metadata (name, responsibilities) is still seeded from roles.json
-- AND a role_no_bars gap entry is recorded
-- AND framework_bars_indicators contains zero rows for that role
+- GIVEN the baseline revision is `draft` and a role has a pivot and BARS rows
+  for competency X
+- WHEN X is removed from that role in the source JSON and the seeder runs
+- THEN the stale pivot and BARS rows for (role, X) are deleted
 
-#### Scenario: MTG/LAT absent — potential catalog flagged incomplete
+#### Scenario: A published baseline accepts zero seeder writes
 
-- GIVEN neither competencies.json nor any bars file defines MTG or LAT
-- WHEN the FrameworkCatalogSeeder runs
-- THEN no MTG or LAT rows are created
-- AND a gap entry is recorded flagging "MTG/LAT competencies absent — potential assessment type incomplete"
-- AND the seeder completes successfully
-
-#### Scenario: BUL BARS file seeds only present competencies (8 of 14)
-
-- GIVEN bars/BUL.json defines BARS for 8 of BUL's 14 assigned competencies
-- WHEN the FrameworkCatalogSeeder runs
-- THEN framework_bars_indicators rows are created only for competencies present in bars/BUL.json (8 competencies × 3 = 24 rows)
-- AND 6 gap entries are recorded with kind=competency_no_bars and role_code=BUL
-
-#### Scenario: FLL BARS file seeds only present competencies (8 of 18)
-
-- GIVEN bars/FLL.json defines BARS for 8 of FLL's 18 assigned competencies
-- WHEN the FrameworkCatalogSeeder runs
-- THEN framework_bars_indicators rows are created only for competencies present in bars/FLL.json (8 competencies × 3 = 24 rows)
-- AND 10 gap entries are recorded with kind=competency_no_bars and role_code=FLL
-
-#### Scenario: MLL BARS file seeds only present competencies (8 of 18)
-
-- GIVEN bars/MLL.json defines BARS for 8 of MLL's 18 assigned competencies
-- WHEN the FrameworkCatalogSeeder runs
-- THEN framework_bars_indicators rows are created only for competencies present in bars/MLL.json (8 competencies × 3 = 24 rows)
-- AND 10 gap entries are recorded with kind=competency_no_bars and role_code=MLL
+- GIVEN the baseline revision is `published`
+- WHEN the anchor text for an existing indicator is edited in the JSON, and a
+  brand-new competency is added to the JSON, and the seeder runs
+- THEN NEITHER the edit NOR the new competency is written — no additive
+  insert occurs
+- AND the structured `seeder_lock_guard_active`-equivalent signal is emitted
 
 #### Scenario: Seeded-count correctness — per-role BARS coverage
 
-- GIVEN the seeder has run successfully against the complete catalogue (all 83 declared pairs anchored)
-- WHEN framework_bars_indicators are counted per role
-- THEN ICO has 45 rows (15 competencies × 3 indicators)
-- AND FLL has 54 rows (18 competencies × 3 indicators)
-- AND MLL has 54 rows (18 competencies × 3 indicators)
-- AND BUL has 42 rows (14 competencies × 3 indicators)
-- AND SRX has 54 rows (18 competencies × 3 indicators)
+- GIVEN the seeder has run successfully against the complete catalogue (all
+  83 declared pairs anchored) in the draft baseline
+- WHEN `framework_bars_indicators` are counted per role, scoped to that
+  revision
+- THEN ICO has 45 rows, FLL has 54, MLL has 54, BUL has 42, SRX has 54
 
-#### Scenario: Re-seeding after a previously-missing BARS file is authored adds the missing rows (fixture)
+#### Scenario: Gap reconciliation is unaffected by revision state
 
-- GIVEN a fixture role's bars/{ROLE}.json was absent on the first seed run
-- AND the file is subsequently authored and placed on disk
-- WHEN the seeder runs again
-- THEN the role's BARS indicators are inserted
-- AND no existing rows are duplicated
-
-#### Scenario: Delete-stale — removing a competency from a role removes stale pivot and indicator rows (no locked FV)
-
-- GIVEN no FrameworkVersion with is_locked=true exists
-- AND the seeder has run once and a role (e.g. ICO) has a `framework_role_competency` pivot for competency X, and `framework_bars_indicators` rows for (ICO, X)
-- WHEN one competency is removed from that role in the source JSON fixture
-- AND the seeder runs again
-- THEN the stale `framework_role_competency` pivot row for (ICO, X) is DELETED
-- AND the stale `framework_bars_indicators` rows for (ICO, X) are DELETED
-- AND all other pivot and indicator rows are unchanged
-- (This proves `sync`/delete-stale is used, NOT `syncWithoutDetaching`)
-
-#### Scenario: Lock-guard — fully additive when a locked FV exists (delete-stale and mutations suppressed)
-
-- GIVEN FrameworkVersion FV1 has is_locked=true (pinned by at least one project; set via explicit property assignment, not mass-assign)
-- AND the seeder has run once; competency X is in ICO's framework_role_competency and framework_bars_indicators,
-  with anchor text "Anchor text original" for indicator at position 1,
-  and competency X has name translation "name original" in EN
-- WHEN the anchor text for that indicator is EDITED in the JSON fixture to "Anchor text MODIFIED"
-- AND the EN name for competency X is EDITED in competencies.json to "name MODIFIED"
-- AND a brand-new competency Z with its indicator rows (not yet in the DB) is added to both competencies.json
-  and the ICO bars fixture
-- AND the seeder runs again
-- THEN the existing anchor row for (ICO, X, position=1) is UNCHANGED — anchor text is still "Anchor text original"
-  (mutation suppressed by per-call-site $model->exists gate)
-- AND the EN name translation for competency X is UNCHANGED — still "name original"
-  (new-locale and name-edit mutations suppressed for existing rows)
-- AND the framework_role_competency pivot for (ICO, X) is PRESERVED (delete-stale skipped)
-- AND the framework_bars_indicators rows for (ICO, X) are PRESERVED
-- AND competency Z IS inserted into framework_competencies (new row — additive)
-- AND competency Z's indicator rows ARE inserted into framework_bars_indicators (new rows — additive; a new competency and its indicators must both be inserted, no orphan competency-without-indicators)
-- AND the framework_role_competency pivot for (ICO, Z) IS inserted (syncWithoutDetaching adds new pivots)
-- AND framework_gaps upserts (e.g., missing_translation, competency_no_bars for new gaps) STILL OCCUR — not suppressed
-- AND a structured signal (log entry or gap record with kind=seeder_lock_guard_active) is emitted
-
-#### Scenario: Lock-guard — JSON-removed-but-DB-preserved competency leaves indicators and pivot intact
-
-**Context:** `$currentAssignedIds` in the seeder BARS loop is built from `array_keys($assignedIds)`,
-which reflects the CURRENT JSON — NOT the DB pivot state. In locked mode, `syncWithoutDetaching`
-preserves pivot rows for competencies removed from the JSON; such competencies reach the
-stale-unassigned branch (not in `$currentAssignedIds`) even though their DB pivot exists.
-
-- GIVEN FrameworkVersion FV1 has is_locked=true
-- AND the seeder has run once; competency W is in ICO's framework_role_competency (DB pivot present)
-  and has framework_bars_indicators rows for (ICO, W)
-- WHEN competency W is REMOVED from ICO's competency list in the source JSON (roles.json)
-- AND the seeder runs again (in locked mode)
-- THEN the stale-unassigned branch is reached for W (W is absent from $currentAssignedIds which is JSON-derived)
-- AND BarsIndicator::delete() is NOT called — the destructive delete is suppressed
-- AND the `continue` skips BARS processing for W (no new indicator rows are inserted either)
-- AND the existing framework_bars_indicators rows for (ICO, W) are PRESERVED byte-for-byte
-- AND the framework_role_competency pivot for (ICO, W) is PRESERVED (syncWithoutDetaching does not detach)
-- AND no mutation of any kind is applied to W's existing indicator or pivot rows
-
-#### Scenario: Lock-guard — soft-deleted project keeps FV locked; guard still fires
-
-- GIVEN FrameworkVersion FV1 has is_locked=true pinned by Project P1
-- WHEN Project P1 is soft-deleted
-- AND the seeder runs again
-- THEN FV1.is_locked is still true (soft-delete does not unlock)
-- AND the seeder still runs in append-only mode (guard fires based on is_locked=true, regardless of project soft-delete)
-- AND existing catalog rows are PRESERVED
-
-#### Scenario: Lock-guard inactive — normal unlocked re-seed still delete-stales and mutates
-
-- GIVEN no FrameworkVersion has is_locked=true (all FVs are unlocked or none exist)
-- AND the seeder has run once; competency Y exists in framework_role_competency for role FLL,
-  with an anchor row having text "Old anchor"
-- WHEN competency Y is removed from the FLL JSON fixture
-- AND the anchor text for another competency is edited to "New anchor" in the JSON
-- AND the seeder runs again
-- THEN the stale framework_role_competency pivot for (FLL, Y) is DELETED (guard inactive)
-- AND the anchor row is updated to "New anchor" (mutation proceeds normally when no FV is locked)
-
-#### Scenario: Locked FV suppresses new IT translation — explicit signal, not a silent no-op
-
-- GIVEN FrameworkVersion FV1 has is_locked=true
-- AND ICO×PRS indicator rows already exist in the DB with only EN translations
-- AND the source JSON now carries `it` values for all 12 of ICO×PRS's strings
-- WHEN the seeder runs
-- THEN none of ICO×PRS's existing rows gain an `it` translation
-  (`$model->hasTranslation('field', 'it')` remains false for all 12 strings)
-- AND the `seeder_lock_guard_active` signal (log entry and/or `framework_gaps`
-  record) is emitted
-- AND an operator inspecting the seeder's output can determine, without
-  reading source, that IT authoring for ICO×PRS exists in the source JSON but
-  was NOT applied because a FrameworkVersion is locked
-
----
-
+- GIVEN a `framework_gaps` row for a now-anchored pair
+- WHEN the seeder runs against either a draft or published baseline
+- THEN the gap row is still resolved — `framework_gaps` is not catalogue
+  content and is never gated by revision state
 ### Requirement: Read-Only Org-Scoped Framework API
 
 The system MUST expose read-only HTTP endpoints (behind `auth:api` middleware
