@@ -827,15 +827,43 @@ Chain strategy: feature-branch-chain
 >       revision's defaults (matched by competency code) when the pinned revision has none.
 >       Release runbook: author defaults in a draft → publish → `php artisan
 >       beai:backfill-project-questions --dry-run` → run it for real.
-> - [ ] Z28 (api, same lineage, WARNINGs) — R1-001/R4-audit-rollback-deletes-platform-rows
->       (`2026_09_16_120000_make_audit_logs_organization_nullable.php:43-48`: `down()` deletes
->       platform audit rows); R3-backfill-includes-soft-deleted-projects
->       (`BackfillProjectQuestionsCommand.php:89-92`); R3-import-not-a-sync
->       (`CatalogueImportCommand.php:196-206`); R3-test-pins-500
->       (`InterviewabilityIngressRefusalTest.php:311`); R3-z4-422-shape-diverges
->       (`RoleController.php:116-130`); R2-duplicated-controller-scaffolding
->       (`BarsIndicatorController.php:36-41`). Suggestions: R2-discard-cascade-implicit,
->       R2-duplicated-sentinel, R2-exception-default-cause, R2-factory-docblock-position-claim.
+> - [x] Z28 (api, same lineage, WARNINGs; fixed in `1a42886`, `662040b`, `5e0f70a`, `a7da2eb`,
+>       `df5fd63`, `1855334`, `4b3f426`) — R1-001/R4-audit-rollback-deletes-platform-rows
+>       (`2026_09_16_120000_make_audit_logs_organization_nullable.php:43-48`: `down()` refuses
+>       with a `RuntimeException` and deletes nothing when a platform row exists, `1a42886`);
+>       R3-backfill-includes-soft-deleted-projects (`BackfillProjectQuestionsCommand.php:89-92`:
+>       `withoutGlobalScopes()` → `withoutGlobalScope('tenant')`, keeping `SoftDeletingScope`
+>       active, `662040b`); R3-import-not-a-sync (`CatalogueImportCommand.php:196-206`: additive
+>       by design — `CatalogueImportTest`'s own `--continue` case already asserts a competency
+>       added outside the import survives a subsequent import, which a real sync would delete —
+>       documented explicitly in the class docblock and `$description` rather than changed,
+>       `5e0f70a`); R3-test-pins-500 (`InterviewabilityIngressRefusalTest.php:311`:
+>       `ParticipantController::store()` now catches the duplicate-participant `QueryException`
+>       inside its own savepoint and returns a clean 409 with a machine-readable `reason`,
+>       matching `SsoLinkController`'s own conflict shape; the test now asserts 409, `a7da2eb`);
+>       R2-duplicated-controller-scaffolding (`BarsIndicatorController.php:36-41`: left as-is —
+>       `RoleController`'s own docblock already documents that hiding `abort_unless()` behind a
+>       shared helper previously dropped the 403 from Scramble's OpenAPI output on 3 of 5 routes,
+>       `PlatformUserController`'s own docblock corroborates it, so this duplication is
+>       deliberate, not an oversight). R3-z4-422-shape-diverges (`RoleController.php:116-130`) —
+>       investigated, NOT REPRODUCIBLE: every catalogue CRUD controller's Z4 `QueryException`
+>       catch (`RoleController`/`CompetencyController`/`DefaultQuestionController`/
+>       `BarsIndicatorController`) returns the byte-identical `{"error": <code>}` 422 shape today,
+>       confirmed by direct diff and by `CatalogueDraftDiscardOnPostValidationFailureTest`'s own
+>       passing assertion on this exact shape for `RoleController::store()`; no divergence found
+>       against HEAD `32e37dc`. Suggestions, all applied: R2-discard-cascade-implicit (documented
+>       the FK-cascade chain `DiscardUnusedDraftRevision` relies on, `4b3f426`); R2-duplicated-
+>       sentinel (`NO_PUBLISHED_REVISION` moved onto `CatalogueRevisionResolver`, shared by
+>       `FrameworkController` and `BarsIndicatorLoader`, `df5fd63`); R2-exception-default-cause
+>       (`RevisionPublishedDuringWriteException`'s `$cause` constructor arg is no longer
+>       defaulted, `1855334`); R2-factory-docblock-position-claim (`BarsIndicatorFactory`'s
+>       docblock corrected — `position` is run-wide unique via `faker->unique()`, not scoped to
+>       the (revision, role, competency) group, `4b3f426`). Also fixed, surfaced by `gga` on the
+>       R3-test-pins-500 commit: an M2M-supplied `status` reached `Participant::create()`
+>       unvalidated, bypassing the candidate lifecycle's `updating`-only transition guard —
+>       hardcoded to `in_attesa` on create, `a7da2eb`. Full coverage (94.0%), Pint, PHPStan,
+>       `ci-guards.sh`, and a fresh Postgres OpenAPI export (byte-identical, `openapi.json`
+>       committed with the 409/`status` schema changes) all verified against the final state.
 > - [ ] Z27 (api) — a catalogue locale value (e.g. a role's optional `it` name) cannot be
 >       cleared over HTTP: `ValidatesLocaleMaps` rejects `null`/`''`, and
 >       `HasTranslations::setTranslations()` merges, so omitting the key keeps the old value
@@ -848,7 +876,12 @@ Chain strategy: feature-branch-chain
 >       UI instead) and, optional, R3-role-form-cannot-clear-optional-locale
 >       (`RoleForm.vue:212-219`: an optional `it` value cannot be cleared once set).
 
-> **REQUIRED BEFORE ARCHIVE — baseline immutability at the database layer (G3).**
+> **DEFERRED 2026-09-17 by the product owner to a dedicated follow-up change** (G3.1–G3.3;
+> G3.2's factory and G3.4 are already done). The API already refuses these writes; the
+> residual risk is raw SQL or an insert that omits `revision_id`. This block no longer gates
+> archiving this change.
+>
+> **Baseline immutability at the database layer (G3).**
 > PR 3's content-immutability trigger (`2026_09_15_201434_enforce_catalogue_published_content_immutability.php`)
 > exempts the BASELINE revision, and the literal `DEFAULT <baseline id>` on `revision_id`
 > survives on `framework_bars_indicators` and `framework_role_competency`. Together that
