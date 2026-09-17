@@ -29,11 +29,14 @@ and a reference for the port, not the final architecture.
   red-green-refactor. Use the `sdd-*` and `tdd` skills.
 - **Test coverage target: 85%** overall; correctness-critical zones (scoring, tenant
   scoping, candidate state machine) held to ~95%.
-- **E2E:** Playwright with best practices on **both** Nuxt apps. Projects: **Chromium**
-  (desktop) and **WebKit/Safari** (desktop) tested fully; a **mobile viewport** project
-  asserts the *unsupported-experience* gate (SA-11), since the product is desktop-only
-  (Firefox excluded). **Every suite** (Pest + Vitest + Playwright) runs in CI/CD for
-  **both** frontend/backoffice **and** backend — no test tier is skipped in CI.
+- **E2E:** Playwright with best practices on **both** Nuxt apps. Both run **Chromium**
+  (desktop) and **WebKit/Safari** (desktop) fully. `frontend` additionally runs a
+  **mobile viewport** project asserting the *unsupported-experience* gate (SA-11), since
+  only the candidate interview needs a desktop browser with camera/microphone support
+  (Firefox excluded there too). `backoffice` has no such project and no browser/viewport
+  gate at all — REVERSED 2026-09-17, see the NFR entry below. **Every suite** (Pest +
+  Vitest + Playwright) runs in CI/CD for **both** frontend/backoffice **and** backend —
+  no test tier is skipped in CI.
 - **gentle-ai** is the active orchestration/review layer — keep it on.
 - **Git Flow**: `main` (production) + `develop` (integration). Work on
   `feature/*`, `release/*`, `hotfix/*`. **No deploy unless explicitly requested.**
@@ -194,8 +197,13 @@ owning slices (C2+), **not C1**. Do not install or wire any of them during C1.
   **opaque candidate identifier** is echoed unchanged in every webhook.
 - **Integration surface:** org-scoped M2M API; `progress` + `evaluation` webhooks
   (HMAC-signed, idempotent, retry/backoff); per-project exit redirect URL.
-- **NFR:** desktop only (Chrome/Edge/Opera/Safari; **Firefox and mobile excluded** →
-  "unsupported browser" gate); voice latency < 2–3 s; HTTPS; GDPR; tenant isolation;
+- **NFR:** the candidate-facing **`frontend`** is desktop only (Chrome/Edge/Opera/Safari;
+  **Firefox and mobile excluded** → "unsupported browser" gate) — REVERSED 2026-09-17: this
+  gate was mistakenly ported verbatim into `backoffice` too, blocking admins on mobile/tablet/
+  Firefox from a plain CRUD SPA with no camera or microphone requirement. `backoffice` carries
+  no browser or viewport gate and must stay usable from any modern browser at any width; only
+  `frontend` needs it, because only it runs the avatar interview and needs those devices.
+  Voice latency < 2–3 s; HTTPS; GDPR; tenant isolation;
   admin audit logs.
 - **i18n mandatory it/en** (desirable es/fr/de/pt): UI, TTS questions **and** evaluation
   must be consistent with the project language.

@@ -22,6 +22,15 @@
 
 ## 2. Target Browsers & Viewport
 
+> **Scope — `frontend` (candidate interview) only, REVERSED 2026-09-17.** This section,
+> and the SA-11 gate it describes, apply exclusively to the candidate-facing `frontend`
+> app: it needs a desktop browser with camera/microphone support to run the interview.
+> `backoffice` (the admin panel) is a plain CRUD SPA with no such requirement — it was
+> mistakenly gated the same way by a verbatim copy of `frontend`'s middleware, blocking
+> admins on mobile, tablet and Firefox for no functional reason. That copy has been
+> removed; `backoffice` carries no browser or viewport restriction and must render at any
+> width on any modern evergreen browser.
+
 | Browser | Supported | Notes |
 |---------|-----------|-------|
 | Chrome 120+ | Full | Primary target |
