@@ -1,5 +1,24 @@
 # Tasks: Framework Catalogue Authoring
 
+## Open follow-ups at archive (2026-09-17, accepted by the product owner)
+
+- **G3.1–G3.3** — baseline immutability at the database layer (drop the trigger's
+  `is_baseline` exemption, move ~46 catalogue-writing tests off the baseline, drop the
+  remaining `DEFAULT` on `revision_id`). Deferred to a dedicated change.
+- **5.5** — verify the revision migrations against a staging environment holding a copy of
+  real data before the production deploy.
+- **Z19** (optional, partial) — R1-001 audit migration `down()` wording, R4
+  `CatalogueImportCommand` TOCTOU, R2-002..R2-005.
+- **Z20** (human) — bump `CONVERSATION_PROMPT_VERSION` in `api/.env.example` together with the
+  `config/conversation.php` default (PR 7 changed the prompt template). Also add
+  `BEAI_INTERVIEWABILITY_GATE=true` to `api/.env.example`.
+- **Z27** (product decision) — how a catalogue locale value is cleared over HTTP.
+- **Z29** — non-blocking review warnings on the api (utterance lock vs `/end`, classifier
+  suffix word boundary, three inaccurate docblocks) plus suggestions.
+- **Release runbook** — `BEAI_INTERVIEWABILITY_GATE=false` → deploy → superadmin authors
+  default questions in a draft → publish → `php artisan beai:backfill-project-questions
+  --dry-run` → run it → `BEAI_INTERVIEWABILITY_GATE=true`.
+
 > Strict TDD active. Correctness-critical zones (~95% coverage): revision
 > resolution, `ProjectInterviewability`, `ApplyCompetencySelection`, the
 > publish sweep, the superadmin gate — this change touches two of the three
