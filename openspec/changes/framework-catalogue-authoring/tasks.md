@@ -822,6 +822,20 @@ Chain strategy: feature-branch-chain
 >       a failed load renders the empty state instead of the error state) and
 >       R3-indicator-move-no-inflight-guard (`CatalogueIndicatorsPanel.vue:60-78`: move up/down
 >       stays enabled during the multi-request swap, so a double click can race it).
+> - [x] Z22b (api, lineage review-a1fd77693a0cc8dc, CRITICAL R4-interviewability-rollout-unrecoverable,
+>       corrected in `32e37dc` and validated) — the backfill falls back to the latest published
+>       revision's defaults (matched by competency code) when the pinned revision has none.
+>       Release runbook: author defaults in a draft → publish → `php artisan
+>       beai:backfill-project-questions --dry-run` → run it for real.
+> - [ ] Z28 (api, same lineage, WARNINGs) — R1-001/R4-audit-rollback-deletes-platform-rows
+>       (`2026_09_16_120000_make_audit_logs_organization_nullable.php:43-48`: `down()` deletes
+>       platform audit rows); R3-backfill-includes-soft-deleted-projects
+>       (`BackfillProjectQuestionsCommand.php:89-92`); R3-import-not-a-sync
+>       (`CatalogueImportCommand.php:196-206`); R3-test-pins-500
+>       (`InterviewabilityIngressRefusalTest.php:311`); R3-z4-422-shape-diverges
+>       (`RoleController.php:116-130`); R2-duplicated-controller-scaffolding
+>       (`BarsIndicatorController.php:36-41`). Suggestions: R2-discard-cascade-implicit,
+>       R2-duplicated-sentinel, R2-exception-default-cause, R2-factory-docblock-position-claim.
 > - [ ] Z27 (api) — a catalogue locale value (e.g. a role's optional `it` name) cannot be
 >       cleared over HTTP: `ValidatesLocaleMaps` rejects `null`/`''`, and
 >       `HasTranslations::setTranslations()` merges, so omitting the key keeps the old value
