@@ -103,7 +103,7 @@ and UI labels are English — only the avatar's spoken content and the questions
 
 ## Architecture (demo)
 
-- **Provider abstraction** (`src/providers/types.ts`): one `InterviewProvider`
+- **Provider abstraction** (`legacy-demo/src/providers/types.ts`): one `InterviewProvider`
   interface both implementations satisfy, so the UI and persistence are
   provider-agnostic. Every transcript event is normalized to
   `{ role: 'user' | 'avatar', text, ts, seq? }`.
@@ -113,8 +113,8 @@ and UI labels are English — only the avatar's spoken content and the questions
     (camera off). Normalizes Daily `app-message` `conversation.utterance` events.
 - **Backend** (Astro `output: 'server'` + `@astrojs/node` standalone). API keys are
   read server-side only, never in the browser.
-- **Persistence**: `better-sqlite3` at `./data/interviews.db`, schema auto-created on
-  boot. `./data` is gitignored.
+- **Persistence**: `better-sqlite3` at `legacy-demo/data/interviews.db`, schema
+  auto-created on boot. `data/` is gitignored.
 
 ### Endpoints
 
@@ -139,16 +139,22 @@ and UI labels are English — only the avatar's spoken content and the questions
 
 ## Setup
 
+All commands below run from **`legacy-demo/`**, its own Astro project — not the
+wrapper root.
+
 ### 1. Install
 
 ```bash
+cd legacy-demo
 npm install
 ```
 
 ### 2. Environment
 
-`.env.example` / `.env` are protected by the local tooling, so create them yourself.
-Copy this into **`.env.example`** (secrets empty) and into **`.env`** (filled in):
+`.env.example` / `.env` are protected by the local tooling, so create them yourself
+**inside `legacy-demo/`** (Astro reads env from its own project root, not the
+wrapper's). Copy this into **`legacy-demo/.env.example`** (secrets empty) and into
+**`legacy-demo/.env`** (filled in):
 
 ```dotenv
 # HeyGen LiveAvatar
@@ -190,6 +196,8 @@ Context is created automatically at runtime from `questions.json` (no setup scri
 npm run dev
 ```
 
+(still from `legacy-demo/`.)
+
 Open **http://localhost:4321**. Mic + WebRTC work on `http://localhost` (a secure
 context), so no HTTPS setup is needed.
 
@@ -224,14 +232,14 @@ cheaper for your use case:
   **$0.37/min** (Basic/Starter overage, source tavus.io/pricing), with Tavus billing
   rules (30s minimum, rounded up to 6s). Free tier = 25 min/month, 1 concurrent stream.
 
-Rates live in `src/lib/pricing.ts` and can be overridden via the optional env vars
-above. Per-session cost is also recomputed on the `/review/:id` page from the stored
+Rates live in `legacy-demo/src/lib/pricing.ts` and can be overridden via the optional
+env vars above. Per-session cost is also recomputed on the `/review/:id` page from the stored
 duration, giving an apples-to-apples comparison across providers.
 
 ## Notes
 
 - Video starts at `quality: 'low'` (HeyGen) so latency feels instant while testing —
-  bump it in `src/pages/api/interview/start.ts` (`HEYGEN_VIDEO_QUALITY`).
+  bump it in `legacy-demo/src/pages/api/interview/start.ts` (`HEYGEN_VIDEO_QUALITY`).
 - Tavus free tier delivers the live utterance events we capture; the post-call full
   transcript webhook is a **paid** feature. Our capture is client-side, so it works on
   the free tier regardless.
