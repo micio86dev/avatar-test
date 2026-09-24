@@ -192,7 +192,7 @@ Test commands: `php artisan test --parallel`; coverage
       parent's pre-existing `onFieldChange()`/`withoutKey()` consumes exactly
       as it did before this PR. No file this PR touches contains a POST,
       PATCH, or DELETE to `/avatar-templates`.
-- [x] **5.2** — D5's residual risk: could NOT reconfirm live this session —
+- [ ] **5.2** — D5's residual risk: could NOT reconfirm live this session —
       the sandbox's permission system denies reading `.env` (`rg` blocked by
       a deny rule on `api/.env`), so no HeyGen/Tavus API key was reachable to
       make a live request. Proceeded on the existing recorded observation in
