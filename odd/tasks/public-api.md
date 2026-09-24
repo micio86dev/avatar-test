@@ -72,7 +72,8 @@ TDD, with every integration response validated against
 | P0.2 | 1 mapper | 4+ files (filesystems, signers, models, compose) | — | 4 claims spot-checked with rg |
 | P0.3 | 1 mapper | 20+ resource/model files | — | 3 claims spot-checked with rg |
 | P0.4 | inline | 2 doc files, no research left | 883528e | gga PASSED; RDD approved |
-| S1 | 2 writers (api, wrapper CI) | 12+ files across 2 repos | api 479d631 | pint, phpstan, pest 7/7 re-run by parent; shellcheck+dash re-run |
+| S1 | 2 writers (api, wrapper CI) | 12+ files across 2 repos | api 479d631, wrapper b928e0e | pint, phpstan, pest 7/7 re-run by parent; shellcheck+dash re-run; RDD approved both (lineages review-306e…, review-ef42…) |
+| S1 follow-ups | 2 writers | 5 api files, 6 wrapper files | wrapper 287ad87, api pending gate | RDD approved wrapper (review-e59b…); ambient 059d7c0-based candidate: lens_context_budget_exceeded (terminal, already covered piecewise) |
 
 ## Decision taken (2026-09-24)
 P0.5 commit was refused by the `gga` pre-commit gate: `openapi.yaml`
