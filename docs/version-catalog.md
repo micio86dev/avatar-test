@@ -74,7 +74,7 @@ parity removes an entire class of bug that only appears in production.
 | Node | `24.11` (LTS) | Via `node:24.11-slim`; the SSR runtime and the Vitest/Playwright runner |
 | Nuxt | `^4.4.8` (frontend), `^4.0` (backoffice) | Patch locked in each app's `bun.lock` |
 | Docker Compose | v2 (min v2.24) | `docker compose`, no hyphen |
-| Spectral CLI | `6.16.3` | Via `bunx --yes @stoplight/spectral-cli@6.16.3`; lints `docs/specs/public-api/openapi.yaml` against `docs/specs/public-api/.spectral.yaml` in the wrapper's `public-api-contract` CI job. Not a project dependency (no `bun.lock` entry) — invoked ad hoc per run via `bunx`, so the version is pinned here and at the call site instead |
+| Spectral CLI | `6.16.3` | A locked dependency of `tools/spectral/package.json`, resolved in `tools/spectral/bun.lock`; lints `docs/specs/public-api/openapi.yaml` against `docs/specs/public-api/.spectral.yaml` in the wrapper's `public-api-contract` CI job via `bun install --frozen-lockfile` + `bun run lint`. The pin lives in that lockfile, not `bunx` — the version here just mirrors it |
 
 Bun installs and builds; Node runs SSR and the test runners. That split is not
 a preference — Nuxt SSR and Playwright are officially Node-targeted, and the

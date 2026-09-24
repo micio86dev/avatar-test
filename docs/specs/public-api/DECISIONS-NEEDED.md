@@ -197,3 +197,7 @@ Status legend: **open** (owner decision pending), **resolved** (owner ruled).
   in exactly four places (`/health.status`, `Recording.kind`, and the two
   webhook `event` discriminators), all top level. Any future nested `const`
   must extend the check; `T-CONTRACT-002` guards the top-level case.
+- The API's `tests/Contract/ContractValidatorTest.php` covers top-level and
+  top-level-`allOf` consts, and a nested `const` added to the contract must
+  come with an extension of `ContractValidator::assertDeclaredConstProperties()`
+  — the API writer is extending it to `allOf` right now.

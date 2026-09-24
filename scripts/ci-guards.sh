@@ -3115,7 +3115,7 @@ catalog_short_bars_anchors() {
 # division of labour) owns the operator-facing message for each exit code.
 # On exit 2 it names the missing path on stderr, because that is the one
 # case where the caller cannot tell which of the two files was absent.
-public_api_contract_divergence() {
+public_api_contract_identical() {
   CI_PACD_SRC="$1"
   CI_PACD_VENDORED="$2"
   if [ ! -f "$CI_PACD_SRC" ]; then

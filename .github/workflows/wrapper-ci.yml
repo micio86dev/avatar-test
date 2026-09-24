@@ -81,7 +81,7 @@
 # `wrapper-cross-stack`, and this is a second job so a Spectral failure or a
 # vendored-copy drift is reported against its own contract rather than
 # folded into that job's already-long step list. Its guard function,
-# `public_api_contract_divergence`, lives in scripts/ci-guards.sh beside the
+# `public_api_contract_identical`, lives in scripts/ci-guards.sh beside the
 # others and is self-tested in (f) the same way every other guard is — one
 # mechanism, proved once, used by whichever job needs it.
 #
@@ -1538,7 +1538,7 @@ jobs:
           mkdir -p "$FIXTURE/pac-src" "$FIXTURE/pac-vendored"
           printf 'openapi: 3.1.0\ninfo:\n  title: BEAI Public API\n' > "$FIXTURE/pac-src/openapi.yaml"
           cp "$FIXTURE/pac-src/openapi.yaml" "$FIXTURE/pac-vendored/openapi.yaml"
-          if public_api_contract_divergence "$FIXTURE/pac-src/openapi.yaml" "$FIXTURE/pac-vendored/openapi.yaml"; then
+          if public_api_contract_identical "$FIXTURE/pac-src/openapi.yaml" "$FIXTURE/pac-vendored/openapi.yaml"; then
             echo "  ok — public-api-contract guard accepts a byte-identical vendored copy"
           else
             echo "SELF-TEST FAILED: the public-api-contract guard rejected two byte-identical files."
@@ -1546,7 +1546,7 @@ jobs:
           fi
 
           printf '\n# tampered\n' >> "$FIXTURE/pac-vendored/openapi.yaml"
-          if public_api_contract_divergence "$FIXTURE/pac-src/openapi.yaml" "$FIXTURE/pac-vendored/openapi.yaml"; then
+          if public_api_contract_identical "$FIXTURE/pac-src/openapi.yaml" "$FIXTURE/pac-vendored/openapi.yaml"; then
             echo "SELF-TEST FAILED: the public-api-contract guard called a byte-altered vendored copy identical."
             FAILED=1
           else
@@ -1556,7 +1556,7 @@ jobs:
           # Captured via if/else — same `bash -e` trap as the JSON-drift rows
           # above; a bare call would abort this step on the very exit code
           # being asserted.
-          if public_api_contract_divergence "$FIXTURE/pac-src/openapi.yaml" "$FIXTURE/pac-src/missing.yaml" 2>/dev/null; then
+          if public_api_contract_identical "$FIXTURE/pac-src/openapi.yaml" "$FIXTURE/pac-src/missing.yaml" 2>/dev/null; then
             PAC_STATUS=0
           else
             PAC_STATUS=$?
@@ -1568,7 +1568,7 @@ jobs:
             FAILED=1
           fi
           # The missing-SOURCE branch is a separate early return; prove it too.
-          if public_api_contract_divergence "$FIXTURE/pac-src/missing.yaml" "$FIXTURE/pac-vendored/openapi.yaml" 2>/dev/null; then
+          if public_api_contract_identical "$FIXTURE/pac-src/missing.yaml" "$FIXTURE/pac-vendored/openapi.yaml" 2>/dev/null; then
             PAC_STATUS=0
           else
             PAC_STATUS=$?
@@ -3822,7 +3822,7 @@ jobs:
   #      hand-maintained duplicate, so nothing short of the two staying
   #      byte-for-byte the same is the contract.
   #
-  # `public_api_contract_divergence`, the guard behind check 2, lives in
+  # `public_api_contract_identical`, the guard behind check 2, lives in
   # scripts/ci-guards.sh beside every other guard this repo's CI relies on —
   # see that file's own header for why one definition, sourced by both the
   # real gate here and the self-test in wrapper-cross-stack step (f), is the
@@ -3887,18 +3887,24 @@ jobs:
       # actually holds that claim to CI rather than leaving it as prose
       # nobody re-checks.
       #
-      # @stoplight/spectral-cli is pinned to an exact version on the command
-      # line (not `@latest`) and in docs/version-catalog.md, for the same
-      # `tag_pinned`/D25 reason every Docker tag and GitHub Action in this
-      # workflow is pinned: an unpinned linter can start failing a
-      # previously-clean contract on a day nobody touched this repo.
+      # @stoplight/spectral-cli is a locked dependency of tools/spectral/
+      # (its own package.json + committed bun.lock), installed here with
+      # `bun install --frozen-lockfile` — not invoked ad hoc via `bunx --yes`.
+      # Spectral's own transitive dependencies were otherwise unpinned on
+      # every run, and `--yes` is an npx-style flag whose acceptance by this
+      # job's pinned bun-version was unproven. A committed lockfile pins the
+      # whole resolved tree, the same `tag_pinned`/D25 reason every Docker
+      # tag and GitHub Action in this workflow is pinned: an unpinned
+      # dependency can start failing a previously-clean contract on a day
+      # nobody touched this repo. See docs/version-catalog.md's Spectral row.
       # -----------------------------------------------------------------------
+      - name: Install Spectral (locked)
+        working-directory: tools/spectral
+        run: bun install --frozen-lockfile
+
       - name: Spectral lint — docs/specs/public-api/openapi.yaml
-        run: |
-          bunx --yes @stoplight/spectral-cli@6.16.3 lint \
-            --ruleset docs/specs/public-api/.spectral.yaml \
-            -F hint \
-            docs/specs/public-api/openapi.yaml
+        working-directory: tools/spectral
+        run: bun run lint
 
       # -----------------------------------------------------------------------
       # 2. Vendored copy parity: api/public-api/openapi.yaml must be
@@ -3916,7 +3922,7 @@ jobs:
           # shellcheck disable=SC1091
           . ./scripts/ci-guards.sh
 
-          if public_api_contract_divergence docs/specs/public-api/openapi.yaml api/public-api/openapi.yaml; then
+          if public_api_contract_identical docs/specs/public-api/openapi.yaml api/public-api/openapi.yaml; then
             PACD_STATUS=0
           else
             PACD_STATUS=$?
