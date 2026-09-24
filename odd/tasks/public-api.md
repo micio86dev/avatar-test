@@ -68,8 +68,9 @@ TDD, with every integration response validated against
       (`T-INT-017..025`; api 9179443/a86269f/c9a7599/9e2e287 + follow-ups
       da87df1; RDD approved all four slices; gga approved follow-ups on
       first pass; full suite 4261 green).
-- [ ] S7 Webhook delivery log + redeliver over the existing C10 path
-      (`T-WH`, `T-WHD`).
+- [x] S7 Webhook delivery log + redeliver over the existing C10 path
+      (`T-WHD-001..019`; api a8d4080; gga round 2 approved; full suite 4282
+      green). T-WH-001..012 signature/retry/dedupe already covered by C10.
 - [ ] S8 Exports (`T-EXP-001..010`), usage (`T-USAGE-001..004`).
 - [ ] S9 Test mode + mock provider (`T-TEST-001..006`).
 - [ ] S10 `@beai/embed` package (`T-SDK-001..020`), Playwright E2E, ≤ 12 KB gz CI gate.

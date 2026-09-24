@@ -503,3 +503,16 @@ Status legend: **open** (owner decision pending), **resolved** (owner ruled).
 - `started_at_seconds` is the primary question's own timestamp relative to
   the participant's `started_at`; `answer_duration_seconds` spans the
   candidate's own turns for that question only.
+
+### G-50 — Ambient review hook re-triggers against a stale boundary · observed, not actioned
+- The stop hook periodically offers an "ambient" candidate spanning
+  `059d7c0..HEAD` (the wrapper's state before this feature branch), which
+  duplicates dozens of commits already reviewed and acknowledged
+  individually as the feature progressed. It also exceeds the reviewer
+  context budget as one candidate.
+- **Choice.** Continue advancing the real per-commit review boundary (each
+  wrapper pin and each api slice, reviewed and acknowledged at commit
+  time) rather than re-slicing the entire historical range to satisfy the
+  stale ambient trigger, which would only re-review already-approved
+  content. Not disabling RDD; just not chasing this specific stale
+  boundary.
