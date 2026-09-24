@@ -235,3 +235,15 @@ Status legend: **open** (owner decision pending), **resolved** (owner ruled).
   against `components.schemas.Problem` plus the `X-Request-Id` header via
   `assertProblemMatchesContract`. Step 4 re-points the auth tests at
   `/organization` for operation-level validation.
+
+## Found by the RDD review of step 2 (lineage review-079d24d11364b4d0)
+
+### G-24 — Test-mode keys must never reach the internal M2M surface · resolved · step 2 follow-up
+- The step 2 commit let `POST /api/m2m/clients` mint `mode=test` keys while
+  the shared resolver accepted them on every `/api/m2m/*` route, so a test
+  key could read live tenant data through the calling-system integration.
+- **Choice.** The `api-m2m` guard rejects test-mode clients (401); only the
+  `/api/v1` middleware accepts them, and step 9 partitions their data. The
+  legacy hash fallback is skipped for test keys and gated by a cached
+  "legacy rows exist" flag for live keys. Mode values live in the
+  `ApiKeyMode` enum; `prefixOf()` refuses malformed keys.
