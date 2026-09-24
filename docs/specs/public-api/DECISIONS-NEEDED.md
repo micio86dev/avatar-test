@@ -247,3 +247,39 @@ Status legend: **open** (owner decision pending), **resolved** (owner ruled).
   legacy hash fallback is skipped for test keys and gated by a cached
   "legacy rows exist" flag for live keys. Mode values live in the
   `ApiKeyMode` enum; `prefixOf()` refuses malformed keys.
+
+## Found while briefing step 3 (2026-09-24)
+
+### G-25 — Per-organization rate limits · resolved · step 3
+- §3.2 says the limits are "configurable per org in backoffice".
+- **Choice.** Two nullable integer columns on `organizations`
+  (`public_api_rate_limit_live`, `public_api_rate_limit_test`); null means
+  the config defaults (600 and 120 per minute, env-overridable). The
+  backoffice editor for them belongs to step 11's backoffice additions.
+
+### G-26 — Idempotency storage · resolved · step 3
+- **Choice.** Idempotent responses (2xx only) are stored in the configured
+  cache store (Redis in production) for 24 h, keyed by
+  `sha256(org|mode|method|path|key)` with a body fingerprint; concurrency
+  uses `Cache::lock`. No table is introduced; a cache flush replays nothing
+  and never returns a wrong response.
+
+## Found during step 3 (2026-09-24)
+
+### G-27 — 405 answers as 404 `not_found` · resolved · step 3
+- `ErrorCode` has no method-not-allowed entry.
+- **Choice.** Unknown method → `404 not_found`, consistent with the
+  no-enumeration principle: the method surface is not revealed.
+
+### G-28 — Query-parameter errors use 400, not 422 · open until step 4 Part A
+- Step 3 mapped `?limit=`/`?cursor=` validation to `422 validation_failed`.
+  §3.2 and the contract declare `400` (`BadRequest`) on list operations and
+  reserve `422` for request bodies.
+- **Choice.** Step 4 remaps query-parameter validation to
+  `400 validation_failed` with the same `errors[]` shape; `invalid_cursor`
+  and `invalid_expand` stay `400`. `T-CONV-002` is updated accordingly.
+
+### G-29 — Cursor HMAC key · resolved · step 3
+- The opaque cursor is signed with the raw `app.key` string (not the
+  base64-decoded bytes). It is an anti-tampering measure only; the cursor
+  position is not a secret.
