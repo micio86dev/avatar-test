@@ -271,15 +271,71 @@ Status legend: **open** (owner decision pending), **resolved** (owner ruled).
 - **Choice.** Unknown method → `404 not_found`, consistent with the
   no-enumeration principle: the method surface is not revealed.
 
-### G-28 — Query-parameter errors use 400, not 422 · open until step 4 Part A
+### G-28 — Query-parameter errors use 400, not 422 · resolved · step 3 review follow-up
 - Step 3 mapped `?limit=`/`?cursor=` validation to `422 validation_failed`.
   §3.2 and the contract declare `400` (`BadRequest`) on list operations and
   reserve `422` for request bodies.
-- **Choice.** Step 4 remaps query-parameter validation to
-  `400 validation_failed` with the same `errors[]` shape; `invalid_cursor`
-  and `invalid_expand` stay `400`. `T-CONV-002` is updated accordingly.
+- **Choice.** `?limit=` now raises `App\Exceptions\PublicApi\
+  QueryValidationException` (a tagged `ValidationException` subtype) from
+  `CursorPage::resolveLimit()`, which `PublicApiExceptionRenderer` maps to
+  `400 validation_failed` with the same `errors[]` shape — matched BEFORE
+  the plain `ValidationException` case, which stays `422` and now covers
+  request-BODY validation only. `invalid_cursor` and `invalid_expand`
+  already answered `400` and are unchanged. `T-CONV-002` is updated
+  accordingly. `metadata[…]` QUERY filters do not exist yet (no endpoint
+  uses them today — only the request-BODY `metadata` object, via
+  `App\Rules\PublicApi\Metadata`, which correctly stays `422`); the same
+  `QueryValidationException` pattern applies whenever step 4+ adds one.
 
 ### G-29 — Cursor HMAC key · resolved · step 3
 - The opaque cursor is signed with the raw `app.key` string (not the
   base64-decoded bytes). It is an anti-tampering measure only; the cursor
   position is not a secret.
+
+## Found by the four-lens review of step 3 (2026-09-24)
+
+### G-30 — RateLimitPublicApi is a fixed-window counter, not a token bucket · resolved · step 3 review follow-up
+- SPEC.md §3.2 says "per organization, token bucket"; the actual
+  implementation (`Illuminate\Cache\RateLimiter`, the same primitive every
+  `throttle:` middleware in the framework is built on) is a FIXED-WINDOW
+  counter. The two are not interchangeable: a token bucket refills
+  smoothly and bounds the rate everywhere on the timeline; a fixed window
+  resets at a hard boundary, so a client sending `max` requests at the end
+  of one window and `max` more at the start of the next can push up to
+  `2 * max` requests through a short span straddling that boundary.
+- **Choice.** Accepted as a documented deviation from the spec's literal
+  wording — implementing a true token bucket is out of scope for this
+  follow-up. `RateLimitPublicApi`'s own docblock, `AppServiceProvider`'s
+  named-limiter registration, and `config/public_api.php`'s rate-limit
+  block all now say so explicitly, so the gap is documented at every place
+  that otherwise repeats the spec's "token bucket" phrase verbatim.
+  Distinct from — and not to be confused with — the INTRA-window
+  check-then-hit race also found in this review (fixed separately: a
+  single window can never itself exceed `max`, burst or not, now that the
+  middleware hits the counter and compares its OWN atomic return value
+  instead of a separate, later `attempts()` read).
+
+### G-31 — A policy AuthorizationException on /v1 renders 404, not 403 · resolved · step 3 review follow-up
+- `PublicApiExceptionRenderer` had an `AuthorizationException → 403
+  insufficient_scope` mapping that could never fire: Laravel's own
+  `Illuminate\Foundation\Exceptions\Handler::prepareException()` converts
+  every `AuthorizationException` with no explicit status to
+  `AccessDeniedHttpException` BEFORE any render callback — including this
+  one — ever sees it. The exception actually reaching the renderer fell
+  through to the generic `HttpExceptionInterface` branch instead, which
+  answered `403 validation_failed` — a status/code pairing the contract
+  does not define and that materially mischaracterises a policy denial as
+  a validation failure.
+- **Choice.** `AccessDeniedHttpException` (the one that actually arrives)
+  and `AuthorizationException` (kept for defence in depth, in case
+  something renders one directly without going through Laravel's own
+  handler) both now map to `404 not_found`, not `403`. `403
+  insufficient_scope` stays reserved for `App\Http\Middleware\PublicApi\
+  RequireScope`'s own direct response, built for a resolved client whose
+  `abilities` genuinely lack a named scope — never for a Gate/policy
+  denial. A `403` on a policy denial would also tell an unauthorized
+  caller a resource EXISTS at all, the same existence-oracle concern
+  `NotFound`'s own contract description already raises for a cross-org
+  resource (mirrors G-27's reasoning for the 405→404 collapse); `404`
+  costs nothing a legitimate caller needs and reveals nothing to one that
+  is not.

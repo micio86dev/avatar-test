@@ -76,7 +76,8 @@ TDD, with every integration response validated against
 | P0.4 | inline | 2 doc files, no research left | 883528e | gga PASSED; RDD approved |
 | S1 | 2 writers (api, wrapper CI) | 12+ files across 2 repos | api 479d631, wrapper b928e0e | pint, phpstan, pest 7/7 re-run by parent; shellcheck+dash re-run; RDD approved both (lineages review-306e…, review-ef42…) |
 | S2 | 1 writer (api) | migration, 7 new classes, 6 changed, 3 test files | api 24219b9 | pint, phpstan L8, pest 354/354 re-run by parent; post-hoc RED observed; RDD 4-lens approved (review-079d…), 2 security warnings → G-24 follow-up |
-| S3 | 1 writer (api) | 7 new classes, 2 migrations, 12 test files | api 1ce0167 | pint, phpstan L8, pest 423/423 re-run by parent; post-hoc RED observed (45 errors) |
+| S3 | 1 writer (api) | 7 new classes, 2 migrations, 12 test files | api 1ce0167 | pint, phpstan L8, pest 423/423 re-run by parent; post-hoc RED observed (45 errors); RDD 4-lens approved (review-6456…), 13 advisory → S3 follow-up writer |
+| S3 follow-ups | 1 writer (api) | 13 findings, 8 app files, 9 test files | api 7f0e1ce | pint, phpstan L8, pest 112/112 re-run by parent; gga required tests/Helpers move |
 | S2 follow-ups | 1 writer (api) | 7 findings, ~25 files incl. fixture cleanup | api a49e7b1 | pint, phpstan L8, pest 426/426 re-run by parent; RDD 4-lens approved (review-db76…), 6 advisory → S3 Part A |
 | S1 follow-ups | 2 writers | 5 api files, 6 wrapper files | wrapper 287ad87, api pending gate | RDD approved wrapper (review-e59b…); ambient 059d7c0-based candidate: lens_context_budget_exceeded (terminal, already covered piecewise) |
 
@@ -93,4 +94,7 @@ stay as authored (G-00).
 
 ## Next step
 S4 read endpoints: organization, projects (`T-PRJ`, `T-EXPOSE-001/002`),
-public ids (G-05), allowed_domains; Part A: G-28 remap to 400.
+public ids (G-05), allowed_domains. G-28 (query-parameter errors → 400) was
+resolved early, applied together with the step 3 four-lens review follow-ups
+(G-30, G-31) rather than deferred to step 4 Part A — see
+`docs/specs/public-api/DECISIONS-NEEDED.md`.
