@@ -339,3 +339,60 @@ Status legend: **open** (owner decision pending), **resolved** (owner ruled).
   resource (mirrors G-27's reasoning for the 405→404 collapse); `404`
   costs nothing a legitimate caller needs and reveals nothing to one that
   is not.
+
+## Found while briefing step 5 (2026-09-24)
+
+### G-32 — Session-token exchange reuses the candidate JWT, not a cookie · open · step 5
+- §3.5 exchanges the single-use token for an httpOnly `SameSite=None`
+  cookie. The frontend already runs the whole interview on a bearer
+  candidate JWT (`CandidateTokenFactory::mintCandidateToken`, stored by
+  `useCandidateSession`), and the existing SSO link already enforces
+  single use atomically (`consumeJti`). A cookie would add a second
+  credential path and inherits the third-party-cookie failure G-11 describes.
+- **Choice.** `GET /api/embed/exchange?token=<session_token>` verifies the
+  public session token (dedicated secret `PUBLIC_API_SESSION_SECRET`, HS256,
+  `aud=embed`, `sub=int_…`, `jti`), consumes the `jti` atomically, records
+  the `token_consumed` event, and answers `200 {access_token}` (the existing
+  candidate JWT). A consumed or revoked token answers `410 token_consumed`;
+  an expired, mis-signed or wrong-audience token `401 token_invalid`; a
+  token whose interview is no longer `pending` `410 token_consumed`. The
+  hosted page stores the candidate JWT exactly as the SSO link flow does;
+  the embed page (step 10) keeps it in memory and `sessionStorage`. The
+  cookie-flag test in `T-TOK` becomes "no cookie is set". Owner may still
+  ask for the cookie variant later; it would be additive.
+
+### G-33 — Hosted page in step 5, embed page in step 10 · resolved
+- §2 says the hosted page IS the iframe content. The frontend today sets
+  `X-Frame-Options: DENY` globally and has no `frame-ancestors`.
+- **Choice.** Step 5 ships `/i/{token}` (top-level, same chrome as the SSO
+  link flow, no framing). Step 10 adds `/embed/{token}` on the same
+  component with `frame-ancestors` from the organization's allowed
+  domains, the `Permissions-Policy` for the iframe, and the postMessage
+  protocol. Framing stays denied until then.
+
+### G-34 — Interview events table · resolved · step 5
+- `/interviews/{id}/events` needs a timeline the domain does not store.
+- **Choice.** New tenant-scoped `interview_events` table (`public_id`
+  `evt_…`, `participant_id`, `type`, `occurred_at`, small `data` jsonb).
+  Step 5 records `created`, `invited`, `token_consumed`; step 6 records the
+  session and readiness events from the existing candidate controllers and
+  jobs. Never PII or transcript text in `data`.
+
+## Found during step 4 (2026-09-24)
+
+### G-35 — /v1 middleware priority ordering · resolved · step 4
+- Laravel's `SortedMiddleware` placed `RequireScope` (priority-listed) before
+  `AuthenticatePublicApi` (not listed), so the scope check fell through to
+  the lazily resolved `api-m2m` guard, whose `RequestGuard` caches the user
+  for the guard instance's lifetime. Steps 2 and 3 shipped with this latent
+  defect; step 4's first scoped business route exposed it.
+- **Choice.** The whole `/v1` stack is on the priority list in order:
+  `AssignRequestId → RejectApiKeyInQuery → AuthenticatePublicApi →
+  PublicApiTenantContext → RateLimitPublicApi → RequireScope →
+  SubstituteBindings`, pinned by a test.
+
+### G-36 — Public `{project}` binding is resolved in the controller · resolved · step 4
+- The admin `apiResource('projects')` binds `{project}` to the integer id.
+- **Choice.** Public controllers decode the prefixed public id themselves
+  (`PublicId::decode` + `wherePublicId`), never through a global binding
+  resolver, so admin routes are untouched.
