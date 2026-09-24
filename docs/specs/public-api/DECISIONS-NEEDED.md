@@ -396,3 +396,74 @@ Status legend: **open** (owner decision pending), **resolved** (owner ruled).
 - **Choice.** Public controllers decode the prefixed public id themselves
   (`PublicId::decode` + `wherePublicId`), never through a global binding
   resolver, so admin routes are untouched.
+
+## Found while briefing step 6 (2026-09-24)
+
+### G-37 — Two meanings of `question_index` · resolved · step 6
+- In the domain `InterviewSession.question_index` is the competency's
+  position in the project (one session per competency). The public
+  `answers[]` item needs the ordinal of the primary question inside that
+  competency, and no table stores it: the asked questions are the session's
+  `primary_questions` snapshot, and each avatar turn tagged `primary` maps
+  to the next entry of that list (`TurnClassifier`).
+- **Choice.** Public `answers[].question_index` is the 0-based ordinal of
+  the primary question within the competency, derived by replaying the
+  session's `primary` avatar turns in `ts, id` order; `question_text` is
+  `primary_questions[question_index]`; `answer_text` joins the candidate
+  turns up to the next primary avatar turn; `started_at_seconds` and
+  `answer_duration_seconds` are deltas of utterance timestamps relative to
+  the participant's `started_at`. The public transcript keeps
+  `competency_code` on every turn and `question_index` in that same
+  derived sense. Follow-up avatar turns carry `question_index` of the
+  primary question they follow.
+
+### G-38 — Interview events are recorded at the existing seams · resolved · step 6
+- **Choice.** `session_started`/`session_ended` from `InterviewController`
+  `start`/`end`, `question_asked`/`answer_recorded` from the utterance
+  insert path (`turn_kind = primary` avatar turns, candidate turns),
+  `under_evaluation` + `transcript_ready` from the completion CAS,
+  `completed`/`error` + `scoring_ready` from `ScoreEvaluationJob`. `data`
+  carries only `competency_code` and `question_index`.
+
+## Found during step 5 (2026-09-24)
+
+### G-39 — Exchange error codes live outside the `/v1` enum · resolved · step 5
+- `GET /api/embed/exchange` is not a `/v1` operation; it answers problem+json
+  with `token_invalid` (401) and `token_consumed` (410), which the `/v1`
+  `ErrorCode` enum does not list.
+- **Choice.** Kept as documented in G-32; the embed/hosted page maps them.
+  Step 11 documents the exchange as its own section of the developer docs.
+
+### G-40 — `hosted_url` is null on reads · resolved · step 5
+- A hosted URL embeds a token; a read cannot mint one.
+- **Choice.** `Interview.hosted_url` is `null` on list and detail; the create
+  and session-token responses carry it. The contract already allows null.
+
+### G-41 — `HasPublicId` keeps the live column check · resolved · step 5
+- The step 4 review asked to drop the per-insert `Schema::hasColumn()`.
+  `BaselineRevisionMigrationTest` creates rows after rolling back past the
+  `public_id` migration, so an explicit fixture cannot work, and a static
+  cache broke that test in a batch.
+- **Choice.** The live check stays; it costs one catalogue query per
+  organization/project/participant insert, which are rare writes.
+
+### G-42 — Raw SQL insert paths must mint the public id themselves · resolved · step 5
+- `SsoExchangeController` inserts participants with raw SQL, bypassing the
+  Eloquent `creating` hook. The step 5 writer added the ULID to that INSERT
+  and to the duplicated SQL in the concurrency test. Any future raw insert
+  into a `HasPublicId` table must do the same; the Arch test pins the models,
+  not the SQL.
+
+### G-43 — Email case normalisation · open · step 5
+- `participants_project_id_email_unique` is a plain `(project_id, email)`
+  index; the SSO ingress stores the address as received. The public create
+  path lower-cases the address and checks duplicates case-insensitively,
+  and the public list filter already matches on `lower(email)`.
+- **Owner decides.** Whether to normalise the SSO path too and replace the
+  unique index with a functional `lower(email)` index (a migration on a
+  live table with a backfill that may collide).
+
+### G-44 — Idempotency records are encrypted at rest · resolved · step 5
+- A replayed `POST /v1/interviews` carries the original session token for
+  up to 24 h (spec §3.5, G-16). The stored record is encrypted with the app
+  key so no live credential sits in Redis in clear.

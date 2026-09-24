@@ -61,8 +61,9 @@ TDD, with every integration response validated against
       - [x] frontend `/i/[token]` written and green (T-TOK-011..014, E2E);
             UNCOMMITTED: gga requires the response type from the generated
             client, so it commits after api S5 + openapi sync + codegen.
-      - [ ] api: enrolment, lifecycle mapping, session tokens + exchange,
-            interview_events, participants columns.
+      - [x] api: enrolment, lifecycle mapping, session tokens + exchange,
+            interview_events, participants columns (T-INT-001..016,
+            T-TOK-001..010; api `cc6ecc3`; four gga rounds, 23 findings fixed).
 - [ ] S6 Transcript / answers / scoring / audio recording / events (`T-INT` rest).
 - [ ] S7 Webhook delivery log + redeliver over the existing C10 path
       (`T-WH`, `T-WHD`).
@@ -84,7 +85,8 @@ TDD, with every integration response validated against
 | S1 | 2 writers (api, wrapper CI) | 12+ files across 2 repos | api 479d631, wrapper b928e0e | pint, phpstan, pest 7/7 re-run by parent; shellcheck+dash re-run; RDD approved both (lineages review-306e…, review-ef42…) |
 | S2 | 1 writer (api) | migration, 7 new classes, 6 changed, 3 test files | api 24219b9 | pint, phpstan L8, pest 354/354 re-run by parent; post-hoc RED observed; RDD 4-lens approved (review-079d…), 2 security warnings → G-24 follow-up |
 | S3 | 1 writer (api) | 7 new classes, 2 migrations, 12 test files | api 1ce0167 | pint, phpstan L8, pest 423/423 re-run by parent; post-hoc RED observed (45 errors); RDD 4-lens approved (review-6456…), 13 advisory → S3 follow-up writer |
-| S4 | 1 writer (api) | 2 migrations, 9 new classes, 8 changed, 10 test files | api c807d32 | pint, phpstan L8, pest 567/567 re-run by parent; post-hoc RED observed (20 errors) |
+| S5 api | 1 writer (api) | 2 migrations, ~15 new classes, 4 gga rounds | api cc6ecc3 | pint, phpstan L8, pest 312/312 re-run by parent; post-hoc RED observed (29); writer's full suite 4137 green |
+| S4 | 1 writer (api) | 2 migrations, 9 new classes, 8 changed, 10 test files | api c807d32 | pint, phpstan L8, pest 567/567 re-run by parent; post-hoc RED observed (20 errors); RDD 4-lens approved (review-55d9…), 10 advisory → S5 Part A |
 | S3 follow-ups | 1 writer (api) | 13 findings, 8 app files, 9 test files | api 7f0e1ce | pint, phpstan L8, pest 112/112 re-run by parent; gga required tests/Helpers move; RDD approved (review-7184…), 3 advisory → S4 Part A |
 | S2 follow-ups | 1 writer (api) | 7 findings, ~25 files incl. fixture cleanup | api a49e7b1 | pint, phpstan L8, pest 426/426 re-run by parent; RDD 4-lens approved (review-db76…), 6 advisory → S3 Part A |
 | S1 follow-ups | 2 writers | 5 api files, 6 wrapper files | wrapper 287ad87, api pending gate | RDD approved wrapper (review-e59b…); ambient 059d7c0-based candidate: lens_context_budget_exceeded (terminal, already covered piecewise) |
