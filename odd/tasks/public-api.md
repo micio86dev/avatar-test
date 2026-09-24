@@ -64,7 +64,10 @@ TDD, with every integration response validated against
       - [x] api: enrolment, lifecycle mapping, session tokens + exchange,
             interview_events, participants columns (T-INT-001..016,
             T-TOK-001..010; api `cc6ecc3`; four gga rounds, 23 findings fixed).
-- [ ] S6 Transcript / answers / scoring / audio recording / events (`T-INT` rest).
+- [x] S6 Transcript / answers / scoring / audio recording / events
+      (`T-INT-017..025`; api 9179443/a86269f/c9a7599/9e2e287 + follow-ups
+      da87df1; RDD approved all four slices; gga approved follow-ups on
+      first pass; full suite 4261 green).
 - [ ] S7 Webhook delivery log + redeliver over the existing C10 path
       (`T-WH`, `T-WHD`).
 - [ ] S8 Exports (`T-EXP-001..010`), usage (`T-USAGE-001..004`).
@@ -86,7 +89,7 @@ TDD, with every integration response validated against
 | S2 | 1 writer (api) | migration, 7 new classes, 6 changed, 3 test files | api 24219b9 | pint, phpstan L8, pest 354/354 re-run by parent; post-hoc RED observed; RDD 4-lens approved (review-079d…), 2 security warnings → G-24 follow-up |
 | S3 | 1 writer (api) | 7 new classes, 2 migrations, 12 test files | api 1ce0167 | pint, phpstan L8, pest 423/423 re-run by parent; post-hoc RED observed (45 errors); RDD 4-lens approved (review-6456…), 13 advisory → S3 follow-up writer |
 | S5 api | 1 writer (api) | 2 migrations, ~15 new classes, 4 gga rounds | api cf29bf2, 3520b3f, e1ef9eb, 1a740aa (re-cut of cc6ecc3: lens_context_budget_exceeded) | RDD approved all four slices (review-09a6…, review-3528…, review-44ab…, review-f367…), 31 advisory → S5 follow-up writer; backoffice schema-name collision found by codegen | pint, phpstan L8, pest 312/312 re-run by parent; post-hoc RED observed (29); writer's full suite 4137 green |
-| S5 follow-ups | 1 writer (api) | 31 findings + schema names + Scramble contract, 30 files | api 5fbfd6b | pint, phpstan L8, pest 328/328 re-run by parent; writer's full suite 4180 green |
+| S5 follow-ups | 1 writer (api) | 31 findings + schema names + Scramble contract, 30 files | api c3f2dc7 + ae16aa7 (re-cut of 5fbfd6b) | pint, phpstan L8, pest 328/328 re-run by parent; writer's full suite 4180 green; RDD approved both slices (review-9a41…, review-aaaa…), 14 advisory → S6 Part A |
 | S4 | 1 writer (api) | 2 migrations, 9 new classes, 8 changed, 10 test files | api c807d32 | pint, phpstan L8, pest 567/567 re-run by parent; post-hoc RED observed (20 errors); RDD 4-lens approved (review-55d9…), 10 advisory → S5 Part A |
 | S3 follow-ups | 1 writer (api) | 13 findings, 8 app files, 9 test files | api 7f0e1ce | pint, phpstan L8, pest 112/112 re-run by parent; gga required tests/Helpers move; RDD approved (review-7184…), 3 advisory → S4 Part A |
 | S2 follow-ups | 1 writer (api) | 7 findings, ~25 files incl. fixture cleanup | api a49e7b1 | pint, phpstan L8, pest 426/426 re-run by parent; RDD 4-lens approved (review-db76…), 6 advisory → S3 Part A |

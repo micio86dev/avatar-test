@@ -484,3 +484,22 @@ Status legend: **open** (owner decision pending), **resolved** (owner ruled).
 - **Choice.** Public resources carry explicit Scramble schema names
   (`PublicOrganization`, `PublicProject`, `PublicInterview`); admin names
   are unchanged. Step 11's `/v1` filter maps them to the contract names.
+
+## Found during step 6 (2026-09-24)
+
+### G-47 — Indicator score `-1` is literal in the public API · resolved · step 6
+- The wrapper standards say the unassessable sentinel is never rendered as
+  a number on the admin surface. The vendored contract types
+  `Behavior.score` as `enum [1,2,3,4,5,-1]`, so the public API emits the
+  literal `-1` with `unassessable_reason` set; the admin surface keeps its
+  own rendering. Both derive from the same stored value.
+
+### G-48 — Transcript turns carry no timing fields · resolved · step 6
+- The spec prose mentions `started_at_seconds`/`ended_at_seconds` on turns;
+  the vendored contract's `Transcript.turns` schema has none. The
+  contract wins: timing lives on `/answers` items only.
+
+### G-49 — Answer timing derivation · resolved · step 6
+- `started_at_seconds` is the primary question's own timestamp relative to
+  the participant's `started_at`; `answer_duration_seconds` spans the
+  candidate's own turns for that question only.
