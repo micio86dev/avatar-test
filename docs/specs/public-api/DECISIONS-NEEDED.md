@@ -210,3 +210,28 @@ Status legend: **open** (owner decision pending), **resolved** (owner ruled).
   packages installed, lockfile byte-identical afterwards. The lockfile
   format is accepted by the pinned CI version. `tools/spectral/package.json`
   is the single place to bump Spectral; the catalog row mirrors it.
+
+## Found while briefing step 2 (2026-09-24)
+
+### G-21 — Legacy keys have no visible prefix · resolved · step 2
+- `api_clients.key_prefix` is added nullable. Rows created before the
+  migration store only the hash, so their prefix cannot be backfilled.
+- **Choice.** New keys carry `beai_<mode>_` + the first 8 characters of the
+  random part; the guard looks up by prefix and decides with `hash_equals`,
+  and falls back to the hash-equality lookup for null-prefix rows. No forced
+  rotation: those keys remain valid and merely lack a display prefix.
+
+### G-22 — Test-mode data isolation lands in step 9 · resolved · steps 2 and 9
+- §3.7 asks for a `mode` column on all tenant tables or a separate schema.
+- **Choice.** Step 2 delivers the key `mode` and a request-scoped `ApiMode`
+  context (`T-AUTH-007` asserts the stamp and the `Origin` rule). Step 9
+  adds `mode` to the tenant tables the public API reads and the global
+  scope that partitions them (`T-TEST`). Until then a test key can only
+  reach `/health`, so no live data is exposed through it.
+
+### G-23 — Auth tests before real endpoints exist · resolved · step 2
+- Step 2 has no contract operation to validate 401/403 bodies against.
+- **Choice.** Auth tests register probe routes and validate problem bodies
+  against `components.schemas.Problem` plus the `X-Request-Id` header via
+  `assertProblemMatchesContract`. Step 4 re-points the auth tests at
+  `/organization` for operation-level validation.

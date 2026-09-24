@@ -48,7 +48,9 @@ TDD, with every integration response validated against
 - [x] S1 Contract: Spectral lint + vendored-copy parity in wrapper CI;
       `assertMatchesContract` helper, `/api/v1/health`, `config/public_api.php`
       in api (T-CONTRACT-002..005; api `479d631`).
-- [ ] S2 Auth middleware + scopes + tenancy guard (`T-AUTH-001..009`, isolation).
+- [x] S2 Auth middleware + scopes + tenancy guard (`T-AUTH-001..009`, isolation,
+      legacy fallback; api `24219b9`). Writer built Part B as one unit; RED
+      observed by the parent with the implementation removed (18 errors).
 - [ ] S3 Conventions: problem+json, pagination, rate limit, idempotency,
       request-id (`T-CONV-001..012`).
 - [ ] S4 Read endpoints: organization, projects (`T-PRJ`, `T-EXPOSE-001/002`).
@@ -73,6 +75,7 @@ TDD, with every integration response validated against
 | P0.3 | 1 mapper | 20+ resource/model files | — | 3 claims spot-checked with rg |
 | P0.4 | inline | 2 doc files, no research left | 883528e | gga PASSED; RDD approved |
 | S1 | 2 writers (api, wrapper CI) | 12+ files across 2 repos | api 479d631, wrapper b928e0e | pint, phpstan, pest 7/7 re-run by parent; shellcheck+dash re-run; RDD approved both (lineages review-306e…, review-ef42…) |
+| S2 | 1 writer (api) | migration, 7 new classes, 6 changed, 3 test files | api 24219b9 | pint, phpstan L8, pest 354/354 re-run by parent; post-hoc RED observed |
 | S1 follow-ups | 2 writers | 5 api files, 6 wrapper files | wrapper 287ad87, api pending gate | RDD approved wrapper (review-e59b…); ambient 059d7c0-based candidate: lens_context_budget_exceeded (terminal, already covered piecewise) |
 
 ## Decision taken (2026-09-24)
@@ -87,4 +90,5 @@ existing models; auth, conventions, tokens, SDK, exports, test mode and docs
 stay as authored (G-00).
 
 ## Next step
-S2 auth middleware + scopes + tenancy guard (`T-AUTH-001..009`).
+S3 conventions: problem+json handler, pagination, rate limit, idempotency,
+request-id (`T-CONV-001..012`).
