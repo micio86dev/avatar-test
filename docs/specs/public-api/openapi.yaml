@@ -131,6 +131,8 @@ paths:
         Returns the interview, the hosted URL and a single-use session token for the embed SDK.
         `(project, email)` and `(project, candidate_ref)` are each unique: a second enrolment answers
         `409 duplicate_enrolment`. The project must be `active`, else `422 project_not_active`. Requires `interviews:write`.
+        An `Idempotency-Key` replay returns the original body, whose `session_token` may by then be
+        expired or consumed; mint a new one via `createSessionToken` while the interview is `pending`.
       parameters: [ { $ref: "#/components/parameters/idempotencyKey" } ]
       requestBody:
         required: true
@@ -222,7 +224,7 @@ paths:
         Mints a new single-use session token and revokes any unconsumed previous one.
         Allowed only while the interview is `pending`; any other status answers `409 invalid_state`.
         Requires `interviews:write`.
-      parameters: [ { $ref: "#/components/parameters/interviewId" }, { $ref: "#/components/parameters/idempotencyKey" } ]
+      parameters: [ { $ref: "#/components/parameters/interviewId" } ]
       responses:
         "201":
           description: Token minted.

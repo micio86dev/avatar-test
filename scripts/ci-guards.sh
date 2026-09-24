@@ -3079,3 +3079,55 @@ catalog_short_bars_anchors() {
     printf '%s\n' "$CI_CSBA_LINE"
   done
 }
+
+# ---------------------------------------------------------------------------
+# The public API contract's vendored copy.
+#
+# docs/specs/public-api/openapi.yaml is the source of truth for the public
+# API contract (docs/specs/public-api/README.md: "openapi.yaml — OpenAPI 3.1
+# contract (source of truth)"). api/public-api/openapi.yaml is a VENDORED
+# COPY the api repo ships alongside its own code, so it can be shipped and
+# read without reaching back into the wrapper. Unlike the api/frontend/
+# backoffice openapi.json trio `json_canonical_equal` guards in step (b),
+# there is no generator on either side re-serialising this file and no
+# second author with their own formatter — one file is authored, by hand, in
+# exactly one place, and the other is meant to be an exact copy of it. There
+# is therefore nothing to be whitespace-agnostic ABOUT: a byte difference
+# here is not a reformatting false positive to filter out the way Prettier
+# reordering JSON keys is, it IS the drift.
+#
+# The exit contract mirrors `json_canonical_equal` (earlier in this file) on
+# purpose — same shape of problem (a two-file "did the vendored copy stay in
+# sync with the source of truth" gate feeding the same step-(b)-style real
+# gate), so it is held to the same 0/1/2 split rather than inventing a
+# second vocabulary for the same distinction:
+#   0 — the two files are byte-identical.
+#   1 — both files exist and differ.
+#   2 — either file is missing, so nothing was compared at all. This must
+#       never be reported as "differs" — the same "could not read" versus
+#       "differs" separation this file's own doctrine states beside
+#       `json_canonical_equal`, applied here without a JSON parser because
+#       there is nothing to parse: `cmp` compares bytes directly, so this
+#       guard has no Bun dependency.
+#
+# Prints nothing on exit 0 and 1 — `cmp -s` alone carries no content worth
+# echoing, and the CALLER (the workflow step, mirroring step (b)'s own
+# division of labour) owns the operator-facing message for each exit code.
+# On exit 2 it names the missing path on stderr, because that is the one
+# case where the caller cannot tell which of the two files was absent.
+public_api_contract_divergence() {
+  CI_PACD_SRC="$1"
+  CI_PACD_VENDORED="$2"
+  if [ ! -f "$CI_PACD_SRC" ]; then
+    echo "ci-guards: $CI_PACD_SRC does not exist." >&2
+    return 2
+  fi
+  if [ ! -f "$CI_PACD_VENDORED" ]; then
+    echo "ci-guards: $CI_PACD_VENDORED does not exist." >&2
+    return 2
+  fi
+  if cmp -s "$CI_PACD_SRC" "$CI_PACD_VENDORED"; then
+    return 0
+  fi
+  return 1
+}

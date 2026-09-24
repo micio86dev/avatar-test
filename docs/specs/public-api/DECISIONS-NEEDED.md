@@ -114,17 +114,19 @@ Status legend: **open** (owner decision pending), **resolved** (owner ruled).
 - **Choice.** First request takes a Redis lock on `(org, key)`; a concurrent
   second request answers `409 idempotency_in_progress` (new error code).
 
-### G-10 — Cancel allowed from terminal states · resolved · step 5
-- **Choice.** Cancel only from `created`/`invited`; anything else is
-  `409 invalid_state`.
+### G-10 — Cancel allowed from terminal states · superseded by G-00
+- **Choice (superseded).** The cancel endpoint and the `created`/`invited`
+  states no longer exist (G-00). Do not derive tests from this entry.
 
-### G-11 — Single-use token plus third-party cookie · open · step 5
+### G-11 — Single-use token plus third-party cookie · resolved · step 5
 - Browsers blocking third-party cookies drop the `SameSite=None` cookie after
   the token is burned; a reload returned `410` with no recovery.
 - **Choice.** Cookie is `Partitioned` (CHIPS) in addition to
   `SameSite=None; Secure`; when the cookie is unreadable the embed page emits
   `error{code:"cookie_blocked", recoverable:true}` and the host may mint a new
-  token. Owner may prefer a postMessage session handle.
+  token. Recovery is possible because consuming a token does not change the
+  interview status (SPEC §3.5): minting stays allowed while `pending`. The
+  `cookie_blocked` code is part of the postMessage error enum (§4.3).
 
 ### G-12 — Events list order is an exception to §3.2 · resolved · step 6
 - `/interviews/{id}/events` is oldest first; recorded as the one exception.
@@ -167,3 +169,31 @@ Status legend: **open** (owner decision pending), **resolved** (owner ruled).
   interview.
 - Added: `project_not_active` (422), `Behavior.unassessable_reason`,
   `Interview.progress`, `Interview.role_code`.
+
+### G-16 — Idempotent replay of session tokens · resolved · step 3/5
+- A replayed `POST /interviews` could return a consumed or expired token.
+- **Choice.** `POST /interviews/{id}/session-tokens` takes no
+  `Idempotency-Key`; `POST /interviews` replays the original body and the
+  contract documents that the token may need re-minting.
+
+### G-17 — Public API route prefix · resolved · step 1
+- **Choice.** Laravel serves the public API under `/api/v1/*`; the public
+  hostname maps `/v1` onto it. Contract paths omit both prefixes.
+
+### G-18 — New dev dependency · resolved · step 1
+- `league/openapi-psr7-validator` (^0.24) is added to the API as a dev
+  dependency for response validation against the contract. PSR-7 bridging
+  reuses what the lockfile already carries; the step 1 report names any
+  additional package verbatim. Approved implicitly by the goal ("build the helper
+  in step 1"); recorded here because the Boost rules ask for approval on
+  dependency changes.
+
+### G-19 — The response validator ignores `const` · resolved · step 1
+- `league/openapi-psr7-validator` 0.24 targets OpenAPI 3.0.2; probed
+  empirically on 3.1 keywords: type arrays, `minItems`/`maxItems`, `enum`
+  and `oneOf` with `null` are enforced, `const` is silently accepted.
+- **Choice.** `tests/Contract/ContractValidator.php` adds an explicit
+  `const` check for top-level object properties. The contract uses `const`
+  in exactly four places (`/health.status`, `Recording.kind`, and the two
+  webhook `event` discriminators), all top level. Any future nested `const`
+  must extend the check; `T-CONTRACT-002` guards the top-level case.

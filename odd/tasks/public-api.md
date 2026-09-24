@@ -41,24 +41,27 @@ TDD, with every integration response validated against
       SPEC §8.1; no candidate entity (G-02), no WebhookDelivery route, no
       public-id convention (G-05), legacy webhook format differs (G-04).
 - [x] P0.4 Q1–Q6 answered in SPEC §8; `DECISIONS-NEEDED.md` created with G-01..G-06.
-- [ ] P0.5 Commit (gga gate + RDD review required) `spec: resolve open questions after codebase audit` (wrapper).
+- [x] P0.5 Commit `883528e` (gga PASSED on 2nd attempt; RDD approved, lineage
+      `review-5edc0007b4b5d851`, 4 advisory findings applied in S1). `spec: resolve open questions after codebase audit` (wrapper).
 
 ### Phase 1 — implementation, SPEC §7 order
-- [ ] S1 Contract: Spectral lint in CI + contract-test helper validating every
-      integration response against `openapi.yaml`.
+- [x] S1 Contract: Spectral lint + vendored-copy parity in wrapper CI;
+      `assertMatchesContract` helper, `/api/v1/health`, `config/public_api.php`
+      in api (T-CONTRACT-002..005; api `479d631`).
 - [ ] S2 Auth middleware + scopes + tenancy guard (`T-AUTH-001..009`, isolation).
 - [ ] S3 Conventions: problem+json, pagination, rate limit, idempotency,
       request-id (`T-CONV-001..012`).
-- [ ] S4 Read endpoints: organization, templates, candidates
-      (`T-TPL`, `T-CAND`, `T-EXPOSE-001/002`).
-- [ ] S5 Interviews create + state machine + session tokens + hosted page
-      (`T-INT`, `T-TOK`).
+- [ ] S4 Read endpoints: organization, projects (`T-PRJ`, `T-EXPOSE-001/002`).
+- [ ] S5 Interviews create (enrolment) + lifecycle mapping + session tokens +
+      hosted page, no cancel (`T-INT`, `T-TOK`).
 - [ ] S6 Transcript / answers / scoring / audio recording / events (`T-INT` rest).
-- [ ] S7 Outbox + webhooks (`T-WH-001..012`).
+- [ ] S7 Webhook delivery log + redeliver over the existing C10 path
+      (`T-WH`, `T-WHD`).
 - [ ] S8 Exports (`T-EXP-001..010`), usage (`T-USAGE-001..004`).
 - [ ] S9 Test mode + mock provider (`T-TEST-001..006`).
 - [ ] S10 `@beai/embed` package (`T-SDK-001..020`), Playwright E2E, ≤ 12 KB gz CI gate.
-- [ ] S11 Scalar docs, openapi-generator SDKs (TS, PHP, Python), quickstart CI job.
+- [ ] S11 Scalar docs, openapi-generator SDKs (TS, PHP, Python), quickstart
+      CI job, Scramble `/v1` export equivalence (`T-CONTRACT-001`).
 - [ ] S12 `AGENTS.md` rule: no new public/export field without a T-EXPOSE-001 entry.
 - [ ] S13 `docs/specs/public-api/IMPLEMENTATION-REPORT.md`.
 
@@ -68,7 +71,8 @@ TDD, with every integration response validated against
 | P0.1 | inline + 1 mapper | 3 files inline, 8 more via mapper | — | read-only |
 | P0.2 | 1 mapper | 4+ files (filesystems, signers, models, compose) | — | 4 claims spot-checked with rg |
 | P0.3 | 1 mapper | 20+ resource/model files | — | 3 claims spot-checked with rg |
-| P0.4 | inline | 2 doc files, no research left | — | — |
+| P0.4 | inline | 2 doc files, no research left | 883528e | gga PASSED; RDD approved |
+| S1 | 2 writers (api, wrapper CI) | 12+ files across 2 repos | api 479d631 | pint, phpstan, pest 7/7 re-run by parent; shellcheck+dash re-run |
 
 ## Decision taken (2026-09-24)
 P0.5 commit was refused by the `gga` pre-commit gate: `openapi.yaml`
@@ -82,4 +86,4 @@ existing models; auth, conventions, tokens, SDK, exports, test mode and docs
 stay as authored (G-00).
 
 ## Next step
-P0.5 commit → S1.
+S2 auth middleware + scopes + tenancy guard (`T-AUTH-001..009`).

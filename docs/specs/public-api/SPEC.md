@@ -254,7 +254,8 @@ Tests: `T-EXPOSE-001` (field-diff test, fails on any new backoffice field not cl
 ### 3.5 Session tokens (browser surface)
 
 - JWT, `HS256` (or `EdDSA` if already used in the project), signed with a **dedicated** secret (not the app key). Claims: `iss=beai`, `sub=int_…`, `org=org_…`, `mode`, `jti`, `iat`, `exp = iat + 15 min`, `aud=embed`.
-- **Single-use**: on first successful `/embed/{token}` load the `jti` is marked consumed and exchanged for an httpOnly, SameSite=None, Secure cookie bound to the interview (the WebRTC session then runs on the cookie). A second load with the same token → `410 token_consumed`. Minting a new token revokes previous unconsumed ones.
+- **Single-use**: on first successful `/embed/{token}` load the `jti` is marked consumed and exchanged for an httpOnly, SameSite=None, Secure cookie bound to the interview (the WebRTC session then runs on the cookie). A second load with the same token → `410 token_consumed`. Minting a new token revokes previous unconsumed ones. Consuming a token records the `token_consumed` event and does **not** change the interview status: `in_progress` begins only when the first interview session starts. While the interview is still `pending`, the client backend may therefore mint a replacement token (recovery for a blocked cookie, see G-11). The cookie is `Partitioned` (CHIPS); when it is unreadable on the next request the embed page emits `error{code:"cookie_blocked", recoverable:true}` and consumes nothing further.
+- **Session-token endpoints are not idempotent-replayable**: `POST /interviews/{id}/session-tokens` does not accept `Idempotency-Key` (a duplicate mint only revokes the previous token). `POST /interviews` does accept it, and a replayed `201` carries the ORIGINAL `session_token`, which may by then be expired or consumed; the client must mint a new one in that case. Documented on both operations.
 - A session token grants **only**: load embed page for `sub`, start/end that interview's avatar session. It cannot call `/v1/*`. Tests must assert `/v1/*` rejects a session token with `401 invalid_api_key`.
 - Hosted URL: `https://interview.beai.example/i/{token}` — same token, same rules. Hosted page shows BEAI branding unless org has white-label (existing backoffice setting).
 
@@ -350,7 +351,7 @@ interview.destroy();                   // removes iframe, cleans listeners
 ### 4.3 Events (postMessage protocol)
 All messages: `{ source: "beai-embed", version: 1, type, payload }`. Host → iframe: `start`, `end`, `set-theme`. Iframe → host: `ready`, `consent:granted`, `permissions:denied`, `started`, `question:changed { index, total }`, `completed { interviewId }`, `error { code, message, recoverable }`, `resize { height }`.
 - SDK **validates `event.origin`** against the BEAI embed origin and ignores everything else.
-- iframe **validates `event.origin`** against the org's allowed domains (from the token's org); mismatched → message ignored and `error {code:"origin_not_allowed"}` emitted once.
+- iframe **validates `event.origin`** against the org's allowed domains (from the token's org); mismatched → message ignored and `error {code:"origin_not_allowed"}` emitted once. Error codes emitted by the iframe: `origin_not_allowed`, `cookie_blocked`, `permissions_denied`, `provider_unavailable`, `network_lost`, `token_invalid`.
 - No candidate PII, transcript, or scores cross postMessage. Only IDs and progress.
 
 ### 4.4 Iframe / embed page (`/embed/{token}`)
