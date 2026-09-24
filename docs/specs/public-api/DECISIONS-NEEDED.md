@@ -467,3 +467,20 @@ Status legend: **open** (owner decision pending), **resolved** (owner ruled).
 - A replayed `POST /v1/interviews` carries the original session token for
   up to 24 h (spec §3.5, G-16). The stored record is encrypted with the app
   key so no live credential sits in Redis in clear.
+
+### G-45 — `participants.public_id` NOT NULL and rolling deploys · open · step 5
+- Old code inserting participants during a rolling deploy (after the
+  migration, before the new code) fails closed on the NOT NULL column with
+  no default (a ULID cannot be a database default).
+- **Choice.** Deploy order: new code first, then the migration (Railway
+  runs migrations at release; the SSO ingress insert is the only old-code
+  writer). Documented in the migration docblock. Owner may prefer a
+  temporary trigger-based default.
+
+### G-46 — Public schema names in the generated spec · resolved · step 5 follow-up
+- The public resources were exported under `Project`, `Organization` and
+  `Interview`, the names the backoffice's generated client uses for the
+  admin shapes; the backoffice typecheck broke on 28 usages.
+- **Choice.** Public resources carry explicit Scramble schema names
+  (`PublicOrganization`, `PublicProject`, `PublicInterview`); admin names
+  are unchanged. Step 11's `/v1` filter maps them to the contract names.
