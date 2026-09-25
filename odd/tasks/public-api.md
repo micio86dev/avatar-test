@@ -108,8 +108,8 @@ TDD, with every integration response validated against
 - [x] S10a `@beai/embed` package core (`T-SDK-001..020`'s unit-testable
       subset) — new 4th git submodule `embed/` (`micio86dev/embed`, same
       Git Flow ×4 pattern as api/frontend/backoffice), base commit `1144a0d`
-      plus eight gate-fix follow-up commits (`e28b87f`, `198b2af`,
-      `ff08c2b`, `473486e`, `083aa64`, `87985e7`, `9bd91ca` — 9 commits
+      plus seven gate-fix follow-up commits (`e28b87f`, `198b2af`,
+      `ff08c2b`, `473486e`, `083aa64`, `87985e7`, `9bd91ca` — 8 commits
       total). `BEAI.mount()` creates/manages an iframe pointed at
       `{embedOrigin}/embed/{token}`, validates `event.origin` +
       `event.source` (multi-embed cross-talk guard) + the `{source,
@@ -118,8 +118,10 @@ TDD, with every integration response validated against
       `READY_TIMEOUT_MS` — 15s — guard that also blocks a LATE `ready`
       from starting anyway once the host was told the embed failed), and
       relays `set-theme` without deciding white-label gating (iframe-side).
-      Zero runtime deps; IIFE bundle measures ~2.06 KB gz, well under the
-      12 KB budget (`scripts/check-bundle-size.mjs`). Per-handler
+      Zero runtime deps; local `bun run size` measured the IIFE bundle at
+      ~2.06 KB gz against `scripts/check-bundle-size.mjs`'s 12 KB budget —
+      a manual measurement only, since the CI job that runs this gate
+      automatically is deferred to S10b, not yet enforcing it. Per-handler
       `try/catch` isolation in `dispatch()` — a throwing host callback
       no longer skips later listeners for the same event or propagates
       out of `destroy()`. 55 Vitest tests, several rounds of mutation-
