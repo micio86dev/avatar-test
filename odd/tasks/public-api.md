@@ -162,8 +162,19 @@ TDD, with every integration response validated against
       **Disclosed gap:** mount→completed ≤60s against the api's mock provider
       is NOT covered — no e2e fixture reaches a real api; tracked for the
       final integration pass.
-- [ ] S11 Scalar docs, openapi-generator SDKs (TS, PHP, Python), quickstart
-      CI job, Scramble `/v1` export equivalence (`T-CONTRACT-001`).
+- [x] S11a (api 319e327; frontend 44c6125; backoffice 29c1005): Scramble
+      `/v1`-only export (`openapi.v1.json`, CI freshness step) and
+      `T-CONTRACT-001` equivalence test against `docs/specs/public-api/
+      openapi.yaml`; query params/status codes fixed code-side; 11
+      remaining divergences recorded explicitly (G-54, allow-listed with
+      reasons so any NEW one fails). Mutation-verified by the writer;
+      pint, phpstan, Contract+OpenApi tests re-run by parent.
+- [ ] S11b Scalar docs (self-hosted, static, served by the backoffice nginx
+      stage or a sibling static service), generated from `openapi.yaml`.
+- [ ] S11c openapi-generator SDKs (TS `@beai/sdk`, PHP `beai/beai-php`,
+      Python `beai`) — publishing/hosting repos need owner confirmation.
+- [ ] S11d Quickstart CI job (snippets run against a test-mode org, must
+      reach `completed`).
 - [ ] S12 `AGENTS.md` rule: no new public/export field without a T-EXPOSE-001 entry.
 - [ ] S13 `docs/specs/public-api/IMPLEMENTATION-REPORT.md`.
 
@@ -197,7 +208,7 @@ existing models; auth, conventions, tokens, SDK, exports, test mode and docs
 stay as authored (G-00).
 
 ## Next step
-S11 first. (Open gap carried from S10: mount→completed E2E against the mock provider.) G-51 (interview reads not mode-scoped) and G-52
+S11b/c/d next. (Open gap carried from S10: mount→completed E2E against the mock provider.) G-51 (interview reads not mode-scoped) and G-52
 (two pre-existing plural `withoutGlobalScopes()` sites outside step 8's
 diff) remain open decisions — see `docs/specs/public-api/DECISIONS-NEEDED.md`.
 Then S11 (docs/SDKs/quickstart CI), S12 (`AGENTS.md` rule), S13 (final
