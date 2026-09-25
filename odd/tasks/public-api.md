@@ -149,10 +149,19 @@ TDD, with every integration response validated against
       after 2 fix rounds. RDD frontend range candidate:
       `lens_context_budget_exceeded` (terminal, covered piecewise by the
       per-commit gga gate).
-- [ ] S10c Remaining from S10: Playwright E2E (mount→completed ≤60s, CSP
-      blocks a non-allowed host), `resize` postMessage emission (no
-      `ResizeObserver` yet), CI bundle-size gate for `@beai/embed`. (`embed`
-      already added to the wrapper CI `version_manifest_divergence` list.)
+- [x] S10c (frontend 6d9f236, dc0244e; embed 2d7690d): `resize` postMessage
+      emission (throttled `ResizeObserver`); embed CI workflow with the
+      bundle-size gate; Playwright `embed.spec.ts` (real response headers,
+      fail-safe `'none'`, browser framing enforcement with a positive
+      control, mutation-verified) on Chromium/WebKit. Also fixed: the
+      desktop gate now measures `screen.width` when framed (a narrow host
+      container no longer redirects a desktop to `/unsupported`), and on
+      `/embed/**` the unsupported state renders inline and is posted to the
+      host instead of redirecting. Checks re-run by parent: vitest 1561,
+      typecheck, lint, prettier; Playwright gate+embed specs 34/34.
+      **Disclosed gap:** mount→completed ≤60s against the api's mock provider
+      is NOT covered — no e2e fixture reaches a real api; tracked for the
+      final integration pass.
 - [ ] S11 Scalar docs, openapi-generator SDKs (TS, PHP, Python), quickstart
       CI job, Scramble `/v1` export equivalence (`T-CONTRACT-001`).
 - [ ] S12 `AGENTS.md` rule: no new public/export field without a T-EXPOSE-001 entry.
@@ -188,8 +197,7 @@ existing models; auth, conventions, tokens, SDK, exports, test mode and docs
 stay as authored (G-00).
 
 ## Next step
-S10c: Playwright E2E for the embed page, `resize` emission, the CI
-bundle-size gate for `@beai/embed`. G-51 (interview reads not mode-scoped) and G-52
+S11 first. (Open gap carried from S10: mount→completed E2E against the mock provider.) G-51 (interview reads not mode-scoped) and G-52
 (two pre-existing plural `withoutGlobalScopes()` sites outside step 8's
 diff) remain open decisions — see `docs/specs/public-api/DECISIONS-NEEDED.md`.
 Then S11 (docs/SDKs/quickstart CI), S12 (`AGENTS.md` rule), S13 (final
