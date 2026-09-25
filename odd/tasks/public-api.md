@@ -194,9 +194,12 @@ TDD, with every integration response validated against
       G-55/G-56 logged (spec-side issues; server host still the `.example`
       placeholder pending G-03). **Not verified:** the CI job itself, Python
       import (needs pydantic).
-- [ ] S11d Quickstart CI job (snippets run against a test-mode org, must
-      reach `completed`).
-- [ ] S12 `AGENTS.md` rule: no new public/export field without a T-EXPOSE-001 entry.
+- [x] S11d (api 613b47d): `docs/quickstart.md` with tagged executable
+      steps, run by `QuickstartTest` (create interview → embed exchange →
+      mock provider completes → `completed` → scoring) with no outbound HTTP;
+      mutation-verified by the writer. Gaps: candidate-facing steps aren't in
+      the `/v1` contract; test client bypasses TLS/real queue.
+- [x] S12 permanent rule added to api/AGENTS.md (api commit) and wrapper CLAUDE.md (AGENTS.md is a symlink).
 - [ ] S13 `docs/specs/public-api/IMPLEMENTATION-REPORT.md`.
 
 ## Progress and evidence
@@ -229,7 +232,7 @@ existing models; auth, conventions, tokens, SDK, exports, test mode and docs
 stay as authored (G-00).
 
 ## Next step
-S11b/c/d next. (Open gap carried from S10: mount→completed E2E against the mock provider.) G-51 (interview reads not mode-scoped) and G-52
+S13 next. (Open gap carried from S10: mount→completed E2E against the mock provider.) G-51 (interview reads not mode-scoped) and G-52
 (two pre-existing plural `withoutGlobalScopes()` sites outside step 8's
 diff) remain open decisions — see `docs/specs/public-api/DECISIONS-NEEDED.md`.
 Then S11 (docs/SDKs/quickstart CI), S12 (`AGENTS.md` rule), S13 (final

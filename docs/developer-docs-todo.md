@@ -8,7 +8,7 @@ in `api/openapi.v1.json`.
 The sections below are listed in SPEC section 6 but are **not written yet**.
 They are TODO and must not be presented as available.
 
-- [ ] Quickstart (backend create, hosted URL, then embed)
+- [x] Quickstart (backend create, hosted URL, then embed): `docs/quickstart.md`, executed by `api/tests/Feature/PublicApi/QuickstartTest.php` (part of the normal Pest suite, so no separate CI job)
 - [ ] Authentication and keys
 - [ ] Interviews lifecycle
 - [ ] Data and exports
