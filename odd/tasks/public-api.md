@@ -85,7 +85,25 @@ TDD, with every integration response validated against
       pre-existing plural `withoutGlobalScopes()` sites in
       `EvaluationPayloadAssembler.php`/`WebhookDeliveryRecorder.php`
       deliberately left out of this diff's scope.
-- [ ] S9 Test mode + mock provider (`T-TEST-001..006`).
+- [x] S9 Test mode + mock provider (`T-TEST-001..006`); api `95ce204` base
+      commit, plus five gate-fix follow-up commits (`0b8a555`, `52fe762`,
+      `f19a152`, `35bdea5` — 6 total review rounds). `MockProvider` (zero
+      outbound calls) + `RunMockInterviewJob` (walks the real lifecycle via
+      `SettleParticipantCompletion`, fabricates BARS scoring in one
+      `DB::transaction()`, writes a real WAV fixture) + a `Cache::add()`
+      NX lock (mirroring `FinalizeInterview`'s own pattern, released in a
+      `finally` block on any decision — round 4 found the first version
+      left it held for the full TTL after an early no-op). Reversed two
+      round-3 decisions after round 4 caught them: `FinalizeInterview`'s
+      `organizationId` stayed required (a nullable rolling-deploy
+      compatibility shim reintroduced the exact unguarded-`Participant::
+      find()` violation round 2 had closed) and `DispatchScoringJob` now
+      fails closed on an unresolvable participant (G-53, reversed —
+      `ScoreEvaluationJob`'s own `withoutGlobalScopes()` read meant the
+      original "accepted as fail-open" call would have let a test-mode
+      participant get scored and billed on an org mismatch). Full targeted
+      suite 654-657 green across rounds; all six commits RDD-reviewed and
+      acknowledged individually.
 - [ ] S10 `@beai/embed` package (`T-SDK-001..020`), Playwright E2E, ≤ 12 KB gz CI gate.
 - [ ] S11 Scalar docs, openapi-generator SDKs (TS, PHP, Python), quickstart
       CI job, Scramble `/v1` export equivalence (`T-CONTRACT-001`).
@@ -122,9 +140,9 @@ existing models; auth, conventions, tokens, SDK, exports, test mode and docs
 stay as authored (G-00).
 
 ## Next step
-S9 test mode + mock provider (`T-TEST-001..006`). G-51 (interview reads not
-mode-scoped) and G-52 (two pre-existing plural `withoutGlobalScopes()` sites
-outside step 8's diff) remain open decisions — see
-`docs/specs/public-api/DECISIONS-NEEDED.md`. Then S10 (`@beai/embed`
-package), S11 (docs/SDKs/quickstart CI), S12 (`AGENTS.md` rule), S13
-(final `IMPLEMENTATION-REPORT.md`).
+S10 `@beai/embed` package (`T-SDK-001..020`), Playwright E2E, ≤ 12 KB gz CI
+gate. G-51 (interview reads not mode-scoped) and G-52 (two pre-existing
+plural `withoutGlobalScopes()` sites outside step 8's diff) remain open
+decisions — see `docs/specs/public-api/DECISIONS-NEEDED.md`. Then S11
+(docs/SDKs/quickstart CI), S12 (`AGENTS.md` rule), S13 (final
+`IMPLEMENTATION-REPORT.md`).

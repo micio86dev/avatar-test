@@ -559,3 +559,40 @@ Status legend: **open** (owner decision pending), **resolved** (owner ruled).
   every site in both files to the singular form plus a per-file allowlist
   justification) as its own small follow-up pass, or leave it for a future
   gate round that touches those files directly.
+
+## Found during step 9 (2026-09-25)
+
+### G-53 — DispatchScoringJob fails open on an unresolvable Participant · resolved, REVERSED round 4
+- The step 9 gate (round 3, review-reliability finding
+  R3-dispatch-scoring-fail-open) flagged that `DispatchScoringJob::handle()`
+  dispatches the real, paid `ScoreEvaluationJob` whenever the org-filtered
+  `Participant` lookup returns `null` — whether the participant genuinely
+  does not exist, or `ScoringRequested::organizationId` is simply wrong for
+  an existing row. SPEC.md §3.7's "never billed" guarantee for test-mode
+  participants therefore depends on that lookup succeeding.
+- **Round 3 decision (superseded):** accepted the fail-open behaviour as-is,
+  reasoning that failing closed would silently strand a genuinely-missing
+  participant that pre-step-9 code already left to `ScoreEvaluationJob`'s
+  own not-found handling.
+- **Round 4 (gga, same commit's re-review) overruled this**, correctly: the
+  round-3 reasoning missed that `ScoreEvaluationJob` resolves its OWN
+  `Participant` via `withoutGlobalScopes()` — fully unscoped by design.
+  Falling through to `ScoreEvaluationJob::dispatch()` on an org mismatch
+  therefore lets it score (and, for a test-mode participant, BILL) that
+  exact row anyway, completely bypassing the guard this filter exists to
+  enforce — a live security-relevant hole the round-3 framing did not
+  actually close, only relocated.
+- **Now fails closed**: a `null` lookup logs and returns, never dispatching
+  `ScoreEvaluationJob`. Cost is near-zero in practice — `ScoringRequested`
+  only ever fires from `FinalizeInterview`, which already confirmed this
+  exact `(participantId, organizationId)` pair resolves before firing it
+  (both now REQUIRE, never accept null, a genuinely independent
+  `organizationId` — see `FinalizeInterview`'s own constructor docblock,
+  round 4 finding 1), so a mismatch reaching `DispatchScoringJob` can only
+  mean a genuine anomaly, never the normal path.
+- `FinalizeInterviewHookTest.php`'s `'DispatchScoringJob refuses (never
+  dispatches ScoreEvaluationJob for) a wrong-organization lookup'` test
+  locks in this corrected behaviour.
+- **Closed.** No further owner decision needed — the residual risk this
+  entry originally flagged is now structurally closed, not merely
+  documented as accepted.
