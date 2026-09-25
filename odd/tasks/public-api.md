@@ -71,7 +71,20 @@ TDD, with every integration response validated against
 - [x] S7 Webhook delivery log + redeliver over the existing C10 path
       (`T-WHD-001..019`; api a8d4080; gga round 2 approved; full suite 4282
       green). T-WH-001..012 signature/retry/dedupe already covered by C10.
-- [ ] S8 Exports (`T-EXP-001..010`), usage (`T-USAGE-001..004`).
+- [x] S8 Exports (`T-EXP-001..010`), usage (`T-USAGE-001..004`); api
+      `11d96f4` + gate-fix follow-ups `171bf34`, `59414f2`, `510863c` (7
+      gga rounds on the base commit; found and fixed a real strand-on-crash
+      export reclaim bug, a webhook redeliver race, a CSV formula-injection
+      hole, and test-mode reads of live tenant data across usage/exports/
+      interviews before mode partitioning — G-51 interview reads still open).
+      All four commits RDD-reviewed and acknowledged individually
+      (lineages review-bbd7221298eff06f, review-96fd0f2aa8e6b2e1,
+      review-5323b4691b786536); the base commit's own candidate hit the
+      recurring ambient `lens_context_budget_exceeded` ceiling (G-50) and
+      was covered piecewise like every prior slice. G-52 logged: two
+      pre-existing plural `withoutGlobalScopes()` sites in
+      `EvaluationPayloadAssembler.php`/`WebhookDeliveryRecorder.php`
+      deliberately left out of this diff's scope.
 - [ ] S9 Test mode + mock provider (`T-TEST-001..006`).
 - [ ] S10 `@beai/embed` package (`T-SDK-001..020`), Playwright E2E, ≤ 12 KB gz CI gate.
 - [ ] S11 Scalar docs, openapi-generator SDKs (TS, PHP, Python), quickstart
@@ -95,6 +108,7 @@ TDD, with every integration response validated against
 | S3 follow-ups | 1 writer (api) | 13 findings, 8 app files, 9 test files | api 7f0e1ce | pint, phpstan L8, pest 112/112 re-run by parent; gga required tests/Helpers move; RDD approved (review-7184…), 3 advisory → S4 Part A |
 | S2 follow-ups | 1 writer (api) | 7 findings, ~25 files incl. fixture cleanup | api a49e7b1 | pint, phpstan L8, pest 426/426 re-run by parent; RDD 4-lens approved (review-db76…), 6 advisory → S3 Part A |
 | S1 follow-ups | 2 writers | 5 api files, 6 wrapper files | wrapper 287ad87, api pending gate | RDD approved wrapper (review-e59b…); ambient 059d7c0-based candidate: lens_context_budget_exceeded (terminal, already covered piecewise) |
+| S8 | inline (7th gga round) + assistant-applied fixes | 23 files (base), then 1-file follow-ups x2 | api 11d96f4, 171bf34, 59414f2, 510863c | pint, phpstan L1G, pest 529/529 (targeted suite) re-run after each commit; RDD approved and acknowledged all three follow-up commits individually (review-bbd7221298eff06f, review-96fd0f2aa8e6b2e1, review-5323b4691b786536); base commit's own candidate: lens_context_budget_exceeded (terminal, ambient G-50 pattern) |
 
 ## Decision taken (2026-09-24)
 P0.5 commit was refused by the `gga` pre-commit gate: `openapi.yaml`
@@ -108,8 +122,9 @@ existing models; auth, conventions, tokens, SDK, exports, test mode and docs
 stay as authored (G-00).
 
 ## Next step
-S4 read endpoints: organization, projects (`T-PRJ`, `T-EXPOSE-001/002`),
-public ids (G-05), allowed_domains. G-28 (query-parameter errors → 400) was
-resolved early, applied together with the step 3 four-lens review follow-ups
-(G-30, G-31) rather than deferred to step 4 Part A — see
-`docs/specs/public-api/DECISIONS-NEEDED.md`.
+S9 test mode + mock provider (`T-TEST-001..006`). G-51 (interview reads not
+mode-scoped) and G-52 (two pre-existing plural `withoutGlobalScopes()` sites
+outside step 8's diff) remain open decisions — see
+`docs/specs/public-api/DECISIONS-NEEDED.md`. Then S10 (`@beai/embed`
+package), S11 (docs/SDKs/quickstart CI), S12 (`AGENTS.md` rule), S13
+(final `IMPLEMENTATION-REPORT.md`).

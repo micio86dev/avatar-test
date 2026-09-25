@@ -537,3 +537,25 @@ Status legend: **open** (owner decision pending), **resolved** (owner ruled).
   a step 8 follow-up or its own small pass across steps 4-6's read
   endpoints before step 9 (which was already going to add mode
   partitioning to the tenant tables per G-22).
+
+### G-52 — Plural `withoutGlobalScopes()` still remains outside step 8's diff · open
+- Fixing step 8's own gate findings (round 7) converted every
+  `withoutGlobalScopes()` call this diff touched — `ProgressPayloadAssembler`,
+  `SendProgressWebhook`, `SendEvaluationWebhook` — to the singular,
+  allowlisted `withoutGlobalScope('tenant')` form, so `SoftDeletingScope`
+  keeps applying. Two pre-existing sites were deliberately left untouched to
+  avoid dragging previously-reviewed, out-of-diff code into this fix round:
+  - `app/Services/Webhooks/EvaluationPayloadAssembler.php` — five sites
+    (`Project` x2, `Evaluation` x2, `CompetencyResult` x1), all plural.
+  - `app/Services/Webhooks/WebhookDeliveryRecorder.php:80` — one plural
+    `withoutGlobalScopes()->find($projectId)`, with its own docblock citing a
+    queued-job-only justification predating this feature.
+  Both classes run outside HTTP-request tenant context by design (same
+  reasoning as `ProgressPayloadAssembler`), so the plural form's only
+  practical exposure is a soft-deleted row no longer 404ing — narrower than
+  the round-7 finding, but the same class of drift.
+- **Owner decides.** Whether to fold `Services/Webhooks` into
+  `AdminTenancySafetyArchTest`'s `$tenantScopeStripGuardedRoots` (forcing
+  every site in both files to the singular form plus a per-file allowlist
+  justification) as its own small follow-up pass, or leave it for a future
+  gate round that touches those files directly.
