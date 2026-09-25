@@ -401,7 +401,7 @@ jobs:
           # releases bumped package.json and left VERSION behind — and the
           # wrapper drifted the other way. Three repos, one released artifact
           # each, two answers each. This is the only place that sees all four.
-          if ! VERSION_DRIFT=$(version_manifest_divergence . api backoffice frontend); then
+          if ! VERSION_DRIFT=$(version_manifest_divergence . api backoffice frontend embed); then
             echo "ERROR: a repo has a VERSION file with no manifest, or no VERSION file at all."
             exit 1
           fi

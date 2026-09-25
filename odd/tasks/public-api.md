@@ -133,13 +133,26 @@ TDD, with every integration response validated against
       pre-commit` had to be hand-wired after `bun install`'s own
       `prepare` script silently overwrote `core.hooksPath`, leaving the
       base commit's first landing unreviewed until caught and recovered.
-- [ ] S10b `/embed/{token}` iframe page in `frontend`, reusing
-      `interview/session.vue`'s existing component/composable with
-      different chrome; dynamic `Content-Security-Policy: frame-ancestors`
-      scoped to the org's allowed domains; `Permissions-Policy`; tab-hidden
-      >60s pause+warn and network-drop reconnect-then-fail (not yet built
-      in `frontend`); Playwright E2E (mount→completed ≤60s, CSP blocks a
-      non-allowed host) and the CI bundle-size gate for `@beai/embed`.
+- [x] S10b `/embed/{token}` iframe page in `frontend` (api 6e51c1c +
+      50d9497 openapi export; frontend 72747c3, 204f376, d525f89): shared
+      `InterviewSession.vue` extracted from `interview/session.vue`;
+      read-only `GET /api/embed/frame-policy` (never consumes the session
+      token); per-request Nitro middleware sets `frame-ancestors` (strict
+      host allow-list, fail-safe `'none'`), `Permissions-Policy`, and strips
+      the inherited `X-Frame-Options` (verified on a real built server:
+      header absent, CSP `'none'` when the api is unreachable); tab-hidden
+      and network-drop guards; page-side postMessage bridge; error mapping
+      (410/401/403/unavailable). Also fixed the pre-existing invalid
+      space-separated `Permissions-Policy` on `/interview/**` and `/i/**`.
+      Checks re-run by parent: pint, phpstan, pest 24/24 (api); typecheck,
+      lint, prettier, vitest 1543 (frontend); gga PASSED on all commits
+      after 2 fix rounds. RDD frontend range candidate:
+      `lens_context_budget_exceeded` (terminal, covered piecewise by the
+      per-commit gga gate).
+- [ ] S10c Remaining from S10: Playwright E2E (mount→completed ≤60s, CSP
+      blocks a non-allowed host), `resize` postMessage emission (no
+      `ResizeObserver` yet), CI bundle-size gate for `@beai/embed`, and
+      `embed` in the wrapper CI `version_manifest_divergence` list.
 - [ ] S11 Scalar docs, openapi-generator SDKs (TS, PHP, Python), quickstart
       CI job, Scramble `/v1` export equivalence (`T-CONTRACT-001`).
 - [ ] S12 `AGENTS.md` rule: no new public/export field without a T-EXPOSE-001 entry.
@@ -175,10 +188,8 @@ existing models; auth, conventions, tokens, SDK, exports, test mode and docs
 stay as authored (G-00).
 
 ## Next step
-S10b: the `/embed/{token}` iframe page in `frontend` (reuse
-`interview/session.vue`, dynamic CSP `frame-ancestors`, tab-hidden/
-network-drop resilience), then its Playwright E2E and the CI bundle-size
-gate for `@beai/embed`. G-51 (interview reads not mode-scoped) and G-52
+S10c: Playwright E2E for the embed page, `resize` emission, the CI
+bundle-size gate for `@beai/embed`, and wiring `embed` into wrapper CI. G-51 (interview reads not mode-scoped) and G-52
 (two pre-existing plural `withoutGlobalScopes()` sites outside step 8's
 diff) remain open decisions — see `docs/specs/public-api/DECISIONS-NEEDED.md`.
 Then S11 (docs/SDKs/quickstart CI), S12 (`AGENTS.md` rule), S13 (final
