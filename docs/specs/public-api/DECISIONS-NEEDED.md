@@ -525,3 +525,15 @@ Status legend: **open** (owner decision pending), **resolved** (owner ruled).
   range; this is expected and each recurrence is re-verified the same way
   rather than re-prompted, since the underlying coverage argument does not
   change once established.
+
+### G-51 — Interview reads are not scoped by key mode · open
+- The step 8 gate found that `InterviewController`'s reads (list, detail,
+  transcript, answers, scoring, events, recording) filter only by
+  `organization_id`, not by the requesting key's `mode`. A test key can
+  therefore read live interview data, the same class of leak found and
+  fixed for exports (G-51 exports fix in step 8's second gate round).
+- **Owner decides.** Whether `participants.mode` should gate every public
+  read the way it now gates `/usage` and `/exports`, and whether that is
+  a step 8 follow-up or its own small pass across steps 4-6's read
+  endpoints before step 9 (which was already going to add mode
+  partitioning to the tenant tables per G-22).
