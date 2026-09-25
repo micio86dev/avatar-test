@@ -10,3 +10,7 @@
 	path = backoffice
 	url = https://github.com/micio86dev/backoffice.git
 	branch = develop
+[submodule "embed"]
+	path = embed
+	url = https://github.com/micio86dev/embed.git
+	branch = develop

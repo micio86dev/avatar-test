@@ -128,8 +128,8 @@ unmet platform requirement) — or a required tool is missing:
 **Required local toolchain** (versions per D25; documented in `docs/dev-setup.md`):
 PHP 8.5 + PCOV + `pdo_pgsql`, Composer 2.4+, Bun 1.4, Node 24 LTS, Docker +
 Docker Compose v2, Playwright browsers (Chromium + WebKit, `--with-deps`),
-go-task, git, `shellcheck` and `dash` (the shell lint gates); k6 for local load
-tests only. A missing required tool triggers the
+go-task, git, `shellcheck` and `dash` (the shell lint gates), Java 11+ and
+Python 3 (SDK generation); k6 for local load tests only. A missing required tool triggers the
 Dependency Resolution Policy above.
 
 **Package manager: Bun only.** Bun is the sole package manager for both Nuxt apps
@@ -195,6 +195,7 @@ owning slices (C2+), **not C1**. Do not install or wire any of them during C1.
   `framework_version`, `model_version`, `prompt_version`, timestamp.
 - **SSO ingress:** non-forgeable signed token, short expiry (15–60 min); the
   **opaque candidate identifier** is echoed unchanged in every webhook.
+- **Public API exposure (permanent rule):** no new public or export field without a `T-EXPOSE-001` entry (`api/tests/Helpers/PublicApi/ExposureCatalogue.php`), classified in the same change; never silence the test by editing the catalogue without a reviewed decision.
 - **Integration surface:** org-scoped M2M API; `progress` + `evaluation` webhooks
   (HMAC-signed, idempotent, retry/backoff); per-project exit redirect URL.
 - **NFR:** the candidate-facing **`frontend`** is desktop only (Chrome/Edge/Opera/Safari;
