@@ -41,12 +41,6 @@ written for the historical record; **this file is the live one.**
 | Bun (build) | `oven/bun:1.4.0` | `frontend/Dockerfile` and `backoffice/Dockerfile` build stages |
 | Node (SSR runtime) | `node:24.11-slim` | `frontend/Dockerfile` runtime stage |
 | Nginx (static) | `nginx:1.27.5-alpine` | `backoffice/Dockerfile` runtime stage |
-| Scalar API reference (developer docs) | `@scalar/api-reference` `1.72.1` (exact) | `backoffice` devDependency; vendored into `/developers/` by `bun run docs:build` |
-| OpenAPI Generator (SDKs) | `@openapitools/openapi-generator-cli` (jar `7.25.0`, pinned in `sdks/openapitools.json`) | run by `sdks/generate.sh` from the locked `tools/openapi-generator/` package (`bun.lock`); needs Java 11+ (local: OpenJDK 26) |
-| OpenAPI Generator CLI wrapper + TypeScript (SDK tooling) | `@openapitools/openapi-generator-cli` `2.41.0`, `typescript` `5.9.3` | Exact-pinned dependencies of `tools/openapi-generator/package.json`, resolved in its `bun.lock`; `sdks/generate.sh` and `sdks/smoke.sh` run them via `bun install --frozen-lockfile`, never a floating `bunx pkg@major` |
-| Java (SDK CI) | Temurin `21.0.12` | `actions/setup-java` in the `public-api-sdks` wrapper CI job; runs the generator jar |
-| PHP (SDK CI) | `8.5.11` | `shivammathur/setup-php` in the `public-api-sdks` job; `php -l` smoke over the generated PHP SDK |
-| Python (SDK CI) | `3.13.15` | `actions/setup-python` in the `public-api-sdks` job; generation-time spec rewrite and `ast` parse of the Python SDK |
 | Playwright (E2E) | `mcr.microsoft.com/playwright:v1.61.1-jammy` | `scripts/e2e-container.sh`, `frontend` and `backoffice` CI E2E jobs |
 
 The Playwright image is passed to `docker run` by a script rather than written
@@ -81,6 +75,12 @@ parity removes an entire class of bug that only appears in production.
 | Nuxt | `^4.4.8` (frontend), `^4.0` (backoffice) | Patch locked in each app's `bun.lock` |
 | Docker Compose | v2 (min v2.24) | `docker compose`, no hyphen |
 | Spectral CLI | `6.16.3` | A locked dependency of `tools/spectral/package.json`, resolved in `tools/spectral/bun.lock`; lints `docs/specs/public-api/openapi.yaml` against `docs/specs/public-api/.spectral.yaml` in the wrapper's `public-api-contract` CI job via `bun install --frozen-lockfile` + `bun run lint`. The pin lives in that lockfile, not `bunx` — the version here just mirrors it |
+| Scalar API reference (developer docs) | `@scalar/api-reference` `1.72.1` (exact) | `backoffice` devDependency; vendored into `/developers/` by `bun run docs:build` |
+| OpenAPI Generator (SDKs) | `@openapitools/openapi-generator-cli` (jar `7.25.0`, pinned in `sdks/openapitools.json`) | run by `sdks/generate.sh` from the locked `tools/openapi-generator/` package (`bun.lock`); needs Java 11+ (local: OpenJDK 26) |
+| OpenAPI Generator CLI wrapper + TypeScript (SDK tooling) | `@openapitools/openapi-generator-cli` `2.41.0`, `typescript` `5.9.3` | Exact-pinned dependencies of `tools/openapi-generator/package.json`, resolved in its `bun.lock`; `sdks/generate.sh` and `sdks/smoke.sh` run them via `bun install --frozen-lockfile`, never a floating `bunx pkg@major` |
+| Java (SDK CI) | Temurin `21.0.12` | `actions/setup-java` in the `public-api-sdks` wrapper CI job; runs the generator jar |
+| PHP (SDK CI) | `8.5.11` | `shivammathur/setup-php` in the `public-api-sdks` job; `php -l` smoke over the generated PHP SDK |
+| Python (SDK CI) | `3.13.15` | `actions/setup-python` in the `public-api-sdks` job; generation-time spec rewrite and `ast` parse of the Python SDK |
 
 Bun installs and builds; Node runs SSR and the test runners. That split is not
 a preference — Nuxt SSR and Playwright are officially Node-targeted, and the
