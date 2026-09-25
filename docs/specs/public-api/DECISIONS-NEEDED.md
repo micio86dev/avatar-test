@@ -596,3 +596,29 @@ Status legend: **open** (owner decision pending), **resolved** (owner ruled).
 - **Closed.** No further owner decision needed — the residual risk this
   entry originally flagged is now structurally closed, not merely
   documented as accepted.
+
+### G-54 — Recorded divergences between the `/v1` Scramble export and `openapi.yaml` · open
+Step 11 exports a `/v1`-only Scramble document (`openapi.v1.json`, `scramble:export --api=v1`)
+and `tests/Contract/ContractEquivalenceTest.php` (T-CONTRACT-001) compares it with
+`openapi.yaml`: operations, query parameters, request-body properties, status codes and 2xx
+body properties. The test fails on ANY divergence not listed in its constants. Fixed on the
+code side while building it: query parameters (`cursor`, `limit`, `expand`, project filters,
+usage `from`/`to`) were missing from the export; `GET /exports` documented a bogus 422 instead
+of 400. Still recorded, each needing an owner decision on which side moves:
+- **`401`/`403`/`429` everywhere** — contract-only by design: emitted by middleware, invisible
+  to Scramble. Treated as a rule, not per-operation entries.
+- **Contract-only `404`** on `GET /exports`, `GET /interviews`, `GET /projects`, `GET /usage`,
+  `GET /webhooks/deliveries` (list/aggregate endpoints never 404) and on `POST /exports`.
+- **Contract-only `409`** on `POST /exports` (the code answers `429 export_in_progress`, which
+  the export already documents).
+- **Contract-only `400`** on `GET /interviews/{id}` (invalid `expand`) and `POST /interviews`
+  (malformed body) — the controllers do not declare it.
+- **Export-only `500`** on `GET /interviews/{id}/recording` (`internal_error`), absent from
+  `openapi.yaml`.
+- **`Organization.default_language`** — optional in the contract, omitted by the serializer
+  (no language column). Contract-only property on `GET /organization` 200.
+- Error-body SCHEMAS are not compared: the contract declares them as shared components while
+  Scramble mixes Problem and Laravel `{message}` shapes (404 on route-model-bound routes is
+  documented as `{message}` by the export). Worth a follow-up to make every `/v1` error
+  Problem-shaped in the export.
+
