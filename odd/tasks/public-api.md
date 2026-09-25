@@ -86,8 +86,10 @@ TDD, with every integration response validated against
       `EvaluationPayloadAssembler.php`/`WebhookDeliveryRecorder.php`
       deliberately left out of this diff's scope.
 - [x] S9 Test mode + mock provider (`T-TEST-001..006`); api `95ce204` base
-      commit, plus five gate-fix follow-up commits (`0b8a555`, `52fe762`,
-      `f19a152`, `35bdea5` — 6 total review rounds). `MockProvider` (zero
+      commit, plus four gate-fix follow-up commits (`0b8a555`, `52fe762`,
+      `f19a152`, `35bdea5` — 5 commits total, each individually
+      RDD-reviewed and acknowledged, one lineage per commit).
+      `MockProvider` (zero
       outbound calls) + `RunMockInterviewJob` (walks the real lifecycle via
       `SettleParticipantCompletion`, fabricates BARS scoring in one
       `DB::transaction()`, writes a real WAV fixture) + a `Cache::add()`
@@ -102,8 +104,7 @@ TDD, with every integration response validated against
       `ScoreEvaluationJob`'s own `withoutGlobalScopes()` read meant the
       original "accepted as fail-open" call would have let a test-mode
       participant get scored and billed on an org mismatch). Full targeted
-      suite 654-657 green across rounds; all six commits RDD-reviewed and
-      acknowledged individually.
+      suite 654-657 green across rounds.
 - [ ] S10 `@beai/embed` package (`T-SDK-001..020`), Playwright E2E, ≤ 12 KB gz CI gate.
 - [ ] S11 Scalar docs, openapi-generator SDKs (TS, PHP, Python), quickstart
       CI job, Scramble `/v1` export equivalence (`T-CONTRACT-001`).
