@@ -14,8 +14,9 @@
 # This workflow validates, in the order the steps run:
 # Two steps run BEFORE the lettered gates and are not part of the sequence:
 # the lint of the POSIX sh guards — scripts/ci-guards.sh (the guard mechanism
-# itself, checked before anything sources it) AND
-# scripts/verify-openapi-parity.sh, which step (b) below now calls — and the
+# itself, checked before anything sources it), scripts/verify-openapi-parity.sh,
+# which step (b) below now calls, AND sdks/generate.sh + sdks/smoke.sh, which
+# the third job below runs — and the
 # lint of every bash script under scripts/ with the docker-disk-check suite.
 # The openapi-parity fixture suite runs LATER, immediately before step (b),
 # because it needs Bun and `Set up Bun` comes after these two. All are listed
@@ -24,8 +25,10 @@
 #   (a) docker compose config parses, and every image tag — compose services,
 #       Dockerfile FROM bases, Dockerfile COPY --from= images and the images a
 #       script pins for `docker run` alike — is pinned; this workflow's own
-#       `uses:` references are SHA-pinned; and AGENTS.md is a symlink to
-#       CLAUDE.md rather than a second copy of the rules
+#       `uses:` references are SHA-pinned; AGENTS.md is a symlink to
+#       CLAUDE.md rather than a second copy of the rules; and
+#       backoffice/docs-src/openapi.v1.json (the copy the developer docs
+#       render) is byte-identical to api/openapi.v1.json
 #   (b) the committed openapi.json is semantically identical across api/frontend/backoffice
 #   (c) each app's check-client-drift.sh exits 0 (generated TS client matches openapi.json)
 #   (d) the framework catalog, in full. Parity between the authored source and
@@ -74,6 +77,24 @@
 # source. See the header of that file for why: a self-test holding its own copy
 # of the thing under test proves the copy works.
 #
+# A second, independent job, `public-api-contract`, lints the public API
+# contract (docs/specs/public-api/openapi.yaml) with Spectral and asserts its
+# vendored copy in api/public-api/openapi.yaml stays byte-identical. It is
+# not one of the lettered gates above: those all run inside
+# `wrapper-cross-stack`, and this is a second job so a Spectral failure or a
+# vendored-copy drift is reported against its own contract rather than
+# folded into that job's already-long step list. Its guard function,
+# `public_api_contract_identical`, lives in scripts/ci-guards.sh beside the
+# others and is self-tested in (f) the same way every other guard is — one
+# mechanism, proved once, used by whichever job needs it.
+#
+# A third, independent job, `public-api-sdks`, regenerates the TypeScript, PHP
+# and Python SDKs under sdks/ from api/openapi.v1.json and fails if that
+# changes any committed file, then smoke-checks them (tsc, php -l, Python
+# parse). It is the one job that reaches the network beyond checkout: it
+# downloads the openapi-generator jar and the locked npm packages of
+# tools/openapi-generator/. Nothing is published from it.
+#
 # Triggers: develop, main, release/** and hotfix/**.
 #
 # It used to be develop only, justified as "releases handled by Git Flow". This
@@ -96,13 +117,18 @@ on:
       - 'release/**'
       - 'hotfix/**'
 
-# Every step in this job reads: checkout, compose config, openapi/catalog
-# comparison, submodule ancestry checks, self-test fixtures. None of it pushes
-# a branch, opens a PR, writes a release, or calls an API that needs a token
-# scope wider than reading the checked-out ref. `contents: read` is the only
-# scope any step here uses — GITHUB_TOKEN is not referenced anywhere in this
-# file (checkout and setup-bun do not need one). Set at the workflow level,
-# not per-job, because there is exactly one job and it needs exactly this.
+# Every step in all three jobs reads: checkout, compose config, openapi/catalog
+# comparison, submodule ancestry checks, self-test fixtures, a Spectral lint,
+# a byte-comparison of committed files, and SDK regeneration into the
+# checked-out workspace (which is diffed, never committed or pushed). The SDK
+# job downloads the generator jar and locked npm packages, but sends nothing
+# out and needs no token for it. None of it pushes a branch,
+# opens a PR, writes a release, or calls an API that needs a token scope
+# wider than reading the checked-out ref. `contents: read` is the only scope
+# any step in any job uses — GITHUB_TOKEN is not referenced anywhere in
+# this file (checkout and the setup actions do not need one). Set at the
+# workflow level, not per-job: every job needs exactly this and nothing
+# wider, so one declaration covers all of them rather than repeating it.
 permissions:
   contents: read
 
@@ -156,9 +182,11 @@ jobs:
         # verify:openapi` locally, so a bashism in it breaks the gate in CI and
         # nowhere else, which is the least useful place to find out.
         run: |
-          shellcheck -s sh scripts/ci-guards.sh scripts/verify-openapi-parity.sh
+          shellcheck -s sh scripts/ci-guards.sh scripts/verify-openapi-parity.sh sdks/generate.sh sdks/smoke.sh
           dash -n scripts/ci-guards.sh
           dash -n scripts/verify-openapi-parity.sh
+          dash -n sdks/generate.sh
+          dash -n sdks/smoke.sh
 
       # -----------------------------------------------------------------------
       # The disk guard, linted and RUN.
@@ -381,6 +409,14 @@ jobs:
           fi
           echo "AGENTS.md is a symlink to CLAUDE.md — one file, one truth."
 
+          # The public docs render backoffice's vendored copy of the /v1 spec;
+          # it must be byte-identical to what the api exports.
+          if ! cmp -s api/openapi.v1.json backoffice/docs-src/openapi.v1.json; then
+            echo "ERROR: backoffice/docs-src/openapi.v1.json drifted from api/openapi.v1.json."
+            echo "  Run: cp api/openapi.v1.json backoffice/docs-src/openapi.v1.json"
+            exit 1
+          fi
+
           # Every repo agrees with itself about which version it is.
           #
           # The api asserts VERSION == composer.json == openapi.json in its own
@@ -388,7 +424,7 @@ jobs:
           # releases bumped package.json and left VERSION behind — and the
           # wrapper drifted the other way. Three repos, one released artifact
           # each, two answers each. This is the only place that sees all four.
-          if ! VERSION_DRIFT=$(version_manifest_divergence . api backoffice frontend); then
+          if ! VERSION_DRIFT=$(version_manifest_divergence . api backoffice frontend embed); then
             echo "ERROR: a repo has a VERSION file with no manifest, or no VERSION file at all."
             exit 1
           fi
@@ -1509,6 +1545,61 @@ jobs:
             echo "  ok — openapi-drift guard distinguishes invalid JSON (exit 2) from real drift (exit 1)"
           else
             echo "SELF-TEST FAILED: the openapi-drift guard reported invalid JSON with exit $JSON_CMP_STATUS, not the distinct exit 2 for 'could not read'."
+            FAILED=1
+          fi
+
+          # public-api-contract vendored-copy byte parity: the guard backing
+          # the public-api-contract job's own parity step. Same 0/1/2
+          # discipline as json_canonical_equal immediately above, proved the
+          # same way — an identical pair passes, a byte-altered pair is
+          # REJECTED, and a missing file is reported as "could not compare"
+          # (exit 2), never as drift (exit 1). There is no JSON parser here
+          # to blame a bad exit code on: `cmp` either finds the files equal
+          # or it does not, so this guard has one fewer way to fail than the
+          # one above it, and the fixture below still asserts all three
+          # branches rather than assuming the simpler mechanism needs fewer.
+          mkdir -p "$FIXTURE/pac-src" "$FIXTURE/pac-vendored"
+          printf 'openapi: 3.1.0\ninfo:\n  title: BEAI Public API\n' > "$FIXTURE/pac-src/openapi.yaml"
+          cp "$FIXTURE/pac-src/openapi.yaml" "$FIXTURE/pac-vendored/openapi.yaml"
+          if public_api_contract_identical "$FIXTURE/pac-src/openapi.yaml" "$FIXTURE/pac-vendored/openapi.yaml"; then
+            echo "  ok — public-api-contract guard accepts a byte-identical vendored copy"
+          else
+            echo "SELF-TEST FAILED: the public-api-contract guard rejected two byte-identical files."
+            FAILED=1
+          fi
+
+          printf '\n# tampered\n' >> "$FIXTURE/pac-vendored/openapi.yaml"
+          if public_api_contract_identical "$FIXTURE/pac-src/openapi.yaml" "$FIXTURE/pac-vendored/openapi.yaml"; then
+            echo "SELF-TEST FAILED: the public-api-contract guard called a byte-altered vendored copy identical."
+            FAILED=1
+          else
+            echo "  ok — public-api-contract guard rejects a known violation"
+          fi
+
+          # Captured via if/else — same `bash -e` trap as the JSON-drift rows
+          # above; a bare call would abort this step on the very exit code
+          # being asserted.
+          if public_api_contract_identical "$FIXTURE/pac-src/openapi.yaml" "$FIXTURE/pac-src/missing.yaml" 2>/dev/null; then
+            PAC_STATUS=0
+          else
+            PAC_STATUS=$?
+          fi
+          if [ "$PAC_STATUS" -eq 2 ]; then
+            echo "  ok — public-api-contract guard distinguishes a missing file (exit 2) from real drift (exit 1)"
+          else
+            echo "SELF-TEST FAILED: the public-api-contract guard reported a missing file with exit $PAC_STATUS, not the distinct exit 2 for 'could not compare'."
+            FAILED=1
+          fi
+          # The missing-SOURCE branch is a separate early return; prove it too.
+          if public_api_contract_identical "$FIXTURE/pac-src/missing.yaml" "$FIXTURE/pac-vendored/openapi.yaml" 2>/dev/null; then
+            PAC_STATUS=0
+          else
+            PAC_STATUS=$?
+          fi
+          if [ "$PAC_STATUS" -eq 2 ]; then
+            echo "  ok — public-api-contract guard reports a missing source file as exit 2"
+          else
+            echo "SELF-TEST FAILED: the public-api-contract guard reported a missing source file with exit $PAC_STATUS, not the distinct exit 2 for 'could not compare'."
             FAILED=1
           fi
 
@@ -3730,3 +3821,211 @@ jobs:
 
           [ "$FAIL" -eq 0 ] || exit 1
           echo "docs/version-catalog.md matches reality: every used image tag is cataloged, and every cataloged tag is used."
+
+  # ===========================================================================
+  # public-api-contract — the public API OpenAPI contract, on its own.
+  #
+  # A second job rather than more steps on wrapper-cross-stack: that job's
+  # step list already covers eight lettered gates plus their self-test, and a
+  # Spectral finding or a vendored-copy drift is a different failure with a
+  # different fix (edit the contract; re-sync the vendored copy) from
+  # anything wrapper-cross-stack checks. Two independent jobs report two
+  # independent causes instead of one job's red run covering both.
+  #
+  # Two checks, both build-failing:
+  #   1. docs/specs/public-api/openapi.yaml lints clean against
+  #      docs/specs/public-api/.spectral.yaml at `-F hint` — the strictest
+  #      severity Spectral has, so a hint left in the ruleset still fails the
+  #      build rather than being silently tolerated at Spectral's own
+  #      default (which stops at warn).
+  #   2. api/public-api/openapi.yaml — the api repo's vendored copy of that
+  #      same contract — stays byte-identical to it. Unlike the api/frontend/
+  #      backoffice openapi.json trio wrapper-cross-stack step (b) guards,
+  #      nothing regenerates this copy; it is a hand-authored file with a
+  #      hand-maintained duplicate, so nothing short of the two staying
+  #      byte-for-byte the same is the contract.
+  #
+  # `public_api_contract_identical`, the guard behind check 2, lives in
+  # scripts/ci-guards.sh beside every other guard this repo's CI relies on —
+  # see that file's own header for why one definition, sourced by both the
+  # real gate here and the self-test in wrapper-cross-stack step (f), is the
+  # whole point.
+  # ===========================================================================
+  public-api-contract:
+    name: Public API Contract
+    runs-on: ubuntu-latest
+    # Two quick, self-contained checks (a Spectral lint and a byte
+    # comparison) against committed files — no submodule ancestry walk, no
+    # hundreds of self-test fixture assertions. wrapper-cross-stack's 20
+    # minutes is sized for that heavier job; this one needs real headroom
+    # over normal run time without borrowing its neighbour's budget.
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout wrapper repo
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # The vendored copy this job compares against lives inside the api
+          # submodule (api/public-api/openapi.yaml) — without this it is an
+          # empty directory, and the parity check below fails on a missing
+          # file it never actually compared, the same "could not read" trap
+          # wrapper-cross-stack's own checkout comment documents.
+          submodules: recursive
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          # Same pin as wrapper-cross-stack's own "Set up Bun" step, for the
+          # same reason: docs/version-catalog.md is the single source of
+          # truth for this version, and the step below asserts this job's
+          # live `bun --version` actually matches the row it names, rather
+          # than trusting that two `bun-version:` lines in one file were
+          # bumped together.
+          bun-version: '1.4.0'
+
+      - name: Verify Bun matches the pinned version in docs/version-catalog.md
+        run: |
+          set -e
+          CATALOG_BUN=$(grep -E '^\| Bun \|' docs/version-catalog.md | sed -E 's/^\| Bun \| `([^`]+)`.*/\1/')
+          if [ -z "$CATALOG_BUN" ]; then
+            echo "ERROR: could not read a Bun row from docs/version-catalog.md."
+            echo "  A version check that finds no version to check against has not passed, it has failed to run."
+            exit 1
+          fi
+          LIVE_BUN=$(bun --version)
+          if [ "$LIVE_BUN" != "$CATALOG_BUN" ]; then
+            echo "ERROR: bun --version reports $LIVE_BUN but docs/version-catalog.md pins Bun $CATALOG_BUN."
+            echo "  Move the 'Set up Bun' bun-version in this job and the catalog row together."
+            exit 1
+          fi
+          echo "bun --version ($LIVE_BUN) matches the Bun docs/version-catalog.md pins."
+
+      # -----------------------------------------------------------------------
+      # 1. Spectral lint, at -F hint.
+      #
+      # -F hint (not the default) is deliberate: Spectral's own default
+      # --fail-severity is warn, which lets an accumulating pile of hints
+      # pass forever. docs/specs/public-api/README.md already claims this
+      # contract "lints clean with Spectral spectral:oas" — -F hint is what
+      # actually holds that claim to CI rather than leaving it as prose
+      # nobody re-checks.
+      #
+      # @stoplight/spectral-cli is a locked dependency of tools/spectral/
+      # (its own package.json + committed bun.lock), installed here with
+      # `bun install --frozen-lockfile` — not invoked ad hoc via `bunx --yes`.
+      # Spectral's own transitive dependencies were otherwise unpinned on
+      # every run, and `--yes` is an npx-style flag whose acceptance by this
+      # job's pinned bun-version was unproven. A committed lockfile pins the
+      # whole resolved tree, the same `tag_pinned`/D25 reason every Docker
+      # tag and GitHub Action in this workflow is pinned: an unpinned
+      # dependency can start failing a previously-clean contract on a day
+      # nobody touched this repo. See docs/version-catalog.md's Spectral row.
+      # -----------------------------------------------------------------------
+      - name: Install Spectral (locked)
+        working-directory: tools/spectral
+        run: bun install --frozen-lockfile
+
+      - name: Spectral lint — docs/specs/public-api/openapi.yaml
+        working-directory: tools/spectral
+        run: bun run lint
+
+      # -----------------------------------------------------------------------
+      # 2. Vendored copy parity: api/public-api/openapi.yaml must be
+      #    byte-identical to docs/specs/public-api/openapi.yaml.
+      #
+      #    Captured via if/else, not a bare call followed by `$?` — this step
+      #    has no `set -e` of its own, but Actions runs `bash` steps under
+      #    `set -e` by default, and a bare call to a function that can exit
+      #    1 or 2 would abort the step before either branch below ever read
+      #    the status. Same trap wrapper-cross-stack step (b) documents at
+      #    its own json_canonical_equal call site.
+      # -----------------------------------------------------------------------
+      - name: Vendored copy parity — api/public-api/openapi.yaml
+        run: |
+          # shellcheck disable=SC1091
+          . ./scripts/ci-guards.sh
+
+          if public_api_contract_identical docs/specs/public-api/openapi.yaml api/public-api/openapi.yaml; then
+            PACD_STATUS=0
+          else
+            PACD_STATUS=$?
+          fi
+
+          if [ "$PACD_STATUS" -eq 0 ]; then
+            echo "api/public-api/openapi.yaml is byte-identical to docs/specs/public-api/openapi.yaml."
+          elif [ "$PACD_STATUS" -eq 2 ]; then
+            echo "ERROR: api/public-api/openapi.yaml could not be compared against docs/specs/public-api/openapi.yaml."
+            echo "  One or both files are missing. This is NOT drift — nothing was found to differ."
+            exit 1
+          else
+            echo "ERROR: api/public-api/openapi.yaml has drifted from docs/specs/public-api/openapi.yaml."
+            echo "  The vendored copy in api/public-api/ must be a byte-identical copy of the wrapper's"
+            echo "  source of truth. To fix: cp docs/specs/public-api/openapi.yaml api/public-api/openapi.yaml"
+            exit 1
+          fi
+
+  # ===========================================================================
+  # Generated SDKs (public-api step 11c)
+  #
+  # sdks/ holds the openapi-generator output for @beai/sdk (TypeScript),
+  # beai/beai-php (PHP) and beai (Python), regenerated from
+  # api/openapi.v1.json by sdks/generate.sh. Generated code is never
+  # hand-edited, so the only acceptable state is "regenerating changes
+  # nothing": any diff means the spec moved without the SDKs (or the reverse).
+  # Publishing is a separate release step and is not done here.
+  #
+  # Java 21 (Temurin), PHP 8.5 and Python 3.13 are installed by SHA-pinned
+  # setup actions, not taken from whatever the ubuntu-latest image ships that
+  # day. The generator CLI is a locked dependency of tools/openapi-generator/
+  # (bun.lock), and its jar is pinned in sdks/openapitools.json; every version
+  # is recorded in docs/version-catalog.md. This job reaches the network to
+  # download that jar (Maven Central) and the locked npm packages.
+  # ===========================================================================
+  public-api-sdks:
+    name: Public API SDKs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout wrapper repo
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # api/openapi.v1.json and api/VERSION live in the api submodule.
+          submodules: recursive
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: '1.4.0'
+
+      - name: Set up Java (openapi-generator jar)
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '21.0.12'
+
+      - name: Set up PHP (smoke - php -l over the generated PHP SDK)
+        uses: shivammathur/setup-php@bf6b4fbd49ca58e4608c9c89fba0b8d90bd2a39f # 2.35.5
+        with:
+          php-version: '8.5.11'
+
+      - name: Set up Python (spec rewrite + smoke parse of the Python SDK)
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13.15'
+
+      - name: Regenerate the SDKs
+        run: sh sdks/generate.sh
+
+      - name: Fail on drift between the spec and the committed SDKs
+        run: |
+          set -e
+          if [ -n "$(git status --porcelain -- sdks)" ]; then
+            echo "ERROR: regenerating sdks/ changed committed files:"
+            git status --porcelain -- sdks
+            echo "  Run: sh sdks/generate.sh and commit the result."
+            exit 1
+          fi
+
+      - name: Smoke-check the generated SDKs
+        run: sh sdks/smoke.sh

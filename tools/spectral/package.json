@@ -1,0 +1,9 @@
+{
+  "private": true,
+  "devDependencies": {
+    "@stoplight/spectral-cli": "6.16.3"
+  },
+  "scripts": {
+    "lint": "spectral lint --ruleset ../../docs/specs/public-api/.spectral.yaml -F hint ../../docs/specs/public-api/openapi.yaml"
+  }
+}
