@@ -394,6 +394,14 @@ jobs:
           fi
           echo "AGENTS.md is a symlink to CLAUDE.md — one file, one truth."
 
+          # The public docs render backoffice's vendored copy of the /v1 spec;
+          # it must be byte-identical to what the api exports.
+          if ! cmp -s api/openapi.v1.json backoffice/docs-src/openapi.v1.json; then
+            echo "ERROR: backoffice/docs-src/openapi.v1.json drifted from api/openapi.v1.json."
+            echo "  Run: cp api/openapi.v1.json backoffice/docs-src/openapi.v1.json"
+            exit 1
+          fi
+
           # Every repo agrees with itself about which version it is.
           #
           # The api asserts VERSION == composer.json == openapi.json in its own

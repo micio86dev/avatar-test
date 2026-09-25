@@ -169,8 +169,16 @@ TDD, with every integration response validated against
       remaining divergences recorded explicitly (G-54, allow-listed with
       reasons so any NEW one fails). Mutation-verified by the writer;
       pint, phpstan, Contract+OpenApi tests re-run by parent.
-- [ ] S11b Scalar docs (self-hosted, static, served by the backoffice nginx
-      stage or a sibling static service), generated from `openapi.yaml`.
+- [x] S11b (backoffice 6f920c1): self-hosted Scalar reference built by
+      `bun run docs:build` from a vendored `/v1` spec copy, served by the
+      nginx stage at `/developers/` (miss → 404, never the SPA shell);
+      `@scalar/api-reference@1.72.1` pinned in the version catalog.
+      Verified by parent: backoffice vitest 2445, typecheck, prettier,
+      headless render (page renders, zero external requests). Wrapper CI
+      now byte-compares the vendored spec with `api/openapi.v1.json`.
+      **Not verified:** `docker build`/image (daemon not running), CI steps
+      themselves, Scalar's "Ask AI" control behaviour on click. Remaining
+      SPEC §6 prose sections tracked in `docs/developer-docs-todo.md`.
 - [ ] S11c openapi-generator SDKs (TS `@beai/sdk`, PHP `beai/beai-php`,
       Python `beai`) — publishing/hosting repos need owner confirmation.
 - [ ] S11d Quickstart CI job (snippets run against a test-mode org, must

@@ -41,6 +41,7 @@ written for the historical record; **this file is the live one.**
 | Bun (build) | `oven/bun:1.4.0` | `frontend/Dockerfile` and `backoffice/Dockerfile` build stages |
 | Node (SSR runtime) | `node:24.11-slim` | `frontend/Dockerfile` runtime stage |
 | Nginx (static) | `nginx:1.27.5-alpine` | `backoffice/Dockerfile` runtime stage |
+| Scalar API reference (developer docs) | `@scalar/api-reference` `1.72.1` (exact) | `backoffice` devDependency; vendored into `/developers/` by `bun run docs:build` |
 | Playwright (E2E) | `mcr.microsoft.com/playwright:v1.61.1-jammy` | `scripts/e2e-container.sh`, `frontend` and `backoffice` CI E2E jobs |
 
 The Playwright image is passed to `docker run` by a script rather than written
