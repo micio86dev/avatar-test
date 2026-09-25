@@ -35,6 +35,8 @@ would then have to stop for.
 | Playwright browsers | **Chromium + WebKit** | Install with `--with-deps` flag |
 | shellcheck | any recent | Lints `scripts/*.sh`; CI hard-fails without it (`brew install shellcheck`) |
 | dash | any recent | Proves `scripts/ci-guards.sh` is really POSIX sh, not bash (`brew install dash`) |
+| Java (JRE/JDK) | **11+** (CI: Temurin `21.0.12`) | Runs the openapi-generator jar for `sdks/generate.sh` (`brew install openjdk`) |
+| Python | **3.x** (CI: `3.13.15`) | `sdks/generate.sh` spec rewrite and the smoke parse of the Python SDK (`brew install python`) |
 | k6 | any recent | Local load tests only; never CI on PRs |
 
 ### Host resources (not optional)
@@ -148,6 +150,11 @@ docker compose version  # Docker Compose version v2.x.x
 # go-task
 brew install go-task
 task --version  # Task version: 3.x.x
+
+# Java + Python 3 (SDK generation: sdks/generate.sh, sdks/smoke.sh)
+brew install openjdk python
+java -version
+python3 --version
 
 # k6 (local load tests only)
 brew install k6

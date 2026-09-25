@@ -622,3 +622,49 @@ of 400. Still recorded, each needing an owner decision on which side moves:
   documented as `{message}` by the export). Worth a follow-up to make every `/v1` error
   Problem-shaped in the export.
 
+
+### G-55 — Generated SDKs work around the `errors: {"type": "null"}` schema · open
+
+`sdks/generate.sh` feeds openapi-generator a copy of `api/openapi.v1.json` in
+which the API's `errors` schema (`{"type": "null"}`) becomes a nullable string:
+the Python generator crashes on it and typescript-fetch imports a `./Null`
+model it never emits. The generated `errors` type is therefore loosely typed.
+Fixing it properly means changing the API spec/Scramble output, which S11c did
+not touch. **Decision needed:** change the API so the schema is generator-safe,
+or keep the generation-time rewrite.
+
+### G-56 — API-side defects surfaced by the generated SDKs · open
+
+gga review of the S11c SDK commit found these in the generated clients. All
+originate in the api's OpenAPI export (Scramble/docblocks); none is fixed by
+the SDK work, which never hand-edits generated output.
+
+- `servers` defaults to `http://localhost/api/v1`, so every SDK's default base
+  URL is plain-HTTP localhost, in tension with the HTTPS NFR.
+- Internal review notes ("gga round 3 finding 2", "step 6 review follow-up")
+  leak into public SDK docstrings from api-side docblocks.
+- `evaluations.pending` is typed `string`.
+- `PublicInterview.metadata` is typed `Array<any>` while requests send a map.
+- `PublicInterviewProgress` generates as an empty interface (the `anyOf` is
+  lost).
+- The merged 409 response model still types `errors` as plain `string` (the
+  per-variant models are `string | null`), a generator `anyOf` limitation.
+
+**Decision needed:** fix each at the api/spec side (and regenerate), or accept.
+
+**G-56 update — security scheme and server (S11c round 2).** The `/v1` export now
+mirrors `openapi.yaml`: an `apiKey` HTTP bearer scheme (`beai_live_… |
+beai_test_…`), global `security: [apiKey]`, `security: []` on `GET /health`, and
+`servers[0]` = `https://api.beai.example/v1`. Generated SDKs now send
+`Authorization: Bearer <accessToken>` (asserted offline in `sdks/smoke.sh`).
+Open points:
+- The server host is the reference's placeholder (`.example`); it is
+  overridable through `PUBLIC_API_SPEC_SERVER_URL` (`public_api.spec_server_url`)
+  and must be set to the real host once G-03 is decided. The reference URL path
+  is `/v1` while the app serves `/api/v1`; the deployment must route one to the
+  other or the reference must change.
+- The default (whole-`/api`) document `openapi.json` is intentionally NOT given
+  this scheme: it also documents admin routes that use user JWTs, so a global
+  `apiKey` there would misdescribe them.
+- SDK generation still uses the `.example` server as `basePath` default; SDK
+  users must set `basePath` until the host exists.

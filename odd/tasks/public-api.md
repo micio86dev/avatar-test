@@ -179,8 +179,21 @@ TDD, with every integration response validated against
       **Not verified:** `docker build`/image (daemon not running), CI steps
       themselves, Scalar's "Ask AI" control behaviour on click. Remaining
       SPEC §6 prose sections tracked in `docs/developer-docs-todo.md`.
-- [ ] S11c openapi-generator SDKs (TS `@beai/sdk`, PHP `beai/beai-php`,
-      Python `beai`) — publishing/hosting repos need owner confirmation.
+- [x] S11c: openapi-generator 7.25.0 (pinned) generates `sdks/typescript`
+      (`@beai/sdk`), `sdks/php` (`beai/beai-php`), `sdks/python` (`beai`)
+      in-tree from `api/openapi.v1.json` (no new repos, nothing published —
+      split/publish is a release-step decision); `generate.sh` + `smoke.sh`
+      (shellcheck+dash clean), CI job `public-api-sdks` regenerates and
+      fails on drift. Verified by parent: shellcheck/dash, regeneration
+      byte-deterministic, smoke (tsc + client instantiation, php -l,
+      python ast); CLI and TypeScript locked in `tools/openapi-generator`,
+      setup actions SHA-pinned. gga round 2 found the `/v1` export had no
+      security scheme (SDKs could not authenticate): api b36ef7c now
+      declares the bearer `apiKey` scheme + server, asserted in
+      T-CONTRACT-001; smoke asserts the TS client sends `Authorization`.
+      G-55/G-56 logged (spec-side issues; server host still the `.example`
+      placeholder pending G-03). **Not verified:** the CI job itself, Python
+      import (needs pydantic).
 - [ ] S11d Quickstart CI job (snippets run against a test-mode org, must
       reach `completed`).
 - [ ] S12 `AGENTS.md` rule: no new public/export field without a T-EXPOSE-001 entry.

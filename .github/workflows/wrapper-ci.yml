@@ -14,8 +14,9 @@
 # This workflow validates, in the order the steps run:
 # Two steps run BEFORE the lettered gates and are not part of the sequence:
 # the lint of the POSIX sh guards — scripts/ci-guards.sh (the guard mechanism
-# itself, checked before anything sources it) AND
-# scripts/verify-openapi-parity.sh, which step (b) below now calls — and the
+# itself, checked before anything sources it), scripts/verify-openapi-parity.sh,
+# which step (b) below now calls, AND sdks/generate.sh + sdks/smoke.sh, which
+# the third job below runs — and the
 # lint of every bash script under scripts/ with the docker-disk-check suite.
 # The openapi-parity fixture suite runs LATER, immediately before step (b),
 # because it needs Bun and `Set up Bun` comes after these two. All are listed
@@ -24,8 +25,10 @@
 #   (a) docker compose config parses, and every image tag — compose services,
 #       Dockerfile FROM bases, Dockerfile COPY --from= images and the images a
 #       script pins for `docker run` alike — is pinned; this workflow's own
-#       `uses:` references are SHA-pinned; and AGENTS.md is a symlink to
-#       CLAUDE.md rather than a second copy of the rules
+#       `uses:` references are SHA-pinned; AGENTS.md is a symlink to
+#       CLAUDE.md rather than a second copy of the rules; and
+#       backoffice/docs-src/openapi.v1.json (the copy the developer docs
+#       render) is byte-identical to api/openapi.v1.json
 #   (b) the committed openapi.json is semantically identical across api/frontend/backoffice
 #   (c) each app's check-client-drift.sh exits 0 (generated TS client matches openapi.json)
 #   (d) the framework catalog, in full. Parity between the authored source and
@@ -85,6 +88,13 @@
 # others and is self-tested in (f) the same way every other guard is — one
 # mechanism, proved once, used by whichever job needs it.
 #
+# A third, independent job, `public-api-sdks`, regenerates the TypeScript, PHP
+# and Python SDKs under sdks/ from api/openapi.v1.json and fails if that
+# changes any committed file, then smoke-checks them (tsc, php -l, Python
+# parse). It is the one job that reaches the network beyond checkout: it
+# downloads the openapi-generator jar and the locked npm packages of
+# tools/openapi-generator/. Nothing is published from it.
+#
 # Triggers: develop, main, release/** and hotfix/**.
 #
 # It used to be develop only, justified as "releases handled by Git Flow". This
@@ -107,15 +117,18 @@ on:
       - 'release/**'
       - 'hotfix/**'
 
-# Every step in both jobs reads: checkout, compose config, openapi/catalog
-# comparison, submodule ancestry checks, self-test fixtures, a Spectral lint
-# and a byte-comparison of two committed files. None of it pushes a branch,
+# Every step in all three jobs reads: checkout, compose config, openapi/catalog
+# comparison, submodule ancestry checks, self-test fixtures, a Spectral lint,
+# a byte-comparison of committed files, and SDK regeneration into the
+# checked-out workspace (which is diffed, never committed or pushed). The SDK
+# job downloads the generator jar and locked npm packages, but sends nothing
+# out and needs no token for it. None of it pushes a branch,
 # opens a PR, writes a release, or calls an API that needs a token scope
 # wider than reading the checked-out ref. `contents: read` is the only scope
-# any step in either job uses — GITHUB_TOKEN is not referenced anywhere in
-# this file (checkout and setup-bun do not need one). Set at the workflow
-# level, not per-job: both jobs need exactly this and nothing wider, so one
-# declaration covers both rather than repeating it per job.
+# any step in any job uses — GITHUB_TOKEN is not referenced anywhere in
+# this file (checkout and the setup actions do not need one). Set at the
+# workflow level, not per-job: every job needs exactly this and nothing
+# wider, so one declaration covers all of them rather than repeating it.
 permissions:
   contents: read
 
@@ -169,9 +182,11 @@ jobs:
         # verify:openapi` locally, so a bashism in it breaks the gate in CI and
         # nowhere else, which is the least useful place to find out.
         run: |
-          shellcheck -s sh scripts/ci-guards.sh scripts/verify-openapi-parity.sh
+          shellcheck -s sh scripts/ci-guards.sh scripts/verify-openapi-parity.sh sdks/generate.sh sdks/smoke.sh
           dash -n scripts/ci-guards.sh
           dash -n scripts/verify-openapi-parity.sh
+          dash -n sdks/generate.sh
+          dash -n sdks/smoke.sh
 
       # -----------------------------------------------------------------------
       # The disk guard, linted and RUN.
@@ -3948,3 +3963,69 @@ jobs:
             echo "  source of truth. To fix: cp docs/specs/public-api/openapi.yaml api/public-api/openapi.yaml"
             exit 1
           fi
+
+  # ===========================================================================
+  # Generated SDKs (public-api step 11c)
+  #
+  # sdks/ holds the openapi-generator output for @beai/sdk (TypeScript),
+  # beai/beai-php (PHP) and beai (Python), regenerated from
+  # api/openapi.v1.json by sdks/generate.sh. Generated code is never
+  # hand-edited, so the only acceptable state is "regenerating changes
+  # nothing": any diff means the spec moved without the SDKs (or the reverse).
+  # Publishing is a separate release step and is not done here.
+  #
+  # Java 21 (Temurin), PHP 8.5 and Python 3.13 are installed by SHA-pinned
+  # setup actions, not taken from whatever the ubuntu-latest image ships that
+  # day. The generator CLI is a locked dependency of tools/openapi-generator/
+  # (bun.lock), and its jar is pinned in sdks/openapitools.json; every version
+  # is recorded in docs/version-catalog.md. This job reaches the network to
+  # download that jar (Maven Central) and the locked npm packages.
+  # ===========================================================================
+  public-api-sdks:
+    name: Public API SDKs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout wrapper repo
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # api/openapi.v1.json and api/VERSION live in the api submodule.
+          submodules: recursive
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: '1.4.0'
+
+      - name: Set up Java (openapi-generator jar)
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '21.0.12'
+
+      - name: Set up PHP (smoke - php -l over the generated PHP SDK)
+        uses: shivammathur/setup-php@bf6b4fbd49ca58e4608c9c89fba0b8d90bd2a39f # 2.35.5
+        with:
+          php-version: '8.5.11'
+
+      - name: Set up Python (spec rewrite + smoke parse of the Python SDK)
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.13.15'
+
+      - name: Regenerate the SDKs
+        run: sh sdks/generate.sh
+
+      - name: Fail on drift between the spec and the committed SDKs
+        run: |
+          set -e
+          if [ -n "$(git status --porcelain -- sdks)" ]; then
+            echo "ERROR: regenerating sdks/ changed committed files:"
+            git status --porcelain -- sdks
+            echo "  Run: sh sdks/generate.sh and commit the result."
+            exit 1
+          fi
+
+      - name: Smoke-check the generated SDKs
+        run: sh sdks/smoke.sh
