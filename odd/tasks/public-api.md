@@ -56,11 +56,10 @@ TDD, with every integration response validated against
 - [x] S4 Read endpoints: organization, projects (`T-PRJ-001..005`,
       `T-EXPOSE-001/002`; api `c807d32`). Found and fixed the /v1 middleware
       priority defect (G-35). Full suite 4087 green.
-- [ ] S5 Interviews create (enrolment) + lifecycle mapping + session tokens +
+- [x] S5 Interviews create (enrolment) + lifecycle mapping + session tokens +
       hosted page, no cancel (`T-INT`, `T-TOK`).
       - [x] frontend `/i/[token]` written and green (T-TOK-011..014, E2E);
-            UNCOMMITTED: gga requires the response type from the generated
-            client, so it commits after api S5 + openapi sync + codegen.
+            committed as frontend 3037435 after api S5 + openapi sync + codegen.
       - [x] api: enrolment, lifecycle mapping, session tokens + exchange,
             interview_events, participants columns (T-INT-001..016,
             T-TOK-001..010; api `cc6ecc3`; four gga rounds, 23 findings fixed).
