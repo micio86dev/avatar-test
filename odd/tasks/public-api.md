@@ -105,7 +105,39 @@ TDD, with every integration response validated against
       original "accepted as fail-open" call would have let a test-mode
       participant get scored and billed on an org mismatch). Full targeted
       suite 654-657 green across rounds.
-- [ ] S10 `@beai/embed` package (`T-SDK-001..020`), Playwright E2E, ≤ 12 KB gz CI gate.
+- [x] S10a `@beai/embed` package core (`T-SDK-001..020`'s unit-testable
+      subset) — new 4th git submodule `embed/` (`micio86dev/embed`, same
+      Git Flow ×4 pattern as api/frontend/backoffice), base commit `1144a0d`
+      plus eight gate-fix follow-up commits (`e28b87f`, `198b2af`,
+      `ff08c2b`, `473486e`, `083aa64`, `87985e7`, `9bd91ca` — 9 commits
+      total). `BEAI.mount()` creates/manages an iframe pointed at
+      `{embedOrigin}/embed/{token}`, validates `event.origin` +
+      `event.source` (multi-embed cross-talk guard) + the `{source,
+      version}` envelope before touching any payload, queues `start()`
+      until `ready` (cancelled by an `end()` called first, or by a
+      `READY_TIMEOUT_MS` — 15s — guard that also blocks a LATE `ready`
+      from starting anyway once the host was told the embed failed), and
+      relays `set-theme` without deciding white-label gating (iframe-side).
+      Zero runtime deps; IIFE bundle measures ~2.06 KB gz, well under the
+      12 KB budget (`scripts/check-bundle-size.mjs`). Per-handler
+      `try/catch` isolation in `dispatch()` — a throwing host callback
+      no longer skips later listeners for the same event or propagates
+      out of `destroy()`. 55 Vitest tests, several rounds of mutation-
+      tested (not just reasoned-about) test fixes after gga caught two
+      genuinely vacuous `it.each` cases (jsdom silently ignores an
+      invalid CSS length, so NaN/Infinity/negative couldn't fail the
+      original DOM-write test even with every guard deleted). All nine
+      commits individually RDD-reviewed and acknowledged; `.husky/
+      pre-commit` had to be hand-wired after `bun install`'s own
+      `prepare` script silently overwrote `core.hooksPath`, leaving the
+      base commit's first landing unreviewed until caught and recovered.
+- [ ] S10b `/embed/{token}` iframe page in `frontend`, reusing
+      `interview/session.vue`'s existing component/composable with
+      different chrome; dynamic `Content-Security-Policy: frame-ancestors`
+      scoped to the org's allowed domains; `Permissions-Policy`; tab-hidden
+      >60s pause+warn and network-drop reconnect-then-fail (not yet built
+      in `frontend`); Playwright E2E (mount→completed ≤60s, CSP blocks a
+      non-allowed host) and the CI bundle-size gate for `@beai/embed`.
 - [ ] S11 Scalar docs, openapi-generator SDKs (TS, PHP, Python), quickstart
       CI job, Scramble `/v1` export equivalence (`T-CONTRACT-001`).
 - [ ] S12 `AGENTS.md` rule: no new public/export field without a T-EXPOSE-001 entry.
@@ -141,9 +173,11 @@ existing models; auth, conventions, tokens, SDK, exports, test mode and docs
 stay as authored (G-00).
 
 ## Next step
-S10 `@beai/embed` package (`T-SDK-001..020`), Playwright E2E, ≤ 12 KB gz CI
-gate. G-51 (interview reads not mode-scoped) and G-52 (two pre-existing
-plural `withoutGlobalScopes()` sites outside step 8's diff) remain open
-decisions — see `docs/specs/public-api/DECISIONS-NEEDED.md`. Then S11
-(docs/SDKs/quickstart CI), S12 (`AGENTS.md` rule), S13 (final
+S10b: the `/embed/{token}` iframe page in `frontend` (reuse
+`interview/session.vue`, dynamic CSP `frame-ancestors`, tab-hidden/
+network-drop resilience), then its Playwright E2E and the CI bundle-size
+gate for `@beai/embed`. G-51 (interview reads not mode-scoped) and G-52
+(two pre-existing plural `withoutGlobalScopes()` sites outside step 8's
+diff) remain open decisions — see `docs/specs/public-api/DECISIONS-NEEDED.md`.
+Then S11 (docs/SDKs/quickstart CI), S12 (`AGENTS.md` rule), S13 (final
 `IMPLEMENTATION-REPORT.md`).
