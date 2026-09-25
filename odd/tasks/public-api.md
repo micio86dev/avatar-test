@@ -151,8 +151,8 @@ TDD, with every integration response validated against
       per-commit gga gate).
 - [ ] S10c Remaining from S10: Playwright E2E (mount→completed ≤60s, CSP
       blocks a non-allowed host), `resize` postMessage emission (no
-      `ResizeObserver` yet), CI bundle-size gate for `@beai/embed`, and
-      `embed` in the wrapper CI `version_manifest_divergence` list.
+      `ResizeObserver` yet), CI bundle-size gate for `@beai/embed`. (`embed`
+      already added to the wrapper CI `version_manifest_divergence` list.)
 - [ ] S11 Scalar docs, openapi-generator SDKs (TS, PHP, Python), quickstart
       CI job, Scramble `/v1` export equivalence (`T-CONTRACT-001`).
 - [ ] S12 `AGENTS.md` rule: no new public/export field without a T-EXPOSE-001 entry.
@@ -189,7 +189,7 @@ stay as authored (G-00).
 
 ## Next step
 S10c: Playwright E2E for the embed page, `resize` emission, the CI
-bundle-size gate for `@beai/embed`, and wiring `embed` into wrapper CI. G-51 (interview reads not mode-scoped) and G-52
+bundle-size gate for `@beai/embed`. G-51 (interview reads not mode-scoped) and G-52
 (two pre-existing plural `withoutGlobalScopes()` sites outside step 8's
 diff) remain open decisions — see `docs/specs/public-api/DECISIONS-NEEDED.md`.
 Then S11 (docs/SDKs/quickstart CI), S12 (`AGENTS.md` rule), S13 (final
