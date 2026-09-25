@@ -199,7 +199,7 @@ TDD, with every integration response validated against
       mutation-verified by the writer. Gaps: candidate-facing steps aren't in
       the `/v1` contract; test client bypasses TLS/real queue.
 - [x] S12 permanent rule added to api/AGENTS.md (api commit) and wrapper CLAUDE.md (AGENTS.md is a symlink).
-- [ ] S13 `docs/specs/public-api/IMPLEMENTATION-REPORT.md`.
+- [x] S13 `docs/specs/public-api/IMPLEMENTATION-REPORT.md` (e725056), with full-suite results.
 
 ## Progress and evidence
 | Task | Route | Trigger evidence | Commit | Checks |
