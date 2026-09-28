@@ -64,10 +64,10 @@ apps (`assets/css/main.css`). They MUST be kept in sync.
 |-------|-------|-------|
 | `--color-primary` | `#771AAF` | Quint purple (logo color) — headings, primary buttons, navigation active |
 | `--color-primary-light` | `#C222D3` | Hover state of primary elements (light violet) |
-| `--color-primary-dark` | `#4F1AAF` | Active / pressed state (dark violet) |
+| `--color-primary-dark` | `#431695` | Active / pressed state (dark violet, 15% darker than the previous `#4F1AAF`) |
 | `--color-accent` | `#E45526` | Quint institutional orange — CTAs, highlighted / active states |
 | `--color-accent-light` | `#F19823` | Hover state of accent elements (orange) |
-| `--color-accent-dark` | `#B8431E` | Active / pressed state of accent |
+| `--color-accent-dark` | `var(--color-primary-dark)` (`#431695`) | Active / pressed state of accent — aliased to `--color-primary-dark`, not a separate orange literal (reversed: it used to be `#B8431E`) |
 | `--color-lavender` | `#8373D2` | Supporting secondary (lavender) — subtle highlights, badges |
 
 **Background** — pages use a very light brand gradient, not a flat fill:
@@ -248,10 +248,10 @@ tokens below supplement Tailwind's built-in scale for BEAI-specific layout needs
   /* Normative Quint brand values — see §3.1 token table (authoritative) */
   --color-primary: #771aaf;
   --color-primary-light: #c222d3;
-  --color-primary-dark: #4f1aaf;
+  --color-primary-dark: #431695;
   --color-accent: #e45526;
   --color-accent-light: #f19823;
-  --color-accent-dark: #b8431e;
+  --color-accent-dark: var(--color-primary-dark);
 
   /* Supporting secondary */
   --color-lavender: #8373d2;
@@ -363,7 +363,15 @@ components/
 - Molecules contain UI composition logic only (show/hide, local state for UX).
 - Organisms may call composables and emit domain-level events.
 - No component may import directly from another repo's code.
-- Every component must have a matching Vitest unit test.
+- Every component must have a matching Vitest unit test. **Exception:** vendored
+  shadcn-vue source under `app/components/ui/**` (`bunx shadcn-vue add` output, not
+  hand-authored) is excluded from the per-file coverage gate in both apps'
+  `vitest.config.ts` — it is exercised indirectly through the organisms/pages that
+  consume it, not through a standalone unit test per primitive. This exception is
+  narrow and does not extend past coverage enforcement: the cursor-pointer rule
+  immediately below still binds vendored source with zero exceptions, and so does
+  every other rule in this document — "vendored" only ever waives the redundant
+  per-primitive unit test, never a behavioral or accessibility requirement.
 - **Every clickable element MUST show `cursor: pointer`** — always, in both apps,
   with no exceptions. Tailwind v4's Preflight no longer sets it on `<button>`, so
   each app declares it globally in `app/assets/css/main.css` (`@layer base`) for
@@ -1076,16 +1084,16 @@ All text against its background MUST achieve:
 | `--color-neutral-900` (`#0f172a`) | white | 19.2:1 | ✓ |
 | white | `--color-primary` (`#771aaf`) | 8.2:1 | ✓ AA (normal text) |
 | white | `--color-accent` (`#e45526`) | 3.7:1 | ✗ FAILS 4.5:1 AA for normal text; passes 3:1 large-text/UI |
-| white | `--color-accent-dark` (`#b8431e`) | 5.4:1 | ✓ AA (valid text-sized accent alternative) |
+| white | `--color-accent-dark` (`#431695`, aliased to `--color-primary-dark`) | 11.75:1 | ✓ AA (valid text-sized accent alternative) |
 | white | `--color-primary-light` (`#c222d3`) | 4.7:1 | ≈ AA marginal (verify per use-case before body text) |
 | white | `--color-error` (`#ef4444`) | 3.8:1 | ✗ (use `#b91c1c` for text on white) |
 | `--color-success-dark` (`#166534`) | white | 7.1:1 | ✓ AA (verified for BARS `ScoreChip`/`CompetencyMean` text+icon, C11 PR B3) |
 | `--color-warning-dark` (`#92400e`) | white | 7.1:1 | ✓ AA (verified for BARS `ScoreChip`/`CompetencyMean` text+icon, C11 PR B3) |
 | `--destructive` (`#b91c1c`) | `--color-error-light` (`#fee2e2`) | ≈5.30:1 | ✓ AA (invalid `ScoreChip`, C11-follow BARS 1–5 widening) |
 
-> ⚠️ Do NOT use `--color-accent` (`#e45526`) for small text on white — it fails the 4.5:1 AA threshold for normal text (3.7:1). Use `--color-accent-dark` (`#b8431e`, 5.4:1) for text-sized accent elements.
+> ⚠️ Do NOT use `--color-accent` (`#e45526`) for small text on white — it fails the 4.5:1 AA threshold for normal text (3.7:1). Use `--color-accent-dark` (`#431695`, 11.75:1) for text-sized accent elements.
 
-> **Highlighted-row contrast, and ONE highlight (form-clarity-and-console-warnings, D-select).** Every row a pointer or a keyboard can highlight — `ui/select/SelectItem.vue` AND all four `ui/dropdown-menu` row variants — pairs white text with `--color-accent-dark`, never plain `--color-accent` — the request to make the highlight text white is legal ONLY on the darker token, because white on `--color-accent` is the 3.7:1 failure two rows up. Backoffice `tests/unit/theme.spec.ts` asserts the 5.4:1 ratio numerically (a small WCAG relative-luminance helper), not by eye, plus a source-level assertion across all five row files that no state variant — `focus:`, `data-open:`, any other — ever paints plain `bg-accent`. Those rows also carry `cursor-pointer`, and `data-disabled:cursor-not-allowed` WITHOUT `pointer-events-none`: `role="menuitem"` with `tabindex="-1"` matches no selector in the global base rule, `cursor-default` is a utility that outranks `@layer base` regardless, and an element that is not a pointer target resolves its cursor from an ancestor — so `not-allowed` could never render while `pointer-events-none` sat beside it. Dropping it costs no protection: reka-ui guards activation in JS (`if (!props.disabled)` in `MenuItem`, `if (!disabled.value)` in `SelectItem`). `tests/unit/components/ui/dropdown-menu.spec.ts` and `select-item.spec.ts` assert the RENDERED class list, because a source grep cannot see a `cn()` call that dropped the base list. The sub-trigger is not exempt from any of this: `MenuSubTrigger` declares a `disabled` prop and guards on it three times.
+> **Highlighted-row contrast, and ONE highlight (form-clarity-and-console-warnings, D-select).** Every row a pointer or a keyboard can highlight — `ui/select/SelectItem.vue` AND all four `ui/dropdown-menu` row variants — pairs white text with `--color-accent-dark`, never plain `--color-accent` — the request to make the highlight text white is legal ONLY on the darker token, because white on `--color-accent` is the 3.7:1 failure two rows up. Backoffice `tests/unit/theme.spec.ts` asserts the 11.75:1 ratio numerically (a small WCAG relative-luminance helper), not by eye, plus a source-level assertion across all five row files that no state variant — `focus:`, `data-open:`, any other — ever paints plain `bg-accent`. Those rows also carry `cursor-pointer`, and `data-disabled:cursor-not-allowed` WITHOUT `pointer-events-none`: `role="menuitem"` with `tabindex="-1"` matches no selector in the global base rule, `cursor-default` is a utility that outranks `@layer base` regardless, and an element that is not a pointer target resolves its cursor from an ancestor — so `not-allowed` could never render while `pointer-events-none` sat beside it. Dropping it costs no protection: reka-ui guards activation in JS (`if (!props.disabled)` in `MenuItem`, `if (!disabled.value)` in `SelectItem`). `tests/unit/components/ui/dropdown-menu.spec.ts` and `select-item.spec.ts` assert the RENDERED class list, because a source grep cannot see a `cn()` call that dropped the base list. The sub-trigger is not exempt from any of this: `MenuSubTrigger` declares a `disabled` prop and guards on it three times.
 
 > ⚠️ Do NOT use `--color-error` (#ef4444) as text on white. Use `#b91c1c` for error text.
 
@@ -1314,7 +1322,7 @@ Usage:
 10. **Highlighted-row contrast, and ONE highlight (form-clarity-and-console-warnings).**
     Every highlightable row — a `Select` option AND every `DropdownMenu` row —
     MUST render white text on `--color-accent-dark`
-    (5.4:1), never on plain `--color-accent` (3.7:1, fails 4.5:1 AA) — see §9.1's
+    (11.75:1), never on plain `--color-accent` (3.7:1, fails 4.5:1 AA) — see §9.1's
     dedicated note for the numbers and the token pairing. This binds every current
     and future `focus:`/`hover:`/`data-highlighted:` variant that styles a select
     highlight, not only `SelectItem.vue`'s existing `focus:` state.
