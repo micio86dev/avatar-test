@@ -13,7 +13,7 @@ set -euo pipefail
 
 BO=micio86dev/backoffice
 FE=micio86dev/frontend
-WR=micio86dev/avatar-test
+WR=micio86dev/beai
 
 step() { printf '\n==> %s\n' "$*"; }
 
