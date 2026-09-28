@@ -1,5 +1,5 @@
 schema: spec-driven
-project: avatar-test
+project: beai
 initialized: 2026-07-14
 persistence: hybrid
 strict_tdd: true
@@ -41,7 +41,7 @@ testing:
     backoffice_e2e:
       framework: Playwright
       command: "bun run test:e2e"
-      status: scaffolded  # C1 done — same as frontend
+      status: scaffolded  # C1 done — 2 projects (chromium/webkit); no mobile/viewport gate by design
   coverage:
     backend:
       command: "php artisan test --coverage --min=85"
@@ -78,10 +78,10 @@ rules:
     - Follow existing code patterns
     - Dependency Resolution Policy — if a pinned dependency cannot be resolved/installed, STOP and report; never downgrade, replace, remove/loosen constraints, or swap libraries (see CLAUDE.md → Autonomous implementation guardrails; design.md D25/D37)
     tdd: true
-    test_command: "php artisan test --parallel"  # to-be-wired-in-C1 (backend)
-    frontend_test_command: "bun run test:unit"    # to-be-wired-in-C1 (frontend)
+    test_command: "php artisan test --parallel"
+    frontend_test_command: "bun run test:unit"
   verify:
-    test_command: "php artisan test --parallel"   # to-be-wired-in-C1
+    test_command: "php artisan test --parallel"
     build_command: ""
     coverage_threshold: 85
   archive:
