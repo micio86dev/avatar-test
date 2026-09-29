@@ -65,7 +65,7 @@ apps (`assets/css/main.css`). They MUST be kept in sync.
 | `--color-primary` | `#771AAF` | Quint purple (logo color) — headings, primary buttons, navigation active |
 | `--color-primary-light` | `#C222D3` | Hover state of primary elements (light violet) |
 | `--color-primary-dark` | `#431695` | Active / pressed state (dark violet, 15% darker than the previous `#4F1AAF`) |
-| `--color-accent` | `#E45526` | Quint institutional orange — CTAs, highlighted / active states |
+| `--color-accent` | `#E45526` | Quint institutional orange — CTAs and the focus ring. **Never a list-item hover/highlight fill** (see §16 rule 10) |
 | `--color-accent-light` | `#F19823` | Hover state of accent elements (orange) |
 | `--color-accent-dark` | `var(--color-primary-dark)` (`#431695`) | Active / pressed state of accent — aliased to `--color-primary-dark`, not a separate orange literal (reversed: it used to be `#B8431E`) |
 | `--color-lavender` | `#8373D2` | Supporting secondary (lavender) — subtle highlights, badges |
@@ -1326,6 +1326,23 @@ Usage:
     dedicated note for the numbers and the token pairing. This binds every current
     and future `focus:`/`hover:`/`data-highlighted:` variant that styles a select
     highlight, not only `SelectItem.vue`'s existing `focus:` state.
+
+    **The rule, restated (list-item-hover-primary):** hover/highlight of ANY list
+    item — `Select`, `DropdownMenu`, `Combobox` (`ComboboxItem`'s
+    `data-highlighted:` state) and hand-rolled option lists such as
+    `AvatarTemplateProviderCombobox` — is the PRIMARY family, never orange. Solid
+    highlight: `bg-accent-dark text-white` (`--color-primary-dark` #431695,
+    white 11.75:1) with descendants forced white via `**:text-white`. Quiet
+    "selected" or icon-button hover: `bg-primary/10` (#f1e8f7 over white;
+    neutral-800 12.28:1, neutral-600 6.36:1, primary 6.91:1). The bare Tailwind
+    `bg-accent` compiles from `--color-accent` (orange) — the shadcn `--accent`
+    variable is NOT what it reads, because the `@theme inline` bridge omits that
+    key on purpose — so `bg-accent` / `text-accent` / `ring-accent` etc. are
+    banned across `app/` (guarded by `tests/unit/theme.spec.ts`). The shadcn
+    semantic pair `--accent` / `--accent-foreground` (`text-accent-foreground`
+    reads the latter) is defined as primary-dark + white so a vendored component
+    that pulls it can never come back orange; `text-accent-foreground` itself is
+    banned too (near-black on the purple highlight was 1.52:1).
 11. **The `novalidate` + `Field`/`FieldError` contract binds every backoffice form,
     present and future** (generalised from the four forms that originally wrote
     §16's rules 3-5), not only forms `login.vue`/`ProjectForm.vue` happened to
@@ -1388,6 +1405,32 @@ Usage:
     decides on magic bytes, the real byte count and the decoded dimensions, all
     unchanged by this control. A client that crops is a convenience for honest
     operators and evidence of nothing.
+
+### 16.13 Checkbox standard — `CheckboxField` (backoffice)
+
+Every single-boolean control in the backoffice is a `CheckboxField`
+(`app/components/molecules/CheckboxField.vue`). No raw `<input type="checkbox">` and no
+bare `Checkbox` + `Field` composition outside `ui/` and this molecule; an architecture
+test (`tests/unit/arch/checkbox-standard.spec.ts`) fails the build on a raw one.
+
+- **Anatomy.** Box first, label to its right, and the description (hint) and error
+  stacked UNDER the label in the same right-hand column — never on the same row as the
+  box. A box that trailed its label, or a hint sitting beside it as a row sibling, read as
+  three unrelated things and broke the eye's left-edge scan down a column of options.
+- **Vertical alignment.** The box sits in a wrapper exactly one label line tall
+  (`h-5`, matching the label's `leading-5`) and is centred inside it, with the row
+  `items-start`. That keeps the box centred on the FIRST line of the label whether the
+  label wraps or a description/error follows, which `items-center` cannot do (it would
+  centre on the whole stack) and a magic `mt-*` nudge would break at another font size.
+- **Accessibility.** reka-ui renders `<button role="checkbox">`, which `<label for>`
+  cannot reliably name, so the label is a `span` wired with `aria-labelledby`, its click
+  is forwarded to the model, and `aria-describedby` lists the error then description ids.
+  Invalid state sets `aria-invalid` on the box and renders `FieldError` (`role="alert"`).
+  Keyboard (Space) comes from the underlying primitive.
+- **Grids.** A checkbox in a multi-column grid is placed in a normal `Field`-less cell
+  (`items-start`, natural width); it must never be stretched to the cell.
+- **Not for:** multi-option exclusive choice (radio / `ToggleGroup`) or an immediate
+  on/off setting with a side effect (a switch).
 
 ---
 
