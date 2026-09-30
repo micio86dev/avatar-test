@@ -221,7 +221,10 @@ Full rationale in `openspec/ROADMAP.md`. Summary:
    **T = 0.5**, env-overridable. **No High/Medium/Low bands** — render the percentage verbatim.
 2. **DEFAULTS SET, LEGAL SIGN-OFF PENDING** — GDPR retention. The purge mechanism is
    parametric; the durations are a data controller decision. Sign-off MUST also cover
-   `webhook_deliveries.payload` and `participants.display_name`, which postdate the original framing.
+   `webhook_deliveries.payload` and `participants.display_name`, which postdate the original framing,
+   and also `participants.external_id` and `participants.source` (the calling system's own record id
+   and name). The purge retains those two columns like `candidate_ref`: a documented default pending
+   this sign-off, not a legal conclusion, since an external id can still be linkable personal data.
 3. **RATIFIED** — `framework_version` pinned at project creation; live projects are never
    retargeted by a later catalogue revision.
 4. **OPEN** — retry semantics. Gates only the C9 chain-PR 4 (RT-B).
