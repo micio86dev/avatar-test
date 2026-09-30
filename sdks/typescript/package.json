@@ -1,6 +1,6 @@
 {
   "name": "@beai/sdk",
-  "version": "0.59.2",
+  "version": "0.60.0",
   "description": "OpenAPI client for @beai/sdk",
   "author": "OpenAPI-Generator",
   "repository": {
