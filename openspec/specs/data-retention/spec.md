@@ -8,7 +8,9 @@ past their retention window.
 The mechanism is fully built and fully tested. **The durations are not set.**
 Open product decision #2 needs legal sign-off, and that sign-off must cover
 `webhook_deliveries.payload` and `participants.display_name` — both of which
-postdate the original framing and both of which carry candidate data.
+postdate the original framing and both of which carry candidate data — and also
+`participants.external_id` and `participants.source`, which the purge retains as a
+documented default (see the artifact inventory).
 
 Coverage target: 95%. Deletion is the one operation with no undo.
 
@@ -50,7 +52,7 @@ The mechanism MUST cover every artifact class that holds candidate data:
 | Class | What is deleted |
 |---|---|
 | `snapshot` | The `interview_snapshots` row AND the object it points at on the storage disk |
-| `transcript` | `utterances` rows |
+| `transcript` | `utterances` rows, selected on the utterance's own `ts` timestamp |
 | `webhook_payload` | `webhook_deliveries.payload`, overwritten — the delivery record itself is retained |
 | `participant_pii` | `participants.display_name`, overwritten — the opaque `candidate_ref` is retained |
 
@@ -67,6 +69,19 @@ customer's endpoint was told, and when, must survive the purge of what was said.
 The same holds for a participant — the opaque `candidate_ref` is the calling
 system's own identifier and carries no personal data, so removing the row would
 destroy the audit trail without protecting anybody.
+
+`participants.external_id` and `participants.source` are the calling system's own
+record id and the calling system's name. They belong to NO artifact class: every
+class MUST leave both columns exactly as they are (values retained verbatim, NULL
+left NULL, never overwritten with the sentinel), treated like `candidate_ref`.
+This is a DOCUMENTED DEFAULT pending legal sign-off, not a legal conclusion: an
+external id can still be linkable personal data in a given integration, so the GDPR
+retention sign-off (CLAUDE.md ruling 2, open product decision #2) MUST also name
+`participants.external_id` and `participants.source`, alongside
+`webhook_deliveries.payload` and `participants.display_name`. Should legal decide
+otherwise, adding a class is additive.
+(Previously: the inventory did not mention the external reference, leaving its
+retention undefined.)
 
 #### Scenario: A snapshot purge removes the stored object, not only the row
 
@@ -93,6 +108,34 @@ The row is the only pointer that makes the object findable. Deleting the row
 while the object delete failed would orphan the object permanently and
 unfindably — the row surviving is what makes the failure retryable rather than
 silently permanent.
+
+#### Scenario: The participant_pii purge retains the external reference
+
+- GIVEN a participant older than the `participant_pii` window with `external_id = 4471`,
+  `source = "acme-ats"`, and a real `display_name`
+- WHEN the purge runs
+- THEN `display_name` is overwritten with the sentinel
+- AND `candidate_ref`, `external_id` and `source` are unchanged
+
+#### Scenario: NULL is not coerced
+
+- GIVEN a participant past the window with `external_id = NULL` and `source = NULL`
+- WHEN the purge runs
+- THEN both columns are still NULL (not the sentinel, not empty)
+
+#### Scenario: No other class touches the external reference
+
+- GIVEN a participant with an external reference, with snapshots, utterances, and webhook
+  deliveries past their windows
+- WHEN the `snapshot`, `transcript`, and `webhook_payload` classes are purged
+- THEN the participant's `external_id` and `source` are unchanged
+
+#### Scenario: The purge remains tenant-scoped and idempotent with the new columns
+
+- GIVEN participants of two organizations with the same `source` and `external_id`
+- WHEN the purge runs twice
+- THEN each organization's rows are processed inside its own scope only
+- AND the second run changes nothing
 
 ### Requirement: The purge resolves the storage disk through the same configuration point as the writer
 
