@@ -28,7 +28,9 @@ feature/avatar-template-duplicate (api) and feature/avatar-template-duplicate-ui
 User authorization on record (2026-09-29): read persona p89b602b1174 and replay the save PATCH once. NO other Tavus mutation without asking again.
 
 ## Tasks
-- [ ] P1 api  - [ ] P2 backoffice  - [ ] P3 verify + user listens
+- [x] P1 api (merged: api PR #82)
+- [x] P2 backoffice (merged: backoffice PR #48)
+- [ ] P3 verify + user listens
 
 ## Next step
 P1 (api writer).
