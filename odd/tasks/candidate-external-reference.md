@@ -47,10 +47,13 @@ record. `candidate_ref` is an opaque per-project key echoed in webhooks; it carr
 ## Tasks
 Route legend: I = direct inline, D = delegated writer. Each task closes with at least one work-unit commit.
 
-- [ ] A0 SDD planning artifacts in Engram: proposal (#3437), spec (#3438-#3443), design (#3444) done and verified;
-      tasks phase in progress [D: sdd-* agents]
-- [ ] A1 api schema (~330 lines): migration (2 columns, 2 partial CONCURRENTLY indexes), `RepairsInvalidIndex` trait,
+- [x] A0 SDD planning artifacts in Engram: proposal #3437, spec #3438-#3443, design #3444, tasks #3445 (74 tasks),
+      all read back [D: sdd-* agents]
+- [x] A1 api schema: migration (2 columns, 2 partial CONCURRENTLY indexes), `RepairsInvalidIndex` trait,
       `ExternalReference` value object, model docblock/cast, factory state, schema/migration/unit tests [D]
+      Evidence: api commits 37979b7, 4852f25, 9b122e7 on `feature/external-reference-a1-schema`, api PR #90
+      (1078 insertions, ~650 of them tests; forecast was ~330). Independently re-run by the parent: 202 tests
+      pass, pint and phpstan clean; writer also ran a real migrate:fresh / rollback / migrate on Postgres 17.
 - [ ] A2 api internal writes (~390): EntryLinkController, CreateScheduledParticipant, M2M store, sso-link claims,
       SsoExchange upsert with COALESCE, EntryLinkMinter/CandidateTokenFactory; tests for all four combinations [D]
 - [ ] A3a api internal reads (~380): `ParticipantEnrolmentResource` split, Admin resources, admin `q` (plus the
@@ -71,7 +74,12 @@ Route legend: I = direct inline, D = delegated writer. Each task closes with at 
   Explore agents (mapping trigger); their findings are in the approved plan.
 
 ## Review and checks record (per task: assessed tier and outcome)
-_(filled in as tasks close)_
+- A1: assessed `medium`, `review_due` (slice_budget_reached, 1098 lines); consent granted by the user; native review
+  approved with two non-blocking suggestions (R3-001 write path lands in A2; R3-002 `pg_index` test follows the
+  `PublicApiMigrationsRerunTest` precedent and CI connects as `postgres`); acknowledged, authority burned.
+- Wrapper pointer drift (skill-registry + submodule pointers) is a separate, pre-existing candidate; reviewed once
+  and approved before this work; later re-offers were stale because pointers move with every submodule commit.
+  It is reviewed once at a stable checkpoint, not per commit.
 
 ## Decisions recorded (accepted, with rationale)
 - D1 webhooks do not carry the fields (payloads are schema-versioned; `candidate_ref` already correlates).
@@ -89,5 +97,8 @@ _(filled in as tasks close)_
 - 2026-09-30: step 0 closed (api 0.61.0 back-merge #89 merged, release branches deleted); baselines recorded above.
 - 2026-09-30: proposal, spec (5 domain deltas) and design saved to Engram and read back; slices realigned to the design.
 
+- 2026-09-30: A1 implemented, verified and reviewed; api PR #90 open against develop (CI pending). A2 writer started on
+  `feature/external-reference-a2-writes`, stacked on A1 (chain strategy stacked-to-main, chosen by the user).
+
 ## Next step
-A0: tasks phase result, then A1 (RED first: schema/migration/value-object tests).
+A2 (writes): verify the writer's result independently, review the slice, open the stacked PR; then A3a.
