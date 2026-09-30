@@ -486,6 +486,23 @@ docker build -t beai-frontend ./frontend
 docker build -t beai-backoffice ./backoffice
 ```
 
+### Backoffice CSP and the API origin (local docker)
+
+The backoffice nginx serves `img-src 'self' data: blob: https:`. Locally the api
+builds media URLs from `APP_URL` (`http://localhost:8000`), an `http:` origin, so
+images it serves directly (e.g. signed `/storage/...` profile photos) are blocked.
+`BEAI_CSP_IMG_EXTRA` is an optional **build arg** of `backoffice/Dockerfile`
+(build-time, like `BEAI_API_ORIGIN`, because the runtime stage is non-root and
+has no envsubst) that appends extra origins to `img-src`:
+
+- Empty by default, so the production CSP is unchanged (https-only).
+- `docker-compose.yml` sets `http://localhost:${API_PORT:-8000}` for the local
+  backoffice service; rebuild the image after changing it.
+- Only space-separated `http(s)://host[:port]` origins are accepted; anything
+  else fails the build, so a typo cannot inject another directive.
+- Org logos need no allowance: `toSameOriginImageUrl` rewrites their `/api/...`
+  URL to a same-origin path.
+
 ---
 
 ## Mail
