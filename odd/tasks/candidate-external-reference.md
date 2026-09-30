@@ -60,15 +60,24 @@ Route legend: I = direct inline, D = delegated writer. Each task closes with at 
       api PR #92 (stacked on #90; ~1670 lines, ~1500 tests). Parent re-ran the full suite (6773 tests, 0 failed),
       pint, phpstan. Found and fixed a pre-existing leak: tymon's singleton factory put `display_name`, `email`,
       `org_id` (and would have put the reference) on the candidate JWT; verified nothing consumes them.
-- [ ] A3a api internal reads (~380): `ParticipantEnrolmentResource` split, Admin resources, admin `q` (plus the
-      case-insensitive and wildcard-escape fix), Sentry scrubber, purge docblock/test, candidate-session
-      non-exposure, cross-tenant tests, OpenAPI export [D]
-- [ ] A3b api public v1 (~390): CreateInterviewRequest, EnrolCandidate, InterviewController filters,
-      InterviewSerializer/InterviewResource, ExposureCatalogue note, vendored contract YAML, both exports [D]
-- [ ] A4 consumer apps (~420 backoffice, ~40 frontend): ExternalReference molecule, EntryLinkForm fieldset,
-      CandidateTable sub-line, participant detail line, i18n it/en, scrubbers, generated types, Vitest, E2E [D]
-- [ ] A5 wrapper (~150 + generated): contract YAML (docs copy), SPEC.md, `openspec/specs/*` deltas applied,
-      SDK regeneration, CLAUDE.md ruling 2 wording, submodule pins [D]
+- [x] A3a-i api `ParticipantEnrolmentResource` split + M2M/entry-link/schedule switch + candidate-session non-exposure
+      + Sentry + purge note [D]. Evidence: api PR #93 (merged, CI green); full suite 6848 tests, 0 failed on the
+      parent's clean rerun (a first run showed 30 Postgres deadlocks 40P01 across unrelated classes, worker
+      contention; the same 400 tests pass serially). Two fixes found on the way: transcript purge filtered a
+      non-existent column (`utterances.created_at`, now `ts`); reschedule stored a `+02:00` start 2 hours off.
+- [x] A3a-ii api admin resources + public Interview read shape (atomic, T-EXPOSE-001) + admin `q` (source,
+      external_id, and the case-insensitive/wildcard-escape fix) [D]. Evidence: api PR #94 (merged, CI green); full
+      suite 6906 tests, 0 failed (parent).
+- [x] A3b api public v1: create request, EnrolCandidate, list filters, vendored contract YAML [D]. Evidence: api PR #95
+      (full suite 6987 tests, 0 failed on the parent's run; pint, phpstan clean). Finding left alone on purpose:
+      every pre-existing list filter answers 400 on an empty value (public behavior, unrelated to this feature).
+- [x] A4 consumer apps [D]. Frontend PR frontend#37 (merged, CI green incl. E2E): scrubber + regenerated types + type
+      guard. Backoffice PR backoffice#54 (merged, CI green incl. E2E): invite-form fieldset, list sub-line, detail
+      line, molecule, i18n it/en, scrubber; 3084 unit tests (parent re-ran), new E2E 9/9 chromium and webkit.
+- [x] A5 wrapper docs [D]: contract YAML copy, SPEC.md, `openspec/specs/*` deltas applied, CLAUDE.md ruling 2, DESIGN.md
+      one line. Wrapper PR beai#38: its "Public API Contract" check stays red until the api submodule pin moves (the
+      check compares the PINNED api's vendored yaml with docs/), so the docs ship inside the release branch
+      together with the pins and the regenerated SDKs (task A7).
 - [ ] A6 verify: lint/typecheck/format, full suites, migrations on a clean DB, local stack walkthrough
 - [ ] A7 release: api release, then backoffice and frontend, then wrapper pins; deploy verification; cleanup
 
