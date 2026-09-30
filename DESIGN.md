@@ -65,7 +65,7 @@ apps (`assets/css/main.css`). They MUST be kept in sync.
 | `--color-primary` | `#771AAF` | Quint purple (logo color) — headings, primary buttons, navigation active |
 | `--color-primary-light` | `#C222D3` | Hover state of primary elements (light violet) |
 | `--color-primary-dark` | `#431695` | Active / pressed state (dark violet, 15% darker than the previous `#4F1AAF`) |
-| `--color-accent` | `#E45526` | Quint institutional orange — CTAs, highlighted / active states |
+| `--color-accent` | `#E45526` | Quint institutional orange — CTAs and the focus ring. **Never a list-item hover/highlight fill** (see §16 rule 10) |
 | `--color-accent-light` | `#F19823` | Hover state of accent elements (orange) |
 | `--color-accent-dark` | `var(--color-primary-dark)` (`#431695`) | Active / pressed state of accent — aliased to `--color-primary-dark`, not a separate orange literal (reversed: it used to be `#B8431E`) |
 | `--color-lavender` | `#8373D2` | Supporting secondary (lavender) — subtle highlights, badges |
@@ -1326,6 +1326,23 @@ Usage:
     dedicated note for the numbers and the token pairing. This binds every current
     and future `focus:`/`hover:`/`data-highlighted:` variant that styles a select
     highlight, not only `SelectItem.vue`'s existing `focus:` state.
+
+    **The rule, restated (list-item-hover-primary):** hover/highlight of ANY list
+    item — `Select`, `DropdownMenu`, `Combobox` (`ComboboxItem`'s
+    `data-highlighted:` state) and hand-rolled option lists such as
+    `AvatarTemplateProviderCombobox` — is the PRIMARY family, never orange. Solid
+    highlight: `bg-accent-dark text-white` (`--color-primary-dark` #431695,
+    white 11.75:1) with descendants forced white via `**:text-white`. Quiet
+    "selected" or icon-button hover: `bg-primary/10` (#f1e8f7 over white;
+    neutral-800 12.28:1, neutral-600 6.36:1, primary 6.91:1). The bare Tailwind
+    `bg-accent` compiles from `--color-accent` (orange) — the shadcn `--accent`
+    variable is NOT what it reads, because the `@theme inline` bridge omits that
+    key on purpose — so `bg-accent` / `text-accent` / `ring-accent` etc. are
+    banned across `app/` (guarded by `tests/unit/theme.spec.ts`). The shadcn
+    semantic pair `--accent` / `--accent-foreground` (`text-accent-foreground`
+    reads the latter) is defined as primary-dark + white so a vendored component
+    that pulls it can never come back orange; `text-accent-foreground` itself is
+    banned too (near-black on the purple highlight was 1.52:1).
 11. **The `novalidate` + `Field`/`FieldError` contract binds every backoffice form,
     present and future** (generalised from the four forms that originally wrote
     §16's rules 3-5), not only forms `login.vue`/`ProjectForm.vue` happened to
@@ -1389,7 +1406,142 @@ Usage:
     unchanged by this control. A client that crops is a convenience for honest
     operators and evidence of nothing.
 
+### 16.13 Checkbox standard — `CheckboxField` (backoffice)
+
+Every single-boolean control in the backoffice is a `CheckboxField`
+(`app/components/molecules/CheckboxField.vue`). No raw `<input type="checkbox">` and no
+bare `Checkbox` + `Field` composition outside `ui/` and this molecule; an architecture
+test (`tests/unit/arch/checkbox-standard.spec.ts`) fails the build on a raw one.
+
+- **Anatomy.** Box first, label to its right, and the description (hint) and error
+  stacked UNDER the label in the same right-hand column — never on the same row as the
+  box. A box that trailed its label, or a hint sitting beside it as a row sibling, read as
+  three unrelated things and broke the eye's left-edge scan down a column of options.
+- **Vertical alignment.** The box sits in a wrapper exactly one label line tall
+  (`h-5`, matching the label's `leading-5`) and is centred inside it, with the row
+  `items-start`. That keeps the box centred on the FIRST line of the label whether the
+  label wraps or a description/error follows, which `items-center` cannot do (it would
+  centre on the whole stack) and a magic `mt-*` nudge would break at another font size.
+- **Accessibility.** reka-ui renders `<button role="checkbox">`, which `<label for>`
+  cannot reliably name, so the label is a `span` wired with `aria-labelledby`, its click
+  is forwarded to the model, and `aria-describedby` lists the error then description ids.
+  Invalid state sets `aria-invalid` on the box and renders `FieldError` (`role="alert"`).
+  Keyboard (Space) comes from the underlying primitive.
+- **Grids.** A checkbox in a multi-column grid is placed in a normal `Field`-less cell
+  (`items-start`, natural width); it must never be stretched to the cell.
+- **Not for:** multi-option exclusive choice (radio / `ToggleGroup`) or an immediate
+  on/off setting with a side effect (a switch).
+
 ---
+
+### 16.14 Voice preview control — `VoicePreviewButton` (backoffice)
+
+Wherever an operator sets or selects a voice in the avatar-template form (HeyGen `voiceId`,
+Tavus `ttsExternalVoiceId` beside `ttsEngine`, and the Cartesia/ElevenLabs catalogue pickers, on
+the selected value and on every list row) there is a `VoicePreviewButton`
+(`app/components/molecules/VoicePreviewButton.vue`), so the accent can be judged before a template
+is activated. It is superadmin-only, exactly like the form that hosts it.
+
+- **States.** `idle` (play icon), `loading` (spinner, `aria-busy`), `playing` (stop icon,
+  `aria-pressed="true"`), `error` (message in a `role="alert"` region). One sample plays at a time,
+  app-wide; starting another stops the previous one. A sample is cached in memory per
+  (provider, voice, engine, language), so a second click is instant and free.
+- **Unavailable.** When no sample can exist (no voice chosen yet, or a Tavus stock voice / Azure
+  engine) the button stays visible but `disabled`, with the reason in text referenced by
+  `aria-describedby`. Never hide it silently: an absent control reads as a missing feature.
+- **Honest-caption rule.** Every preview says what it is: a sample from the voice vendor, not the
+  final rendering by Tavus / LiveAvatar. A HeyGen sample is additionally labelled "generic sample
+  (not Italian)". Catalogue rows that already offer a free vendor clip label it "catalogue sample"
+  to tell it from the synthesised "Italian sample".
+- **Where it is shown: the picker panel, not a hidden icon.** A catalogue voice picker
+  (`AvatarTemplateProviderCombobox`, resource `voice`) has no image to show, so under the
+  trigger it renders a **voice preview block** instead of the face-picker's image/"No preview
+  available" square: the selected voice's name, a **labelled** listen button (visible text plus
+  icon, at least 40px tall, never icon-only), the honest caption and disclaimer, and — only when
+  the catalogue entry carries a free clip — a second labelled "catalogue sample" button. The block
+  also renders for a voice id that is not in the loaded list (manual entry, catalogue
+  unavailable), because the Italian sample needs only provider and voice id. Image/persona/avatar
+  pickers keep their image panel and its fallback unchanged.
+- **One control per field.** When the panel shows the control, the form does not render a second
+  one for the same field; a voice field with no panel (a plain text input, e.g. the Azure voice)
+  keeps the form-level button, which is labelled too. The compact icon variant is for list rows only.
+- **Layout: its own line, never squeezed.** The control (`data-slot="voice-preview"`) is
+  `w-full basis-full`, on its own line UNDER the field or picker — never a flex sibling of an
+  input. Inside, the button and caption sit in a `flex-wrap` row; the caption is `flex-1
+  min-w-[12rem]` with normal wrapping (`whitespace-normal break-words`), so on a narrow column it
+  drops under the button instead of collapsing to one word per line. The caption is two lines: the
+  sample label (medium weight) and, below it, the muted disclaimer. Compact list rows keep the
+  caption `sr-only`. A jsdom test cannot measure pixels, so the classes are pinned by tests.
+- **Vendor synthesis, not Tavus yet.** The disclaimer states the sample is the voice vendor's own
+  synthesis and has not been rendered by Tavus / LiveAvatar.
+- **Tavus voice replacement note.** On the Tavus form, under the TTS engine field, one helper line
+  says that saving with an external engine (Cartesia, ElevenLabs, Azure) writes engine, model and
+  voice to the Tavus persona and replaces the voice it had, and that with `tavus-auto` or no engine
+  no external voice is written and Tavus chooses. It says nothing about the persona's other settings.
+- **Persona voice (Tavus `palId`).** The persona picker (resource `pal`) uses the same block as a
+  voice picker instead of the "No preview available" square: the persona's name, a labelled
+  "Listen to this persona's voice" button, the honest caption, and a note that saving the template
+  writes the voice set on the form onto the persona and replaces the one it has now. Whether a
+  persona has a previewable voice is only known to the server (it reads the persona's TTS layer), so
+  the button is ENABLED as soon as a persona is chosen — nothing is requested on render, for cost
+  and latency — and a persona with no sample answers with a translated reason after the click
+  (Tavus voice, Azure engine, no voice configured, stock voice, not found). It works for a
+  persona id typed by hand. Face and avatar pickers keep their image panel and fallback.
+- **Visual.** Icon button in the primary family (`hover:bg-primary/10`, focus ring), never orange on
+  hover; AA contrast for the caption and error text (`text-muted-foreground` / `text-destructive`).
+
+### 16.15 Copy to organizations — `CopyTemplateDialog` (backoffice)
+
+A superadmin can copy an avatar template to other organizations from the avatar-templates page
+(`app/components/organisms/CopyTemplateDialog.vue`, opened by a per-row "Copy to organizations"
+action shown under the same platform-only ability as "New template"). Nothing else may see it.
+
+- **Target list.** Every organization EXCEPT the source template's own (the acting client), as
+  `CheckboxField`s in a scrollable region (`max-h`, internal scroll) with a search input above it
+  once the list is long. The search only narrows what is visible: selections made under a filter
+  survive it, and the count of selected organizations is always shown.
+- **Select all.** One `CheckboxField` above the list toggles every VISIBLE (filtered) organization;
+  it is `indeterminate` (minus glyph, `aria-checked="mixed"`) when some but not all are selected.
+- **Name override.** Optional text input (max 120). Left empty, each copy keeps the source name and
+  the server appends "(copy)" only where the target organization already has that name.
+- **Submit.** Disabled with the reason in text, referenced by `aria-describedby`, while nothing is
+  selected; `aria-busy` and a pending label while the request runs. Errors render in a
+  `role="alert"` region in the operator's language; the dialog stays open so the selection is kept.
+- **Result.** After success the dialog swaps its body for a `role="status"` summary listing each
+  created copy (organization name, resulting name) and states that copies are INACTIVE and must be
+  activated inside the target organization. Focus moves to the summary heading. The current
+  organization's own list does not change (the copies live elsewhere), so nothing is refetched.
+- **Visual.** Row hover/highlight in the primary family (`hover:bg-primary/10`), never brand orange;
+  focus ring on every control; AA contrast for helper and error text.
+
+### 16.16 Tavus persona sync state and ownership badge (backoffice)
+
+A Tavus template's persona-level settings (voice, LLM temperature, turn-taking) only take effect
+when Tavus accepts the persona update. A persona the account cannot modify (a Tavus stock persona)
+answers 400, so the template used to keep the OLD voice with no visible error. The state is now shown
+wherever a Tavus template is shown, and at the picker where the cause is chosen.
+
+- **Sync-state indicator** (`PalSyncStatus`, `app/components/molecules/PalSyncStatus.vue`). One
+  component, two layouts: a `row` (badge plus, for a warning, one explanatory line) on every Tavus
+  row of the avatar-templates list, and a `banner` (warning `Alert`) at the top of the edit form.
+  Rendered ONLY for Tavus templates; a HeyGen template has no persona to sync.
+  - `synced`: success badge with the last-sync time. `skipped`: neutral badge. `null`: neutral
+    "never synced" badge. `warning`: warning badge plus a translated, actionable message per stable
+    code (`pal_not_editable`, `pal_sync_rejected`, `pal_sync_unauthorized`, `pal_not_found`,
+    `pal_id_missing`, `tavus_key_missing`, `pal_sync_failed`, `pal_sync_unreachable`). Never the
+    vendor's own words, never the raw code.
+  - `role="status"`, text always present (colour is never the only signal), AA contrast through the
+    existing success/warning/neutral tokens. `synced_at` is the last SUCCESSFUL sync and is kept when
+    a later one fails, so a warning can still say when it last worked.
+  - The save response's top-level `warning` stays a persistent page `Alert` (not a toast) until the
+    next action; a later successful sync clears it.
+- **Persona ownership badge** (the `pal` catalogue picker, `AvatarTemplateProviderCombobox`). Per
+  persona: "Yours" (`editable: true`, primary tint), "Tavus stock, read-only" (`editable: false`,
+  warning tint), nothing when unknown (`null`). Under the SELECTED persona, when `editable` is not
+  `true`, a hint says persona-level settings may not apply. Selection is never blocked and the list
+  order is the API's (no grouping by ownership).
+- **Visual.** Primary family for row hover/highlight (`hover:bg-primary/10`), never brand orange;
+  focus ring on every control.
 
 ## 17. Updates to This Document
 

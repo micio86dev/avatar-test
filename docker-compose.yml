@@ -528,6 +528,11 @@ services:
         # client concatenates onto. `api` is the compose service name, resolved
         # on the shared network — localhost inside this container is itself.
         BEAI_API_ORIGIN: "${BEAI_API_ORIGIN:-http://api:8000}"
+        # LOCAL ONLY: lets the browser load images the api serves from its own
+        # published port (signed /storage photo URLs, built from APP_URL), which
+        # the nginx CSP `img-src ... https:` would otherwise block. Empty in
+        # every other environment, so the production CSP stays https-only.
+        BEAI_CSP_IMG_EXTRA: "http://localhost:${API_PORT:-8000}"
       dockerfile: Dockerfile
     image: beai-backoffice:local
     container_name: beai_backoffice
