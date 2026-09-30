@@ -54,8 +54,12 @@ Route legend: I = direct inline, D = delegated writer. Each task closes with at 
       Evidence: api commits 37979b7, 4852f25, 9b122e7 on `feature/external-reference-a1-schema`, api PR #90
       (1078 insertions, ~650 of them tests; forecast was ~330). Independently re-run by the parent: 202 tests
       pass, pint and phpstan clean; writer also ran a real migrate:fresh / rollback / migrate on Postgres 17.
-- [ ] A2 api internal writes (~390): EntryLinkController, CreateScheduledParticipant, M2M store, sso-link claims,
+- [x] A2 api internal writes: EntryLinkController, CreateScheduledParticipant, M2M store, sso-link claims,
       SsoExchange upsert with COALESCE, EntryLinkMinter/CandidateTokenFactory; tests for all four combinations [D]
+      Evidence: api commits a897c90, 49c82d0, 6865772, 81b8da8, a852858 on `feature/external-reference-a2-writes`,
+      api PR #92 (stacked on #90; ~1670 lines, ~1500 tests). Parent re-ran the full suite (6773 tests, 0 failed),
+      pint, phpstan. Found and fixed a pre-existing leak: tymon's singleton factory put `display_name`, `email`,
+      `org_id` (and would have put the reference) on the candidate JWT; verified nothing consumes them.
 - [ ] A3a api internal reads (~380): `ParticipantEnrolmentResource` split, Admin resources, admin `q` (plus the
       case-insensitive and wildcard-escape fix), Sentry scrubber, purge docblock/test, candidate-session
       non-exposure, cross-tenant tests, OpenAPI export [D]
@@ -77,6 +81,15 @@ Route legend: I = direct inline, D = delegated writer. Each task closes with at 
 - A1: assessed `medium`, `review_due` (slice_budget_reached, 1098 lines); consent granted by the user; native review
   approved with two non-blocking suggestions (R3-001 write path lands in A2; R3-002 `pg_index` test follows the
   `PublicApiMigrationsRerunTest` precedent and CI connects as `postgres`); acknowledged, authority burned.
+- A2: assessed `medium`, `review_due` (slice_budget_reached, 1543 lines); consent granted by the user; native review
+  approved with two advisories (WARNING silent malformed-claim narrowing: FIXED in a852858 with a name-only log and
+  tests; SUGGESTION `make(true)` invariant guarded only by a test: already covered by a regression test, no change);
+  acknowledged, authority burned.
+- Dependency incident (not part of this feature): `composer audit --no-dev` started failing CI on every api branch
+  at 2026-09-30 15:36 UTC (league/commonmark 2.10.0, advisories PKSA-m4t9-vsgq-8khn high and PKSA-m2dq-1fhr-29b1
+  medium). Policy hard stop, user chose a targeted upgrade: api PR #91 (2.10.0 to 2.10.3, one lock entry) merged to
+  develop (b7fccd4); assessed `medium` but `review_due: false` (under_budget, 12 lines), so no review was started.
+  A1 and A2 branches merged develop in (no force push).
 - Wrapper pointer drift (skill-registry + submodule pointers) is a separate, pre-existing candidate; reviewed once
   and approved before this work; later re-offers were stale because pointers move with every submodule commit.
   It is reviewed once at a stable checkpoint, not per commit.
@@ -100,5 +113,9 @@ Route legend: I = direct inline, D = delegated writer. Each task closes with at 
 - 2026-09-30: A1 implemented, verified and reviewed; api PR #90 open against develop (CI pending). A2 writer started on
   `feature/external-reference-a2-writes`, stacked on A1 (chain strategy stacked-to-main, chosen by the user).
 
+- 2026-09-30: A2 verified, reviewed, pushed; stacked PR #92 open (base = A1 branch). PR #90 and #92 CI running.
+  A3a-i writer started on `feature/external-reference-a3a-i-enrolment-resource` (stacked on A2).
+
 ## Next step
-A2 (writes): verify the writer's result independently, review the slice, open the stacked PR; then A3a.
+A3a-i: verify the writer's result independently; then A3a-ii (atomic admin resources + serializer commit, T-EXPOSE-001).
+Merge order when CI is green: #90 -> retarget #92 -> merge -> and so on down the stack.
