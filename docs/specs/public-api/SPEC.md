@@ -81,7 +81,7 @@ Tests: `T-AUTH-001..009` — valid key, revoked key, wrong prefix, key in query,
 - IDs: prefixed ULIDs stored in a `public_id` column (G-05) — `org_…` organization, `prj_…` project, `int_…` interview, `exp_…` export, `evt_…` event. Webhook deliveries use `whd_` + the existing `delivery_id` UUID. Path parameters are validated by regex; mismatched prefix → `404`.
 - Timestamps: ISO 8601 UTC with `Z`. Durations in **seconds**.
 - Pagination: cursor-based. `?limit=` (default 25, max 100), `?cursor=`. Response envelope `{ "data": [...], "next_cursor": "…"|null, "has_more": bool }`. Stable ordering by `created_at desc, id desc`.
-- Filtering on list endpoints: `status`, `project_id`, `created_after`, `created_before`, `metadata[key]=value` (exact match, max 3 metadata filters).
+- Filtering on list endpoints: `status`, `project_id`, `created_after`, `created_before`, `metadata[key]=value` (exact match, max 3 metadata filters). `GET /v1/interviews` additionally filters on `email`, `candidate_ref`, `external_id` and `source` (§3.3).
 - Expansion: `?expand=project` on interview reads to inline the project.
 - Errors: **RFC 9457 Problem Details**, `application/problem+json`:
   ```json
@@ -116,7 +116,7 @@ concept the binding documents (`docs/app_description/`, CLAUDE.md rulings) do no
 | GET | `/v1/projects` | `projects:read` | Read-only. Filters `status`, `role_code`, `assessment_type`. Public-safe fields only (see 3.4). |
 | GET | `/v1/projects/{id}` | `projects:read` | |
 | POST | `/v1/interviews` | `interviews:write` | Enrol a candidate. Returns `interview`, `hosted_url`, `session_token`, `expires_at` (of the token). |
-| GET | `/v1/interviews` | `interviews:read` | List + filters (`status`, `project_id`, `email`, `candidate_ref`, `created_*`, `metadata[…]`). `email`/`candidate_ref` replace a candidate lookup and match **this organization's** enrolments only. |
+| GET | `/v1/interviews` | `interviews:read` | List + filters (`status`, `project_id`, `email`, `candidate_ref`, `external_id`, `source`, `created_*`, `metadata[…]`). `email`/`candidate_ref` replace a candidate lookup and match **this organization's** enrolments only. `external_id`/`source` match the external reference supplied at creation (see below). |
 | GET | `/v1/interviews/{id}` | `interviews:read` | Status, timings, candidate fields, per-competency `progress`, readiness flags, metadata. |
 | POST | `/v1/interviews/{id}/session-tokens` | `interviews:write` | Mint a **new** session token (previous one revoked). Only while status is `pending`, else `409 invalid_state`. |
 | GET | `/v1/interviews/{id}/transcript` | `interviews:read` | Full turn-by-turn transcript. Gate: `under_evaluation` or `completed`, else `409 transcript_not_ready`. |
@@ -160,7 +160,9 @@ separate `interviews` table with its own state machine (G-06) is superseded.
     "candidate_ref": "acme-672-mrossi",
     "email": "mario.rossi@example.com",
     "display_name": "Mario Rossi",
-    "language": "it"
+    "language": "it",
+    "external_id": 4471,
+    "source": "acme-ats"
   },
   "metadata": { "ats_application_id": "A-4471" },
   "exit_redirect_url": "https://hr.acme.example/assessment/done"
@@ -170,13 +172,48 @@ separate `interviews` table with its own state machine (G-06) is superseded.
   response and webhook.
 - `email` is mandatory (ruling 8). `display_name` is required (SSO ingress requires it; the column is
   `NOT NULL`). `language` defaults to the project's language.
+- `external_id` and `source` are the optional **external reference**: the calling system's own record id
+  and the name of the calling system (for example its ATS). Both are optional and independent (either may be
+  sent without the other). `external_id` must be a JSON **integer** from `1` to `9007199254740991`
+  (2^53 - 1, the largest integer a JSON consumer parses exactly); a string, a fractional number or a boolean
+  answers `422 validation_failed`. `source` is a string of at most 180 characters; surrounding whitespace is
+  trimmed and a blank value is stored as `null`. Violations answer `422` with `errors[].field` =
+  `candidate.external_id` or `candidate.source` and create no enrolment. The pair is **not** part of
+  enrolment uniqueness: the same `(source, external_id)` may appear on several enrolments, including in one
+  project, and never yields `409 duplicate_enrolment`. The values are metadata of the enrolment, distinct
+  from `candidate_ref`, and are not echoed in webhooks. They are readable by anyone who can read the
+  interview, so do not put secrets in `source`.
 - The project must be `active`, else `422 project_not_active`. `role_code` is inherited from the project.
 - Uniqueness is per project: `(project, email)` and `(project, candidate_ref)`. A second enrolment answers
   `409 duplicate_enrolment`. The same email in another project or another organization is a separate
   enrolment; no endpoint reveals where else an address appears.
+- Idempotency covers the external reference: replaying the same `Idempotency-Key` with the same body replays
+  the original response, while the same key with a body that differs only in `candidate.external_id` or
+  `candidate.source` answers `409 idempotency_key_reused`.
 - `exit_redirect_url` is an optional per-enrolment override of the project's exit redirect. It must be
   `https` and its host must be in the organization's **allowed domains** (configured in backoffice, same list
   used for `frame-ancestors`), else `422 redirect_url_not_allowed`. When absent, the project's value applies.
+
+**Interview resource — external reference.** Every response that returns an Interview (create, `GET
+/v1/interviews/{id}`, the items of `GET /v1/interviews`, and `?expand=project` reads) carries two top-level
+fields, always present: `external_id` (JSON integer or `null`, never a numeric string) and `source` (string or
+`null`). They sit after `updated_at`. Both are declared in the `Interview` schema's `required` list.
+
+**List filters — external reference.** `GET /v1/interviews?external_id=` and `?source=` are exact-match
+filters, combinable with each other and with every other filter, with cursor pagination and with the default
+ordering. `source` is case-sensitive (like `candidate_ref`). A filter that matches nothing answers `200` with
+`data: []` and `has_more: false`. An empty value (`?source=`) is ignored. A malformed value (`external_id`
+that is not an integer in `1..9007199254740991`, or a `source` longer than 180 characters) answers
+`400 validation_failed`, like every other malformed list filter. Results are always limited to the key's
+organization and live/test mode; a value held only by another organization is indistinguishable from a value
+nobody holds.
+
+**Exports — external reference.** The `interviews` export includes both fields for every interview. In CSV
+they are two columns with the headers `external_id` and `source`, placed **immediately after `updated_at`**;
+a `null` is an empty cell (never the text `null`), `external_id` is plain decimal digits, and `source` passes
+through the same formula-injection escaping as every other text cell. In JSONL each interview object carries
+both keys. Consumers must not rely on column position: when a CSV also carries the optional transcript and
+scoring columns, those shift right by two.
 
 **Scoring — response shape (binding BARS)**
 ```json
@@ -211,7 +248,9 @@ separate `interviews` table with its own state machine (G-06) is superseded.
 **Answers — response item.** `{ competency_code, question_index, question_text, answer_text,
 started_at_seconds, answer_duration_seconds }`, derived from the transcript. No per-question score exists.
 
-Tests: `T-INT-001..030` (create happy path; every 422 branch; `duplicate_enrolment` on email and on
+Tests: `T-INT-001..030` (create happy path; every 422 branch; external reference: four create combinations,
+validation boundaries, `source` whitespace to `null`, no `409` on a repeated pair, idempotency conflict,
+`external_id`/`source` filters incl. the `400` and empty-value cases and org/mode isolation; `duplicate_enrolment` on email and on
 `candidate_ref`; `project_not_active`; lifecycle mapping for all five statuses; session-token minting only in
 `pending`; cross-org 404; `email` filter never returns another organization's rows; transcript/answers gate
 `409 transcript_not_ready` below `under_evaluation`; scoring gate `409 scoring_not_ready` below `completed`;
@@ -236,8 +275,10 @@ Exclusion list (never in public API or export):
 - Soft-deleted rows
 
 Always exposed where the admin sees them: `candidate_ref`, the candidate `email` and `display_name` on the
-owning organization's own enrolments, and the scoring traceability triplet (`framework_version`,
-`model_version`, `prompt_version`).
+owning organization's own enrolments, the external reference (`external_id`, `source`: identifiers the
+calling system itself supplied, present on the admin resource and the public `Interview` alike, so the
+field diff cancels and no exclusion entry is added), and the scoring traceability triplet
+(`framework_version`, `model_version`, `prompt_version`).
 
 Projects specifically: expose `id, name, slug, role_code, assessment_type, language, status,
 framework_version {version, label}, competencies[] {code, name, type}, pause_every_n_competencies,
@@ -324,6 +365,14 @@ evaluation payload `text` matches the Scoring content, additive `project.public_
 - Test-mode data is never counted in `/v1/usage` live numbers and never billed.
 
 Tests: `T-TEST-001..006`.
+
+### 3.8 Changelog
+
+Additive changes to the `/v1` contract after the first release. None is breaking (see "Versioning" in §0).
+
+| Change | Surface | Notes |
+|---|---|---|
+| External reference (`external_id`, `source`) | `POST /v1/interviews` accepts `candidate.external_id` and `candidate.source`; every `Interview` carries `external_id` and `source`; `GET /v1/interviews` filters on both; `interviews` export gains two columns/keys | All optional on write; both always present (nullable) on read. CSV gains the two columns immediately after `updated_at`, so the optional transcript and scoring columns shift right by two; base columns before `updated_at` keep their position, and consumers must not rely on column position. Webhook payloads are unchanged. |
 
 ---
 
