@@ -197,9 +197,15 @@ kept). `candidate_ref`, `external_id`, `source`, `reusable_interview_link_id`,
 `organization_id`, `project_id`, status, scores and every other column stay
 exactly as they are. A pass MUST NOT abort, and MUST NOT leave other due rows
 unredacted, because one row's placeholder collides with another participant's
-stored address in the same project (a theoretical case: only a literal address
-equal to that placeholder can collide); such a row is reported and retried by
-the next pass.
+stored address in the same project. Only a literal address equal to that
+placeholder can collide, and every enrolment path refuses the reserved domains,
+so the case can only arise from an address written outside the enrolment paths
+(for example a direct database write). Such a row is left whole, name and email
+unchanged, and is skipped with a warning that names only its id. Its placeholder
+is derived only from its own `candidate_ref`, so it collides again on every
+pass: the row stays unredacted, and is skipped every time, until an operator
+resolves the row that holds the address. It needs operator action and is not
+retried to success.
 
 The audit row of the class (`data.purged`, `subject_type = participant_pii`) is
 unchanged in shape: class, count and cutoff only; it MUST NOT contain the
@@ -224,7 +230,9 @@ surrounding whitespace, so the mail guard refuses a purged address exactly like
 a legacy one. (2) Each row is written alone, in its own transaction, so a
 collision (SQLSTATE `23505` on `participants_project_id_email_unique`) skips
 only that row: the warning names the participant id and never an address, the
-row is retried by the next pass, and any other database error propagates. (3)
+row is left whole and is skipped again on every pass until an operator resolves
+the holder of the colliding address (the placeholder is deterministic, so a
+retry cannot succeed), and any other database error propagates. (3)
 The count of the class, and with it the audit row, is the number of rows
 actually written: a participant deleted between the selection and the write is
 not counted. A dry run counts the selected set. (4) A legacy anonymous row is
@@ -233,7 +241,10 @@ recognized only by its exact own legacy placeholder,
 purged placeholder. (5) A re-issue of the entry link for a purged participant
 sends the stored name and email back; the own-placeholder exception accepts
 them, the link is minted, nothing is restored, and the invitation job refuses to
-send.)
+send. The `email_sent` flag of the response reports that an invitation was
+queued, not that it was delivered: for a purged reusable-link visitor it is
+`false` and no job is queued, for any other purged participant it is `true` and
+the job then refuses at send time.)
 
 #### Scenario: A due participant has both fields redacted
 
@@ -290,11 +301,19 @@ send.)
 
 #### Scenario: A purged participant can never be mailed
 
-- GIVEN a participant redacted by the purge
+- GIVEN a participant redacted by the purge, and separately a reusable-link
+  visitor redacted by the purge
 - WHEN an invitation is attempted, and when an operator re-issues the entry link
   with `send_email` true (the API default)
-- THEN the invitation job refuses the address through the shared placeholder
-  predicate, the link is still minted and returned, and no mail is sent
+- THEN no mail reaches the mail transport in any case: the link is minted and
+  returned with HTTP 201, the stored name and email are unchanged, and the
+  invitation job, when it runs, refuses the address through the shared
+  placeholder predicate and logs a warning that carries neither the address nor
+  the name
+- AND for the visitor the response reports `email_sent: false` and no job is
+  queued; for the other participant the response reports `email_sent: true`,
+  because that flag reports that an invitation was queued, not that it was
+  delivered
 
 #### Scenario: The former address no longer resolves anyone
 
@@ -326,9 +345,19 @@ send.)
 - GIVEN two due participants in one project, and another participant of that
   project holding exactly the placeholder address the first would receive
 - WHEN the purge runs
-- THEN the second due participant is redacted, the colliding row is reported and
-  left for the next pass, and the command does not terminate with an error for
-  the other rows
+- THEN the second due participant is redacted, the colliding row is left whole
+  (name and email unchanged) and reported with a warning that names only its id,
+  and the command does not terminate with an error for the other rows
+- AND the colliding row is skipped again, with the same warning, on every later
+  pass until an operator resolves the row that holds the address
+
+#### Scenario: A row deleted between the selection and the write is not counted
+
+- GIVEN a due participant that another process deletes after the pass selected it
+  and before the pass writes it
+- WHEN the purge runs
+- THEN the write affects no row, the class count is 0, no audit row is written
+  for the class and the command does not fail
 
 #### Scenario: Disabled or unratified retention touches neither field
 
