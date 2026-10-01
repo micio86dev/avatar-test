@@ -1939,107 +1939,169 @@ presented to the candidate as an error state.
 Vocabulary: the "reusable entry route" is the page `frontend/app/pages/interview/reusable.vue`
 (URL `/interview/reusable`, `/en/interview/reusable` for the `en` locale), opened with the link
 token in the URL fragment. "Visitor" and "reusable link" are defined in the capability
-`reusable-interview-links`. The single-use route `/interview/{token}` is unchanged.
+`reusable-interview-links`. The single-use route `/interview/{token}` is unchanged. The
+"identity form" is the step of `/interview/reusable` that collects the visitor's name and
+email; the "held token" is the link token kept in page memory only; the "reopen state" is the
+terminal state shown after a reload while the form was displayed.
 
 ### Requirement: Reusable Entry Route
 
 The system MUST expose `/interview/reusable` as a client-only entry route (a static route that
-outranks `interview/[token]`) that redeems a reusable link at most once per page load and
-renders no durable UI of its own (a determinate loading state, never a blank screen, and the
-terminal or error states below). It MUST NOT call `GET /api/sso/exchange`. It MUST set a
-localized document title (WCAG 2.4.2) while its inline states are on screen: the accessibility
-audit reports `document-title` as serious without one.
+outranks `interview/[token]`) that collects the visitor's identity and then redeems a reusable
+link once per submit, rendering the identity form, a determinate loading state (never a blank
+screen) and the terminal or error states below. It MUST NOT call `GET /api/sso/exchange`. It
+MUST set a localized document title (WCAG 2.4.2) while each of its states is on screen: the
+accessibility audit reports `document-title` as serious without one.
+
+(Previously: the route rendered no durable UI of its own and redeemed automatically, at most
+once per page load, as soon as a token was read; there was no identity step.)
 
 The fragment MUST be stripped by an early client plugin that runs on EVERY route, before the
 router and before page code: a phone scanning a kiosk QR code hits the SA-11 gate, whose
 redirect to `/unsupported` carries the fragment across, so stripping only on the reusable page
-would leave the token in the address bar there. The plugin MUST declare `order: -50` through the
-object form of `defineNuxtPlugin` (Nuxt reads a plugin's `order` statically, from the raw file
-text and only from that form, and its metadata extraction returns nothing when the raw text,
-comments included, contains a function-form call; a file-name prefix alone is NOT enough). At
-the default order the router plugin reads `window.location` first and its `app:created` replay
-writes the fragment back into the address bar and into `history.state.current`. The plugin MUST
-also strip and discard a `#beai_rl_` fragment pasted into the same tab later (`hashchange`). The
-strip MUST also remove the token from `history.state.current`: on a hash-only change `popstate`
-fires before `hashchange`, and the router writes the fragment-bearing location into the state
-first, so an address-bar strip alone would leave the token in the history state.
+would leave the token in the address bar there. The plugin MUST declare `order: -50` through
+the object form of `defineNuxtPlugin` (Nuxt reads a plugin's `order` statically, from the raw
+file text and only from that form, and its metadata extraction returns nothing when the raw
+text, comments included, contains a function-form call; a file-name prefix alone is NOT
+enough). At the default order the router plugin reads `window.location` first and its
+`app:created` replay writes the fragment back into the address bar and into
+`history.state.current`. The plugin MUST also strip and discard a `#beai_rl_` fragment pasted
+into the same tab later (`hashchange`). The strip MUST also remove the token from
+`history.state.current`: on a hash-only change `popstate` fires before `hashchange`, and the
+router writes the fragment-bearing location into the state first, so an address-bar strip alone
+would leave the token in the history state.
 
 On mount, in this order:
 1. Read the URL fragment (without `#`). If a non-empty `beai_rl_` fragment exists, it is the
    link token. Strip the fragment from the address bar with `history.replaceState` keeping
    `history.state`, except that a string `current` whose fragment starts with `#beai_rl_` is
    rewritten to the part before the `#` (replacing the current history entry, never pushing)
-   BEFORE any network call
-   and before any other asynchronous work (the page also captures idempotently itself, so it
-   does not depend on the plugin's timing). The token is held only in page memory from here on,
-   in a one-shot holder: it is taken once and cleared. A fragment that does not match
+   BEFORE any network call and before any other asynchronous work (the page also captures
+   idempotently itself, so it does not depend on the plugin's timing). The token is held only
+   in page memory from here on (the held token), until the redemption succeeds or a terminal
+   state is reached; it is never read back from anywhere else. A fragment that does not match
    `^beai_rl_[A-Za-z0-9_-]{43}$` is present but yields no token.
 2. If a token was read: clear any stored candidate session first (a kiosk never resumes the
-   previous visitor), then call `POST /api/reusable-links/redeem` with the JSON body
-   `{"link_token": <token>}` exactly once; on HTTP 200 persist the returned `access_token`
-   through the candidate session composable with `entry: 'reusable'` and `navigateTo` the
-   token-free session route `/interview/session` (localized path) with `replace: true`. Every
-   visit with a fragment yields a NEW visitor, never a resumed one. A 200 whose token cannot be
-   stored is a retryable failure, never a navigation to a dead session route.
+   previous visitor), then show the identity form (see "Reusable Identity Form Content And
+   Validation") and make NO network request. The redemption `POST /api/reusable-links/redeem`
+   is sent only when the visitor submits a valid form, with the JSON body `{"link_token": <held
+   token>, "display_name": <trimmed name>, "email": <trimmed email>}`, exactly one request per
+   submit; on HTTP 200 persist the returned `access_token` through the candidate session
+   composable with `entry: 'reusable'`, discard the held token and the typed identity from
+   memory, and leave for the token-free session route `/interview/session` (localized path)
+   with an awaited `router.replace`. Every visit with a fragment yields a NEW visitor, never a
+   resumed one. A 200 whose token cannot be stored is a retryable failure, never a navigation
+   to a dead session route.
 3. If a fragment was present but malformed: show the terminal `link_invalid` state with NO
-   network call.
+   network call and NO identity form.
 4. If no fragment was read (for example a reload after the strip): if a stored, unexpired
    candidate session with `entry === 'reusable'` exists, navigate to the session route (which
-   resumes through `POST /start`); otherwise show the terminal `link_invalid` state with NO
-   network call. A stored session without the `reusable` marker MUST NOT be resumed here.
+   resumes through `POST /start`); otherwise, if the non-secret "form shown" marker defined in
+   "Reusable Reload During The Form Shows A Reopen State" is present, show the terminal reopen
+   state (the terminal route with reason `link_reopen`); otherwise show the terminal
+   `link_invalid` state. In every case with no fragment there is NO network call. A stored
+   session without the `reusable` marker MUST NOT be resumed here.
 
 The redemption is performed by one composable (`useReusableLinkRedeem`) that never throws and
-maps the response onto exactly five outcomes; it MUST drop the HTTP client's error object
-(which keeps the request options, and with them the token) and keep only the response body.
-Response types come from the generated client, never hand-written.
+maps the response onto exactly seven outcomes; it MUST drop the HTTP client's error object
+(which keeps the request options, and with them the token, the name and the email) and keep
+only the response body. Response types come from the generated client, never hand-written.
 
 Outcome mapping: HTTP 404 -> terminal `link_invalid` (existing reason, no retry control). HTTP
 403 -> the same handling the single-use entry route gives an exchange 403: a validated https
 `redirect_url` is followed through `safeExternalRedirect`, otherwise a terminal generic `403`
-state; no gate detail is disclosed and nothing new is invented. HTTP 429 -> an inline "busy"
-state; a network failure or a 5xx -> an inline "failed" state. Both inline states are retryable
-on the page itself (the generic error route's back navigation cannot work, because the URL no
-longer holds the token) and are NEVER `link_invalid`, which would be untrue; Retry re-calls
-redeem with the token still held in memory, and the token is never written back to the URL,
-storage or history. A reload after such an error has no fragment and therefore falls to step 4.
-The redemption MUST NOT be repeated by re-renders or by a hydration re-run (an in-flight guard
-makes it at most once per mount).
+state; no gate detail is disclosed and nothing new is invented. HTTP 422 -> the form stays on
+screen and editable, with the frontend's OWN localized per-field messages on the fields named
+in the response `errors` (`display_name`, `email`); server message text is never shown, and a
+422 that names neither known field is the retryable "failed" state, never a silent no-op. HTTP
+409 (`duplicate_enrolment`) -> the form stays on screen and editable with a localized error on
+the email field telling the visitor the address has already been used for this interview and to
+contact whoever shared the link (English: "This email address has already been used for this
+interview. Please contact the person who shared the link with you."; Italian: "Questo indirizzo
+email è già stato utilizzato per questo colloquio. Contatta chi ti ha condiviso il link."); the
+held token is kept and the visitor may correct the email and submit again; a 409 whose body is
+not `duplicate_enrolment` is the "failed" state. HTTP 429 -> the "busy" state; a network
+failure or a 5xx -> the "failed" state. Both states replace the form with a notice (title,
+message and a Retry control) and are retryable on the page itself (the generic error route's
+back navigation cannot work, because the URL no longer holds the token) and are NEVER
+`link_invalid`, which would be untrue; Retry re-calls redeem with the held token AND the held
+identity, so the visitor does not retype, and neither is ever written back to the URL, storage
+or history. A reload after such an error has no fragment and therefore falls to step 4. If the
+retry then ends in a 422 or a 409, the form is shown again with the held name and email
+prefilled. A submit MUST NOT be repeated by re-renders, double clicks, Enter key repeat or a
+hydration re-run: submit is disabled and the form is `aria-busy` while a request is in flight,
+so one submit is one request.
 
 The token MUST NOT appear, after the strip, in the address bar, history entry or
 `history.state`, router state or query, `localStorage`, `sessionStorage`, the DOM, console
-output, analytics payloads, or any request other than the single redemption body. The SA-11
-browser gate still applies first: an unsupported browser is redirected to `/unsupported` and
-MUST NOT call the redemption (so no visitor is created).
+output, analytics payloads, or any request other than the single redemption body. The visitor's
+name and email MUST NOT appear in the address bar, history, router state or query,
+`localStorage`, `sessionStorage`, console output, analytics payloads, error reports or any
+request other than the redemption body. The SA-11 browser gate still applies first: an
+unsupported browser is redirected to `/unsupported`, MUST NOT show the identity form and MUST
+NOT call the redemption (so no visitor is created).
 
 The terminal `link_invalid` state shows copy that is true for every case that reaches it:
 single-use links that are expired, already invalid or malformed, and reusable links that are
-unknown, malformed or disabled. A reusable link never expires, so the copy MUST NOT claim expiry.
-English: title "This Link Is No Longer Valid", body "This interview link is not valid or is no
-longer active. Please ask whoever sent it to you for a new link." Italian: title "Questo link non
-è più valido", body "Questo link per il colloquio non è valido o non è più attivo. Chiedi un
-nuovo link a chi te lo ha inviato."
+unknown, malformed or disabled. A reusable link never expires, so the copy MUST NOT claim
+expiry. English: title "This Link Is No Longer Valid", body "This interview link is not valid
+or is no longer active. Please ask whoever sent it to you for a new link." Italian: title
+"Questo link non è più valido", body "Questo link per il colloquio non è valido o non è più
+attivo. Chiedi un nuovo link a chi te lo ha inviato."
+
+(Reconciled with the implementation, where it differs from the original delta text: (1) the
+page leaves with an awaited `router.replace`, not `navigateTo`. While a router navigation is in
+flight (a link pasted into an open tab fires `popstate` before `hashchange`), Nuxt treats
+`navigateTo` as a middleware redirect: it returns a route object and does not navigate, and a
+caller that ignores it strands the visitor on the page. `router.replace` supersedes the pending
+navigation, and awaiting it keeps the form disabled until the router has left. This applies to
+every exit: success, `link_invalid`, the generic 403, the reopen state and a resumed session.
+(2) The busy and failed states are full notices that replace the form, each with a Retry
+control, rather than a message beside the form; Retry shows the loading state and re-posts the
+held token and identity. (3) An unrecognized 422 shape is the "failed" state, not a generic
+form-level message, so a refusal the page cannot map is never silent. (4) The reload state is
+the terminal route with reason `link_reopen`, reached with `router.replace`; the non-secret
+marker is read once and removed by that read. (5) The submit button reads "Starting…" while a
+request is in flight (disabled and `aria-busy`), and the form is `aria-busy` too.)
+
+(Known limitation: a redemption that succeeds on the server but whose response never reaches
+the page (a dropped connection, a timeout) leaves the visitor enrolled and without a session.
+The page shows the "failed" state, and Retry re-posts the held token and the same email, which
+the api refuses with 409 `duplicate_enrolment` because the enrolment now exists and is never
+resumed. The visitor cannot continue that interview: the token was stripped from the address
+bar, and only a different email, which creates a second enrolment, or an operator, gets them
+further. An idempotency key on the redemption would let a retry return the original result;
+it is out of scope for this change and is recorded as a follow-up.)
 
 #### Scenario: The link_invalid copy never claims expiry
 - WHEN the terminal page is rendered with `reason=link_invalid` in English or in Italian
 - THEN neither the title nor the body contains "expire" (English) or "scad" (Italian)
 - AND the body ends with a request to ask whoever sent the link for a new one
 
-#### Scenario: First visit redeems once and lands on a token-free URL
+#### Scenario: A well-formed fragment shows the form and makes no request
 
 - GIVEN a desktop browser with no stored session opens `/interview/reusable#beai_rl_<43 chars>`
 - WHEN the page mounts
-- THEN exactly one `POST /api/reusable-links/redeem` with body `{"link_token": "<token>"}` is
-  made, the returned JWT is stored with `entry: 'reusable'`, and the browser is navigated to
-  `/interview/session` with `replace: true`
+- THEN the identity form is shown, no network request is made, and the address bar and history
+  hold no fragment
+
+#### Scenario: First visit redeems once on submit and lands on a token-free URL
+
+- GIVEN the form is shown and the visitor enters "Ada Lovelace" and "ada@example.com"
+- WHEN the visitor submits
+- THEN exactly one `POST /api/reusable-links/redeem` with body `{"link_token": "<token>",
+  "display_name": "Ada Lovelace", "email": "ada@example.com"}` is made, the returned JWT is
+  stored with `entry: 'reusable'`, and the browser is navigated to `/interview/session` with
+  `replace: true`
 - AND the token is nowhere in the address bar or history
 
 #### Scenario: The fragment is stripped before any request
 
 - GIVEN the page mounts with a fragment
 - WHEN the network and `history` calls are ordered
-- THEN `history.replaceState` removing the fragment happens before the redemption request is
-  issued, `history.state` is preserved apart from a `current` that carried the fragment (which
-  is cleaned), and no history entry is added
+- THEN `history.replaceState` removing the fragment happens before the form is shown and before
+  any redemption request, `history.state` is preserved apart from a `current` that carried the
+  fragment (which is cleaned), and no history entry is added
 
 #### Scenario: The plugin strips the fragment before the router can write it back
 
@@ -2061,40 +2123,46 @@ nuovo link a chi te lo ha inviato."
 
 - GIVEN a stored, unexpired session (reusable or single-use) from a previous visitor
 - WHEN `/interview/reusable#<token>` is opened
-- THEN the stored session is cleared before the redemption and the resulting session belongs to
-  the newly created visitor, with no `POST /start` resume of the old one
+- THEN the stored session is cleared before the form is shown and the resulting session, after
+  submit, belongs to the newly created visitor, with no `POST /start` resume of the old one
 
 #### Scenario: Reload after the strip resumes the stored reusable session
 
 - GIVEN the visitor is on the session route (or reloads `/interview/reusable` with no fragment)
   and holds an unexpired session with `entry: 'reusable'`
 - WHEN the page loads
-- THEN no redemption request is made and the visitor is routed to the session route and
-  resumes through `POST /start`
+- THEN no redemption request is made and the visitor is routed to the session route and resumes
+  through `POST /start`
 
 #### Scenario: A single-use session is not resumed here
 
-- GIVEN no fragment and a stored unexpired session WITHOUT `entry: 'reusable'`
+- GIVEN no fragment, no "form shown" marker and a stored unexpired session WITHOUT `entry:
+  'reusable'`
 - WHEN `/interview/reusable` is opened
 - THEN the terminal `link_invalid` state is shown and no network call is made
 
 #### Scenario: No fragment and no session is terminal
 
-- GIVEN no fragment and no stored session (or an expired one, purged on read)
+- GIVEN no fragment, no "form shown" marker and no stored session (or an expired one, purged on
+  read)
 - WHEN `/interview/reusable` is opened
-- THEN the terminal `link_invalid` state is shown, with no retry control and no network call
+- THEN the terminal `link_invalid` state is shown, with no retry control, no form and no
+  network call
 
-#### Scenario: A malformed fragment is terminal without a request
+#### Scenario: A malformed fragment is terminal without a form or a request
 
 - GIVEN `/interview/reusable#beai_rl_short`
 - WHEN the page mounts
-- THEN the terminal `link_invalid` state is shown and no request is made
+- THEN the terminal `link_invalid` state is shown, no identity form is shown and no request is
+  made
 
 #### Scenario: 404 is link_invalid
 
-- GIVEN the redemption returns 404 (unknown, malformed or disabled link)
+- GIVEN the form was submitted and the redemption returns 404 (unknown, malformed or disabled
+  link)
 - WHEN the response is handled
-- THEN the terminal `link_invalid` state is shown with no retry control
+- THEN the terminal `link_invalid` state is shown with no retry control and the typed identity
+  is discarded
 
 #### Scenario: 403 uses the existing exchange-403 handling
 
@@ -2103,35 +2171,62 @@ nuovo link a chi te lo ha inviato."
 - THEN the candidate is redirected to a validated https `redirect_url` when there is one, and
   otherwise sees the same terminal generic screen as an exchange 403, and no gate detail
 
+#### Scenario: 422 maps onto the fields with the app's own copy
+
+- GIVEN the redemption returns 422 with `errors.email` (and separately `errors.display_name`)
+- WHEN the response is handled
+- THEN the form stays on screen with the typed values kept, the localized message of the
+  frontend is shown under the named field with `aria-invalid` and `aria-describedby`, the
+  server's message text is not rendered, and focus moves to the first invalid field
+
+#### Scenario: A 422 that names no known field is a retryable failure
+
+- GIVEN the redemption returns 422 with an `errors` object that names neither `display_name`
+  nor `email`, or no `errors` at all
+- WHEN the response is handled
+- THEN the "failed" state is shown with its Retry control, no field error is invented, and the
+  server's message text is not rendered
+
+#### Scenario: 409 is an email-field error and the form stays usable
+
+- GIVEN the redemption returns 409 `{"message": "duplicate_enrolment"}`
+- WHEN the response is handled
+- THEN the localized duplicate message is shown under the email field, the form stays editable,
+  the held token is kept, and no navigation or session write occurs
+- AND correcting the email and submitting again sends a new redemption with the held token
+
 #### Scenario: 429 and failures are retryable, not link_invalid
 
 - GIVEN the redemption returns 429, 502 or fails at the network layer
 - WHEN the response is handled
 - THEN the inline retryable state is shown (busy for 429, failed otherwise), never
   `link_invalid`
-- AND Retry re-sends the redemption with the in-memory token and the token is not written to
-  the URL, storage or history
+- AND Retry re-sends the redemption with the held token and the held identity, and neither is
+  written to the URL, storage or history
 
-#### Scenario: Redeem is called at most once per mount
+#### Scenario: One submit is one request
 
-- GIVEN the page mounts with a fragment
-- WHEN reactive re-renders or a hydration re-run occur
-- THEN only one redemption request is made
+- GIVEN the form is valid
+- WHEN the visitor double-clicks Submit, presses Enter repeatedly, or a re-render or hydration
+  re-run occurs
+- THEN only one redemption request is made while it is in flight, the submit control is
+  disabled and the form is `aria-busy`
 
-#### Scenario: The token leaks nowhere else
+#### Scenario: The token and the identity leak nowhere else
 
 - GIVEN a completed redemption
 - WHEN the address bar, history state, router query, `localStorage`, `sessionStorage`, the DOM,
   console output and every other network request are inspected
-- THEN none contains the token
+- THEN none contains the token, the typed name or the typed email (the redemption body is the
+  only carrier)
 
-#### Scenario: An unsupported browser never redeems
+#### Scenario: An unsupported browser never shows the form or redeems
 
 - GIVEN a mobile user agent (or a viewport under 1024 px, or Firefox) opens
   `/interview/reusable#<token>`
 - WHEN the SA-11 gate runs
-- THEN the browser is redirected to `/unsupported`, the address bar holds no fragment, and no
-  redemption request is made
+- THEN the browser is redirected to `/unsupported`, the address bar holds no fragment, no
+  identity form is shown and no redemption request is made
 
 #### Scenario: Localized paths behave identically
 
@@ -2143,14 +2238,286 @@ nuovo link a chi te lo ha inviato."
 
 - GIVEN `/interview/reusable`
 - WHEN the router resolves it
-- THEN `pages/interview/reusable.vue` handles it, `interview/[token].vue` does not, and no
-  `GET /api/sso/exchange` is made
+- THEN `pages/interview/reusable.vue` handles it, `interview/[token].vue` does not, and no `GET
+  /api/sso/exchange` is made
 
 #### Scenario: A single-use link is unaffected
 
 - GIVEN a normal `/interview/<sso-link-jwt>` link
 - WHEN it is opened after this change
-- THEN it behaves exactly as in "Single-use entry-route exchange"
+- THEN it behaves exactly as in "Single-use entry-route exchange" and shows no identity form
+
+### Requirement: Reusable Identity Form Content And Validation
+
+After a well-formed token is read and before any redemption, the page MUST show a form that
+collects the visitor's full name and email address. Both fields are MANDATORY. The form MUST
+carry a short, fixed, localized privacy notice and MUST NOT carry a consent checkbox, a link to
+a privacy policy, or tenant-editable text. English notice: "Your name and email are shared with
+the organization running this interview so your interview can be identified and requests about
+your data can be handled." Italian notice: "Il tuo nome e la tua email sono condivisi con
+l'organizzazione che conduce il colloquio, così che il tuo colloquio possa essere identificato
+e le richieste relative ai tuoi dati possano essere gestite." (Owner decision OD-2: legal
+confirmation of this wording is a recorded follow-up, not a blocker.) The email is accepted as
+typed and is not verified: the form MUST NOT promise or request a verification code or
+confirmation link.
+
+Client validation runs on submit and, for a field the visitor has touched, on blur. Name: after
+trimming it MUST be non-empty and at most 255 characters. Email: after trimming it MUST be
+non-empty, at most 255 characters and well-formed as an address; the server remains
+authoritative. Invalid fields show a localized per-field message, no request is sent, and focus
+moves to the first invalid field. A valid submit sends the trimmed values. The form MUST NOT
+persist the typed name or email anywhere (no `localStorage`, `sessionStorage`, cookie, URL,
+history, router state) and MUST NOT log them or send them to analytics or error reporting; they
+live only in component memory until the redemption succeeds or a terminal state is reached.
+
+(Reconciled with the implementation: a field that already shows an error is re-checked as the
+visitor edits it, so the message disappears the moment the value is good and not only on the
+next blur; an error that came from the server clears as soon as its field is edited. The inputs
+carry no `maxlength`, because a browser would truncate silently and store a different value
+than the one typed: the limit is a validation message. The client email check is deliberately
+loose: exactly one `@`, no whitespace, a non-empty local part and a domain holding a dot that
+has a character before and after it; the server rule stays authoritative and a 422 maps back
+onto the field. It is written as a split plus linear tests, because the repository lint rule
+refuses a super-linear regular expression. Lengths count code points, as the server counts
+them.)
+
+#### Scenario: An empty submit flags both fields and focuses the name
+
+- GIVEN the form is shown and both fields are empty
+- WHEN the visitor submits
+- THEN both errors are shown at once, "Enter your name." under the name and "Enter your
+  email." under the email (Italian: "Inserisci il tuo nome." and "Inserisci la tua email."),
+  each invalid field has `aria-invalid="true"` and its `aria-describedby`, focus is on the
+  name field, and no request is sent
+
+#### Scenario: Whitespace-only values are empty
+
+- GIVEN the form is shown and both fields hold only spaces
+- WHEN the visitor submits
+- THEN the values are trimmed before they are checked, so the same two required messages are
+  shown, focus is on the name field and no request is sent
+
+#### Scenario: A blank name with the email filled flags only the name
+
+- GIVEN the form is shown, the email is a well-formed address and the name is empty
+- WHEN the visitor submits
+- THEN only "Enter your name." is shown, the name field is `aria-invalid` and focused, the
+  email field has neither `aria-invalid` nor `aria-describedby`, "Enter your email." is
+  absent and no request is sent
+
+#### Scenario: A blank email with the name filled flags only the email
+
+- GIVEN the form is shown, the name is filled and the email is empty
+- WHEN the visitor submits
+- THEN only "Enter your email." is shown, the email field is `aria-invalid` and focused, the
+  name field has neither `aria-invalid` nor `aria-describedby`, "Enter your name." is absent
+  and no request is sent
+
+#### Scenario: Email format and length are checked
+
+- GIVEN the form is shown
+- WHEN the email is `not-an-email`, then 256 characters long, and the name is 256 characters
+  long
+- THEN each shows its localized message, no request is sent, and a name of 255 characters with
+  a well-formed email submits
+
+#### Scenario: Values are trimmed before sending
+
+- GIVEN the visitor types `" Ada Lovelace "` and `" ada@example.com "`
+- WHEN the form is submitted
+- THEN the request body carries `"Ada Lovelace"` and `"ada@example.com"`
+
+#### Scenario: Validation on blur only for touched fields
+
+- GIVEN an untouched empty name field
+- WHEN focus first passes through and leaves another field
+- THEN no error appears on the untouched field until it has been blurred or the form is
+  submitted
+
+#### Scenario: The privacy notice is shown, with no consent checkbox
+
+- GIVEN the form is shown in English and in Italian
+- WHEN the form is inspected
+- THEN the notice text above is rendered in the matching language, no checkbox, privacy-policy
+  link or consent control exists, and no verification code or confirmation step is offered
+
+#### Scenario: Typed identity is never persisted
+
+- GIVEN the visitor has typed a name and email and the form has been shown, blurred and
+  submitted with a 429
+- WHEN `localStorage`, `sessionStorage`, cookies, the address bar, history state and console
+  output are inspected
+- THEN none contains the typed name or email
+
+### Requirement: Reusable Identity Form Is Accessible And Localized
+
+The identity form MUST be operable by keyboard alone and satisfy WCAG 2.1 AA: each input has a
+visible `<label>` bound to it; each is `required` and `aria-required="true"`; the form uses
+`novalidate` with the script validation above; each invalid field has `aria-invalid="true"` and
+an error message element referenced by `aria-describedby`; focus moves to the first invalid
+field after a failed submit and after a 422 or 409; every field error, whether produced by the
+client or mapped from a 422 or a 409, is rendered in the shared `FieldError` element, which is
+a live alert region (`role="alert"`), and the loading state is a polite live region
+(`aria-live="polite"`, `aria-busy`); the name input has `autocomplete="name"` and the email
+input `type="email"` and `autocomplete="email"` (WCAG 1.3.5); the privacy notice is visible
+text above the submit button and is associated with it through `aria-describedby`; the submit
+control is a real button, disabled while a request is in flight, and the form is `aria-busy`
+while in flight. The localized document title and the visible heading MUST be present and
+distinct from the `link_invalid` ones. All visible and assistive text MUST be translated in
+`it` and `en` (the project languages; no other locale is required), including labels, messages,
+notice, heading, title and the reopen state; no key may be missing in either locale. An
+automated accessibility audit (axe) of the form in its pristine, invalid, 409, 422, busy and
+failed states MUST report no violation in Chromium and in WebKit.
+
+#### Scenario: Labels, required and autocomplete attributes
+
+- GIVEN the form is rendered
+- WHEN the DOM is inspected
+- THEN each input has a bound label, `required` and `aria-required`, the name input has
+  `autocomplete="name"`, and the email input is `type="email"` with `autocomplete="email"`
+
+#### Scenario: Errors are associated and focused
+
+- GIVEN a failed client validation, and separately a 409
+- WHEN the error appears
+- THEN the invalid input has `aria-invalid="true"` and `aria-describedby` pointing at its error
+  message, and focus is on the first invalid field (the email field for a 409)
+
+#### Scenario: Field errors are announced
+
+- GIVEN a client validation failure, a 422 naming `email`, and a 409
+- WHEN each error appears
+- THEN it is rendered in a `role="alert"` element that is the `aria-describedby` target of its
+  field
+
+#### Scenario: The busy and failed states are notices with a Retry control
+
+- GIVEN a 429, and separately a network failure
+- WHEN each is handled
+- THEN a notice with its own heading, a message and a Retry control replaces the form, and the
+  notice has no axe violation in either browser
+
+#### Scenario: Keyboard-only completion
+
+- GIVEN only the keyboard is used
+- WHEN the visitor tabs through the form, fills both fields and presses Enter on the submit
+  control
+- THEN the redemption is sent once and tab order follows the visual order
+
+#### Scenario: Both locales are complete
+
+- GIVEN the `it` and `en` locale files
+- WHEN the identity form keys are compared
+- THEN every key exists in both, and the page renders the matching language at
+  `/interview/reusable` and `/en/interview/reusable`
+
+#### Scenario: The accessibility audit is clean in both browsers
+
+- GIVEN the form in its pristine, invalid, 409, 422, busy and failed states
+- WHEN axe runs in Chromium and in WebKit
+- THEN no violation is reported in either
+
+### Requirement: Reusable Reload During The Form Shows A Reopen State
+
+The token exists only in page memory and the stored session was cleared when it was read, so a
+reload while the identity form is shown loses the token. This is accepted and is the safe
+behavior (the token is never kept in storage, URL or history). To keep the copy true, the page
+MUST set a NON-SECRET boolean marker in `sessionStorage` (no token, no name, no email, no URL,
+no other data) while the form is shown, and MUST remove it when the visitor leaves the form by
+success or by any terminal outcome (`link_invalid`, 403 generic screen or redirect). A load
+with NO fragment, NO unexpired `reusable` session and the marker present MUST show a dedicated
+terminal reopen state with no form, no retry control and no network call, and MUST NOT show
+`link_invalid`. A load with a well-formed fragment starts again at the form (the marker is
+simply set again); a load with a stored unexpired `reusable` session resumes it as before and
+removes a stale marker. The reopen copy, English: title "Please open the link again", body
+"This page was reloaded, so your interview link is no longer here. Open the link again (scan
+the QR code or use the message you received) to start."; Italian: title "Apri di nuovo il
+link", body "Questa pagina è stata ricaricata, quindi il link del tuo colloquio non è più qui.
+Riapri il link (inquadra di nuovo il codice QR oppure usa il messaggio ricevuto) per iniziare."
+The reopen state sets a localized document title.
+
+(Reconciled with the implementation: the marker is the single character `1` under the
+`sessionStorage` key `beai_reusable_identity_pending`, and an unavailable or throwing storage
+degrades to "no marker", so a reload then shows `link_invalid` instead of a crashed page. The
+marker is read once and removed by that read. The reopen state is rendered by the terminal
+route (`/interview/terminal?reason=link_reopen`, localized path), reached with
+`router.replace`. The marker is set when the form is first shown for a fragment and is NOT
+touched by the retryable states: it stays set while the busy or failed notice is on screen,
+while a Retry is in flight, and when a 422 or a 409 returns the visitor to the form. It is
+removed only by a success, a 404, a 403, a resumed session, a malformed fragment, a fresh
+fragment (which sets it again for the new form), the read of a reload, or the page being left inside the app. A
+200 whose token cannot be stored is also the failed state and leaves it set.)
+
+#### Scenario: Reload while the form is shown
+
+- GIVEN the identity form is shown (marker set) and the visitor reloads the page
+- WHEN `/interview/reusable` loads with no fragment and no session
+- THEN the reopen state is shown, no form and no retry control, and no network request is made
+- AND the typed name and email are gone
+
+#### Scenario: Without the marker the link_invalid state applies
+
+- GIVEN no fragment, no session and no marker
+- WHEN the page loads
+- THEN the terminal `link_invalid` state is shown, not the reopen state
+
+#### Scenario: The marker carries no secret or personal data
+
+- GIVEN the form is shown with a name and email typed
+- WHEN `sessionStorage` is inspected
+- THEN the marker exists as a boolean and no stored value contains the token, the name, the
+  email or the URL
+
+#### Scenario: The marker is removed when the form is left
+
+- GIVEN the form was shown (marker set)
+- WHEN the redemption succeeds, and separately when it ends in 404 or 403
+- THEN the marker is absent afterwards
+
+#### Scenario: The marker survives the busy and failed states
+
+- GIVEN the form was shown (marker set) and the redemption ended in 429, and separately in a
+  network failure
+- WHEN the busy or the failed notice is on screen, and again while a Retry is in flight
+- THEN the marker is still set
+- AND a reload at that point finds no fragment and no session, so it shows the reopen state,
+  not `link_invalid`, because the token held in memory is gone
+- AND a Retry that ends in 422 or 409 shows the form again with the marker still set, and a
+  Retry that ends in success, 404 or 403 removes it
+
+#### Scenario: Reopening the link starts again at the form
+
+- GIVEN the reopen state is shown
+- WHEN the visitor opens the link again with the fragment
+- THEN the stored session is cleared, the identity form is shown empty, and the token is held
+  in memory only
+
+#### Scenario: The reopen copy is localized
+
+- GIVEN the reopen state at `/interview/reusable` and `/en/interview/reusable`
+- WHEN it is rendered
+- THEN the Italian and English title and body above are shown and the document title is set
+
+### Requirement: Visitor Identity Is Not Retained After Redemption
+
+After a successful redemption, a terminal outcome, or a navigation away, the typed name and
+email MUST be discarded from component state and composables (no module-level cache, no store,
+no query cache). Neither value MUST be placed in the candidate session storage, the
+`access_token` claims, the session route, or any analytics or error-report payload. The
+identity reaches the network only inside the single redemption body per submit.
+
+#### Scenario: Nothing remains after success
+
+- GIVEN a successful redemption and navigation to `/interview/session`
+- WHEN the application state and browser storage are inspected
+- THEN no module state, store, storage entry or URL holds the typed name or email, and the
+  candidate session holds only the access token and the `reusable` entry marker
+
+#### Scenario: Nothing remains after a terminal outcome
+
+- GIVEN the redemption ended in 404
+- WHEN the terminal state is shown
+- THEN the typed identity is no longer in component state or storage
 
 ### Requirement: The Reusable Entry Route Is Not Indexed, Sends No Referrer, And Keeps The Camera And Microphone Policy
 

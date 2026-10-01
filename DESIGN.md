@@ -1595,15 +1595,15 @@ decisions the design already made so no UI task has to invent them. It reuses ex
   `CheckboxField` (§16.13, `id="entry-link-form-reusable"`), unchecked on every open.
   - Label: "Generate a reusable interview link that never expires".
   - Description (a `FieldDescription` inside its `Field`): "Anyone who opens it starts a new
-    interview for this project. Use it for demos, events and testing."
+    interview for this project. Each visitor enters their name and email before starting. Use it
+    for demos, events and testing."
   - **Checking it HIDES, never disables.** The candidate reference, display name, role, language,
     the "External reference" fieldset (§16 rule 1), the timing fields, the send-email control and
     the scheduled-at control are removed from the DOM (`v-if`, the form's own precedent). A disabled
     field that cannot be filled would read as a bug (§16 rule 7); an absent one reads as a different
     mode. Values typed before checking are never submitted.
   - One optional `Field` "Link name" (`id="entry-link-form-link-name"`, at most 120 characters) takes
-    their place, with the help "Names the link and the interviews started from it, e.g. Milan fair
-    stand." Validation follows the form contract: `novalidate`, `FieldError` with `aria-invalid` and
+    their place, with the help "Names the link, e.g. Milan fair stand." Validation follows the form contract: `novalidate`, `FieldError` with `aria-invalid` and
     `aria-describedby`, messages i18n-keyed and shown after blur, server 422 mapped onto the field.
     Submitting calls the reusable-links endpoint, never the single-use one. Unchecked, the form is
     exactly today's form.
@@ -1615,7 +1615,10 @@ decisions the design already made so no UI task has to invent them. It reuses ex
   interaction before Copy can be used:
   1. Warning `Alert` (`data-testid="entry-link-disclosure"`): "This link does not expire and can be
      used many times. Anyone who has it can start this interview, so share it only where you mean to.
-     This is the only time the full link is shown."
+     This is the only time the full link is shown. Visitors enter their name and email before the
+     interview. On a shared device, use a private browser window." The identity sentences are part of
+     the same single `AlertDescription` (one i18n key), so they are inside the warning `Alert` and
+     visible before Copy can be used.
   2. The line "Never expires · Reusable" (`data-testid="entry-link-never-expires"`) followed by "It
      stops working if the project closes or the link is disabled. Desktop browsers only."
   3. The full URL as selectable text (`data-testid="entry-link-url"`, the same monospace block as the
@@ -1657,9 +1660,11 @@ decisions the design already made so no UI task has to invent them. It reuses ex
   reusable link has a real, immediate disable, so its verb is "Disable"; "revoke" and "regenerate"
   (and their Italian equivalents) appear in no reusable-link string in either locale.
 - **Candidate route states.** The candidate `interview/reusable` page reuses `NoticeShell` for its
-  non-terminal states: loading, busy ("many people are starting right now", with Retry) and a
-  generic failed state (with Retry). An invalid, disabled or unknown link is the existing terminal
-  "link not valid" notice with no retry control.
+  non-terminal states: the identity form (shown first, once a well-formed link is read, see §16.19),
+  loading, busy ("many people are starting right now", with Retry) and a generic failed state (with
+  Retry). An invalid, disabled or unknown link is the existing terminal "link not valid" notice with
+  no retry control and no form. A reload while the identity form is shown ends in a second terminal
+  notice, "Please open the link again" (`link_reopen`), also with no retry control and no form.
 - **Accessibility.** Every state is stated in text (Active/Disabled, the never-expires line, the
   disclosure); colour is never the only signal. The checkbox follows §16.13 (`aria-labelledby`,
   `aria-describedby`, Space key). Field errors are `role="alert"`, the confirmation is a dialog with
@@ -1670,6 +1675,99 @@ decisions the design already made so no UI task has to invent them. It reuses ex
   rows, badges, disable action and confirmation, empty and error states),
   `participants.detail.reusableLink*` and `interview.reusable.*`. The English strings quoted here are
   normative; the Italian strings carry the same meaning.
+
+### 16.19 Candidate identity step on the reusable entry route (frontend)
+
+A visitor who opens a reusable link now gives a full name and an email before the interview starts, so
+the interview can be attributed to a person and a data request can be matched to one. Change:
+`sdd/reusable-link-visitor-identity`; the normative requirements are in its `interview-frontend` delta
+("Reusable Identity Form Content And Validation", "Reusable Identity Form Is Accessible And
+Localized", "Reusable Reload During The Form Shows A Reopen State"). This section records the UI
+decisions so no UI task has to invent them. It adds no token and no colour. The single-use route
+`/interview/{token}` is unchanged and shows no form.
+
+- **Placement.** The form is the page's first non-terminal state, rendered by a presentational
+  molecule (`ReusableIdentityForm`) inside `NoticeShell` (tone `info`, §7.0), the same shell as the
+  busy and failed states. `NoticeShell`'s `title` ("Before you start") is the page `<h1>` and its
+  `message` is the intro ("Enter your name and email so your interview can be identified."). The
+  organization is unknown before redemption, so the shell shows the BEAI brand, exactly like the
+  existing busy and failed states. No request is made before the visitor submits.
+- **Fields, in this order.** Name, then email: a `FieldGroup` of two `Field`s, each `FieldLabel` +
+  `Input` + `FieldError` (§16 rules 1, 3, 4, 6). Labels "Full name" and "Email" are visible text bound
+  by `for`/`id`; there is no placeholder-as-label.
+  - Name: `id="reusable-identity-name"`, `name="name"`, `autocomplete="name"`,
+    `autocapitalize="words"`.
+  - Email: `id="reusable-identity-email"`, `name="email"`, `type="email"`, `inputmode="email"`,
+    `autocomplete="email"`, `autocapitalize="off"`, `spellcheck="false"`.
+  - Both are `required` and carry `aria-required="true"`. The `<form>` is `novalidate`
+    (`data-testid="reusable-identity-form"`) so the script validation, not the browser bubble, speaks.
+  - **No `maxlength`.** The limits (255 characters each, counted in code points) are enforced by the
+    script, because a silently truncated address is a different address than the one typed.
+- **Validation timing (§16 rule 3).** A field is validated on blur once it has been touched (an
+  untouched empty field shows nothing until it is blurred or the form is submitted). Submit validates
+  ALL fields, never short-circuited; with any error nothing is sent and focus moves to the first
+  invalid field. A valid submit sends the trimmed values. The email check is deliberately loose (one
+  `@`, a dot in the domain, no whitespace): the server's rule is authoritative.
+- **Errors (§16 rules 4 and 5).** `aria-invalid="true"` and `aria-describedby` (pointing at
+  `reusable-identity-name-error` or `reusable-identity-email-error`, the `{form}-{field}-error`
+  convention) are present ONLY while an error is shown (a reference to an id that does not exist is
+  an axe violation); `FieldError` has `role="alert"`, so each error is announced. Messages
+  are the app's own i18n copy and the server's text is never rendered.
+  - HTTP 422 maps onto the field named in the response (`display_name`, `email`): the form stays on
+    screen with the typed values kept, and focus moves to the first field that carries a server error.
+    Editing a field clears its server error. A 422 that names no known field is the generic failed
+    state below.
+  - HTTP 409 (`duplicate_enrolment`) maps onto the email field with the duplicate message: English
+    "This email address has already been used for this interview. Please contact the person who
+    shared the link with you."; Italian "Questo indirizzo email è già stato utilizzato per questo
+    colloquio. Contatta chi ti ha condiviso il link." The held link token is kept, the form stays
+    editable and the visitor may correct the email and submit again. The copy never offers to resume.
+  - HTTP 429 shows the existing inline busy state and a network failure or a 5xx the existing inline
+    failed state (both `NoticeShell`, both replace the form). Both are retryable on the page, and Retry
+    re-sends the SAME held token AND the held identity, so the visitor does not retype. Neither is ever
+    written to the URL, storage or history. 404 and 403 keep their existing terminal handling.
+- **Privacy notice.** One short, fixed, localized paragraph of plain visible text ABOVE the submit
+  button (`id="reusable-identity-privacy"`, small muted text), linked to the submit button through
+  `aria-describedby`. English: "Your name and email are shared with the organization running this
+  interview so your interview can be identified and requests about your data can be handled." Italian:
+  "Il tuo nome e la tua email sono condivisi con l'organizzazione che conduce il colloquio, così che il
+  tuo colloquio possa essere identificato e le richieste relative ai tuoi dati possano essere gestite."
+  There is **no checkbox, no link to a privacy policy, no tenant-editable text and no verification
+  step**: the email is accepted as typed and unverified, and the form never promises a code or a
+  confirmation link. This is a collection notice, not the full interview privacy notice of §12, which
+  keeps its own place in the interview. Legal may adjust the wording without a structural change.
+- **Submit.** A real `Button` (`type="submit"`, `size="lg"`, `data-testid="reusable-identity-submit"`)
+  labelled "Start the interview". While a request is in flight it is `disabled`, the form is
+  `aria-busy="true"` and the label reads "Starting…", so a double click, an Enter repeat or a re-render
+  is one request.
+- **No autofocus on load.** A screen-reader user must meet the heading and the intro first. Focus
+  moves only after a failed validation, a 422 or a 409.
+- **`link_reopen` terminal.** The token lives only in page memory and the stored session was cleared
+  when it was read, so a reload while the form is shown loses the token. The page sets a non-secret
+  `sessionStorage` marker (the single character `1`: no token, no name, no email, no URL) while the form
+  is shown and removes it when the form is left. A load with no fragment, no reusable session and the
+  marker present shows a terminal notice with no form and no retry control, distinct from
+  `link_invalid` and with its own localized document title. English: title "Please open the link
+  again", body "This page was reloaded, so your interview link is no longer here. Open the link again
+  (scan the QR code or use the message you received) to start." Italian: title "Apri di nuovo il link",
+  body "Questa pagina è stata ricaricata, quindi il link del tuo colloquio non è più qui. Riapri il link
+  (inquadra di nuovo il codice QR oppure usa il messaggio ricevuto) per iniziare." Reopening the link
+  starts again at an empty form.
+- **Nothing typed is kept.** The typed name and email live only in component memory: never in
+  `localStorage`, `sessionStorage`, cookies, the URL, history, router state, console output, analytics
+  or error reports, and they are discarded on success or on any terminal outcome.
+- **Components.** The frontend vendors `Input` and `FieldError` byte-for-byte from the backoffice
+  (`app/components/ui/input/`, `app/components/ui/field/FieldError.vue`); it had `Field`,
+  `FieldGroup`, `FieldLabel` and `FieldDescription` but neither of these. No new dependency.
+- **Accessibility.** Keyboard-only completion works (Tab, type, Enter submits) and tab order follows
+  visual order; both fields have visible bound labels and the WCAG 1.3.5 autocomplete tokens; axe
+  reports no violation in Chromium and WebKit on the form (empty, with client errors, 409, 422, busy,
+  failed) and on the `link_reopen` terminal. Tests locate controls by role, label or `data-testid`,
+  never by CSS selector (§5).
+- **i18n.** Every string above exists, non-empty, in `it` and `en` under `interview.reusable.identity.*`
+  and `interview.terminal.link_reopen.*`, with no key present in one locale only.
+- **No token change.** §17 requires an `@theme` change to be mirrored in both Nuxt CSS files; this
+  section changes no token, so no CSS file is edited.
 
 ## 17. Updates to This Document
 

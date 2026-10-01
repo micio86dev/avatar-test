@@ -1009,3 +1009,76 @@ is a DENYLIST over a surface the SDK keeps adding to, so every new carrier is
 open until someone names it. The review gate found each of these by walking the
 installed SDK rather than the file — that is the technique to repeat.
 -->
+
+### Requirement: A Reusable-Link Visitor's Name And Email Never Reach An Error Sink, A Log Line Or Analytics
+
+The redeem request body is `{link_token, display_name, email}`; the visitor's name and email
+are personal data entered by a person who is not an operator and are held by BEAI only in the
+participant row. None of the three values MUST reach a third-party sink or an application log
+from the redeem path.
+
+- `api`: an error event whose request body, extras, contexts or breadcrumbs carry `link_token`,
+  `display_name` and `email` MUST have all three replaced by the filtered placeholder (the keys
+  are denied; the `beai_rl_` pattern and the email-address pattern also cover them inside free
+  text). No log line, exception message or exception context produced on the redeem path, for
+  ANY outcome (200, 403, 404, 409, 422, 429 and a forced mint failure) and including the
+  placeholder/visitor mail-guard refusal log, MUST contain the submitted name or the submitted
+  email address, because a person's name inside free text is not detectable by pattern and must
+  therefore never be written there.
+- `frontend` (candidate app): no Sentry event, breadcrumb, console statement, GA4 event or
+  parameter, or Clarity payload MUST carry the typed name or email. The `/interview` branch (so
+  `/interview/reusable` and `/en/interview/reusable`) is already replay-unsafe: the session
+  recorder MUST NOT run while the identity form is shown, and this MUST stay so (the form types
+  personal data into inputs). The analytics path of the reusable route carries no query and no
+  fragment.
+- All three applications keep `email` and `display_name` in their denied-key lists
+  (`SentryScrubber::DENIED_KEYS` and both `EXPECTED_DENIED_KEYS`), pinned by tests.
+
+#### Scenario: api scrubs the three body values
+
+- GIVEN an api error event with request body `{"link_token": "beai_rl_<43 chars>",
+  "display_name": "Ada Lovelace", "email": "ada@example.com"}` and an unrelated key
+  `project_id`
+- WHEN `SentryScrubber` runs
+- THEN the three values are replaced by the filtered placeholder and `project_id` is untouched
+
+#### Scenario: api scrubs an email address embedded in free text
+
+- GIVEN an exception message "failed for ada@example.com while redeeming beai_rl_<43 chars>"
+- WHEN the scrubber runs
+- THEN neither the address nor the token survives in the message
+
+#### Scenario: No log line on the redeem path carries the identity
+
+- GIVEN a log spy and redemptions that end in 200, 403, 404, 409, 422, 429 and a forced mint
+  failure, each with the sentinel name "Zz Sentinel Name" and the sentinel email
+  "zz-sentinel@example.test"
+- WHEN every log line and exception context is inspected
+- THEN none contains the sentinel name or the sentinel email
+
+#### Scenario: The mail-guard refusal log carries no address
+
+- GIVEN an operator re-issue on a visitor with `send_email` true
+- WHEN the refusal is logged
+- THEN the line contains neither the visitor's name nor its email address
+
+#### Scenario: frontend never reports or logs the typed identity
+
+- GIVEN the identity form is filled with the sentinel name and email and the redemption fails
+  with 409, 422, 429 and a network error
+- WHEN the Sentry events, breadcrumbs, console output and GA4 and Clarity payloads are
+  inspected
+- THEN none contains the sentinel name or email
+
+#### Scenario: The recorder never runs on the identity form
+
+- GIVEN `/interview/reusable` and `/en/interview/reusable`, with or without a fragment
+- WHEN each is tested for replay safety and the page is rendered with analytics consent granted
+- THEN each is reported unsafe, no Clarity request is made, and the analytics path contains
+  neither query nor fragment
+
+#### Scenario: The denied-key lists keep the identity keys
+
+- GIVEN the api denied-key list and the two Nuxt `EXPECTED_DENIED_KEYS` lists
+- WHEN the pinning tests run
+- THEN `email` and `display_name` are present in all three
