@@ -1683,9 +1683,9 @@ The api error-report scrubber MUST filter the keys `link_token`, `token_hash` an
 depth and in every carrier, including the URL-path pass (a token pasted into a client-chosen
 URL path segment is the one carrier the query and fragment cut does not reach). The
 `{16,}` form is a deliberate superset of the 51-character token: it also catches a truncated
-token, while the 16-character display prefix alone and a 10-character near miss stay
-untouched. The Nuxt applications use the stricter `beai_rl_[A-Za-z0-9_-]{43}` (see
-`observability`).
+token and a token followed by more URL-safe characters, while the 16-character display prefix
+alone (`beai_rl_` plus 8 characters) and a 15-character tail stay untouched. The Nuxt
+applications use the same pattern (see `observability`).
 
 (Reconciled with the implementation: any key containing the word `token` at any position is
 already denied by the scrubbers' content-word rule, so a key literally named `token_prefix`
@@ -1703,7 +1703,7 @@ credential".)
 #### Scenario: Sentry events are scrubbed
 
 - GIVEN an error event whose request body has `link_token`, whose URL, message and breadcrumbs
-  embed a string matching `beai_rl_[A-Za-z0-9_-]{43}`, and whose context has `token_hash`
+  embed a string matching `beai_rl_[A-Za-z0-9_-]{16,}`, and whose context has `token_hash`
 - WHEN the scrubber runs
 - THEN the body key, every pattern match in any string at any depth, and `token_hash` are
   replaced by the filtered placeholder, and unrelated keys are untouched
@@ -1880,12 +1880,12 @@ solve and what the owner decided, so that nobody discovers them in production.
    throttle matrix takes about 36 seconds. Run broad suites in parallel.
 6. **Wording gap (closed).** The candidate app's terminal `link_invalid` state once reused a
    message that said the link "has expired or is not valid", which is slightly untrue for a
-   link that never expires. The copy now says the link "is not valid or is no longer active",
-   and `interview-frontend` pins that it never claims expiry.
-7. **Error-report scrubber pattern parity.** The api uses `beai_rl_[A-Za-z0-9_-]{16,}`; the
-   two Nuxt applications use `beai_rl_[A-Za-z0-9_-]{43}`, not end-anchored, so a secret longer
-   than 43 characters would leave a tail. The patterns are compatible with this specification
-   and are not unified; unifying them is a follow-up.
+   link that never expires. The copy now says the link "is not valid or is no longer active"
+   and is true for expired single-use links and for unknown or disabled reusable links;
+   `interview-frontend` pins that it never claims expiry.
+7. **Error-report scrubber pattern parity (closed).** The api and the two Nuxt applications now
+   use the same `beai_rl_[A-Za-z0-9_-]{16,}` pattern (see `observability`); a wrapper guard that
+   compares them lands with the pin bump that carries the unified patterns.
 8. **Superadmin without an organization.** Create and disable answer 409 for a superadmin with
    no acting organization (the generic organization-context rule); the backoffice form shows its
    generic error banner, with no dedicated copy.
@@ -1926,7 +1926,7 @@ places; the implementation won, and each is recorded inline above:
 | 5 | project gates inside the locked transaction | gates before the row lock, disabled flag re-checked under the lock; `TrimStrings` skipped for the route |
 | 6 | per-IP and per-link limits | same limits, plus: every attempt counts, body-only token, tighter bucket in the headers, env knobs named |
 | 7 | `link_token` string with a pattern | `link_token` string with the format in the description |
-| 8 | scrubber pattern `{43}` | api `{16,}`, apps `{43}`; `token_prefix` as a key is denied (fail closed) |
+| 8 | scrubber pattern `{43}` | api `{16,}`, apps `{43}` at the time, since unified on `{16,}` in all three (see `observability`); `token_prefix` as a key is denied (fail closed) |
 | 9 | participants index on `(organization_id, reusable_interview_link_id)` | the same columns, partial (`WHERE reusable_interview_link_id IS NOT NULL`) |
 | 10 | visitor identity: anonymous visitor (placeholder email, `<label> #<n>` name) | self-declared name and email, 409 `duplicate_enrolment`, `TrimStrings` skipped for `link_token` only |
 | 11 | one shared mail guard that sees the participant | the invitation job is scalar-only: the visitor refusal is at the dispatch site (entry-link minter flag, `email_sent: false`), the job keeps refusing placeholder addresses |

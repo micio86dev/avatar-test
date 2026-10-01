@@ -2554,7 +2554,7 @@ reusable-specific route rule MAY weaken them.
 
 The candidate app's Sentry scrubber MUST scrub, from every event at any depth (request URL,
 breadcrumbs, transaction and span names, contexts, extras, messages), any string matching
-`beai_rl_[A-Za-z0-9_-]{43}` and any fragment on an `/interview/` route, including data captured
+`beai_rl_[A-Za-z0-9_-]{16,}` and any fragment on an `/interview/` route, including data captured
 BEFORE the strip (the pageload transaction and first breadcrumb read `location.href`). The
 analytics path redaction MUST keep stripping the query and fragment of the interview branch,
 which is already analytics-unsafe, and `reusable` is a named interview page for grouping. The
