@@ -3140,8 +3140,8 @@ public_api_contract_identical() {
 # SentryScrubber (PHP) and the sentry-scrub.ts of each Nuxt app. The spec says
 # all three MUST use ONE pattern and that the two Nuxt fixtures
 # (tests/unit/fixtures/reusable-link-scrub-cases.ts) MUST be byte-identical.
-# Until this guard, that was prose: the api once matched `{43}` while the apps
-# matched `{16,}`, and an over-narrow scrubber leaves a readable token tail in
+# Until this guard, that was prose: the api matched `{16,}` while the two apps
+# matched the narrower `{43}`, and an over-narrow scrubber leaves a readable token tail in
 # an event nobody reviews. Each repo's own tests can only prove ITS scrubber
 # against ITS fixture, so only the wrapper, which sees all three, can compare.
 #

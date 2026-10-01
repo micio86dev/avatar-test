@@ -33,10 +33,10 @@ feature set with real E2E runs and native reviews, and leave local containers on
 - [x] H2 [frontend] `link_invalid` copy true for never-expiring links (it/en); unit tests pin both locales.
 - [x] H3 [api, frontend, backoffice] one `beai_rl_[A-Za-z0-9_-]{16,}` scrubber pattern everywhere, shared byte-identical
       fixture with exact cases, mutation-proven. The wrapper guard that compares them (`scrubber_pattern_divergence`,
-      step c2 of wrapper-ci.yml, with its self-test fixtures) is ADDED on this branch (commit 6f616e8). It runs against
-      the pinned submodules, which still carry the old `{43}` patterns, so this branch MUST NOT be merged to develop on
-      its own: it is merged only inside `release/0.49.0`, in the same change as the pin bump to the releases that carry
-      `{16,}` (the CI of that release PR is the first run of the guard on the wrapper).
+      step c2 of wrapper-ci.yml, with its self-test fixtures) is ADDED on this branch (commit 6f616e8), and the SAME
+      branch bumps the submodule pins to the released tags that carry `{16,}` (api v0.64.0, frontend v0.21.0,
+      backoffice v0.46.0), so the guard is green on the branch's own pins: no merge order is needed for it. The SDK
+      regeneration and the version bump follow in `release/0.49.0`.
 - [x] H4 [api] empty list filter values are "not provided" on every v1 list; `?field[]=` on a scalar filter is a 400;
       the webhook `interview_id` filter now validates and is proven narrowing. SPEC.md 3.2 states the rule.
 - [x] H5 [api] internal notes no longer reach the exported OpenAPI; guard test (phrases, decision ids, and now any
