@@ -78,8 +78,18 @@ Route legend: I = direct inline, D = delegated writer. Each task closes with at 
       one line. Wrapper PR beai#38: its "Public API Contract" check stays red until the api submodule pin moves (the
       check compares the PINNED api's vendored yaml with docs/), so the docs ship inside the release branch
       together with the pins and the regenerated SDKs (task A7).
-- [ ] A6 verify: lint/typecheck/format, full suites, migrations on a clean DB, local stack walkthrough
-- [ ] A7 release: api release, then backoffice and frontend, then wrapper pins; deploy verification; cleanup
+- [x] A6 verify: independent runs by the parent on every slice (api full suite 6987 tests, 0 failed on the last slice;
+      backoffice 3084 and frontend 1588 unit tests; lint, typecheck, format, pint, phpstan clean), migrations exercised
+      on Postgres 17 including a real migrate:fresh / rollback / migrate, real-HTTP harnesses by the writers. NOT done:
+      a manual browser walkthrough on the local docker stack (the local containers are built images and were not
+      rebuilt), and the pinned-container Playwright run locally (image absent, host under the 20 GB disk floor); both
+      E2E suites ran in CI (chromium + webkit, green) and the new backoffice spec also ran on host Playwright (9/9 each).
+- [x] A7 release (2026-10-01, user-authorized production deploy): api 0.62.0 (PR #96, tag v0.62.0, main b43255b; api,
+      worker, scheduler SUCCESS, migration `add_external_reference_to_participants_table` applied in 49 ms, health 200,
+      no exceptions in the api and worker logs); frontend 0.19.5 (PR #38, tag v0.19.5); backoffice 0.44.0 (PR #55, tag
+      v0.44.0, ships the platform-templates work that was waiting in develop); wrapper 0.47.0 (PR #39, tag v0.47.0,
+      pins to the three tags, SDKs regenerated and deterministic). Back-merges merged (api #97, frontend #39,
+      backoffice #56, wrapper #40); merged feature, release and back-merge branches deleted locally and remotely.
 
 ## Route declaration and trigger evidence
 - A1 to A5 each touch 2+ non-trivial files, so they run through one bounded writer per task (writer trigger).
@@ -125,6 +135,24 @@ Route legend: I = direct inline, D = delegated writer. Each task closes with at 
 - 2026-09-30: A2 verified, reviewed, pushed; stacked PR #92 open (base = A1 branch). PR #90 and #92 CI running.
   A3a-i writer started on `feature/external-reference-a3a-i-enrolment-resource` (stacked on A2).
 
+- 2026-10-01: Feature A complete and deployed (see A7). Native reviews: only A1 and A2 were reviewed natively (the user
+  granted consent while present); A3a-i, A3a-ii, A3b, A4 (frontend and backoffice) and A5 were NOT, because each
+  review needs a per-candidate consent from the user, who was away. Their assessed tiers: A3a-i medium (1305 lines),
+  A3a-ii medium, A3b medium (1044), A4 frontend high (1913, mostly generated types), A4 backoffice high (2100, mostly
+  tests and generated types). Each was re-verified independently by the orchestrator instead.
+
+## Follow-ups for the owner (not done on purpose)
+- GDPR ruling 2: the retention sign-off must name `participants.external_id` and `participants.source` (documented
+  default: retained like `candidate_ref`; not a legal conclusion).
+- Every pre-existing v1 list filter (`status`, `project_id`, `email`, `candidate_ref`, `created_after`, `metadata`)
+  answers 400 on an empty value; the controller's `!== ''` guards on them are unreachable. Changing it alters an
+  existing public API, so it was left alone.
+- Internal review notes ("gga round 3 finding 2", "step 6 review follow-up") leak from api docblocks into the public
+  SDK docblocks; fix at the source (the PHP docblocks), then regenerate.
+- The Railway project `avatar-test` auto-deploys the wrapper `main` and fails at the build step on every release since
+  at least 0.43.0 (no buildable app at the repo root); unrelated to this work.
+- Run native reviews (`gentle-ai review`) for the unreviewed slices if wanted.
+
 ## Next step
-A3a-i: verify the writer's result independently; then A3a-ii (atomic admin resources + serializer commit, T-EXPOSE-001).
-Merge order when CI is green: #90 -> retarget #92 -> merge -> and so on down the stack.
+Sibling feature `reusable-interview-links` (see `odd/tasks/reusable-interview-links.md` when created): B1a, B1b, B2 done
+locally, B3a in progress; not released.
