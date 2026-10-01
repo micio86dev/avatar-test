@@ -1959,12 +1959,17 @@ text and only from that form, and its metadata extraction returns nothing when t
 comments included, contains a function-form call; a file-name prefix alone is NOT enough). At
 the default order the router plugin reads `window.location` first and its `app:created` replay
 writes the fragment back into the address bar and into `history.state.current`. The plugin MUST
-also strip and discard a `#beai_rl_` fragment pasted into the same tab later (`hashchange`).
+also strip and discard a `#beai_rl_` fragment pasted into the same tab later (`hashchange`). The
+strip MUST also remove the token from `history.state.current`: on a hash-only change `popstate`
+fires before `hashchange`, and the router writes the fragment-bearing location into the state
+first, so an address-bar strip alone would leave the token in the history state.
 
 On mount, in this order:
 1. Read the URL fragment (without `#`). If a non-empty `beai_rl_` fragment exists, it is the
    link token. Strip the fragment from the address bar with `history.replaceState` keeping
-   `history.state` (replacing the current history entry, never pushing) BEFORE any network call
+   `history.state`, except that a string `current` whose fragment starts with `#beai_rl_` is
+   rewritten to the part before the `#` (replacing the current history entry, never pushing)
+   BEFORE any network call
    and before any other asynchronous work (the page also captures idempotently itself, so it
    does not depend on the plugin's timing). The token is held only in page memory from here on,
    in a one-shot holder: it is taken once and cleared. A fragment that does not match
@@ -2006,9 +2011,18 @@ output, analytics payloads, or any request other than the single redemption body
 browser gate still applies first: an unsupported browser is redirected to `/unsupported` and
 MUST NOT call the redemption (so no visitor is created).
 
-(Known wording gap: the terminal `link_invalid` state reuses the existing message "has expired or
-is not valid". "Expired" is slightly untrue for a link that never expires; new copy was not
-written.)
+The terminal `link_invalid` state shows copy that is true for every case that reaches it:
+single-use links that are expired, already invalid or malformed, and reusable links that are
+unknown, malformed or disabled. A reusable link never expires, so the copy MUST NOT claim expiry.
+English: title "This Link Is No Longer Valid", body "This interview link is not valid or is no
+longer active. Please ask whoever sent it to you for a new link." Italian: title "Questo link non
+è più valido", body "Questo link per il colloquio non è valido o non è più attivo. Chiedi un
+nuovo link a chi te lo ha inviato."
+
+#### Scenario: The link_invalid copy never claims expiry
+- WHEN the terminal page is rendered with `reason=link_invalid` in English or in Italian
+- THEN neither the title nor the body contains "expire" (English) or "scad" (Italian)
+- AND the body ends with a request to ask whoever sent the link for a new one
 
 #### Scenario: First visit redeems once and lands on a token-free URL
 
@@ -2024,7 +2038,8 @@ written.)
 - GIVEN the page mounts with a fragment
 - WHEN the network and `history` calls are ordered
 - THEN `history.replaceState` removing the fragment happens before the redemption request is
-  issued, `history.state` is preserved, and no history entry is added
+  issued, `history.state` is preserved apart from a `current` that carried the fragment (which
+  is cleaned), and no history entry is added
 
 #### Scenario: The plugin strips the fragment before the router can write it back
 
@@ -2038,7 +2053,9 @@ written.)
 
 - GIVEN the application is running on any route
 - WHEN a `#beai_rl_...` fragment appears through a same-document navigation
-- THEN it is stripped and discarded and never redeemed from there
+- THEN it is stripped from the address bar AND from `history.state.current`, no history entry
+  keeps it, it is discarded, and it is never redeemed from there, including by a later in-app
+  navigation to the entry route
 
 #### Scenario: Always a new visitor, never the previous one
 
@@ -2170,7 +2187,7 @@ reusable-specific route rule MAY weaken them.
 
 The candidate app's Sentry scrubber MUST scrub, from every event at any depth (request URL,
 breadcrumbs, transaction and span names, contexts, extras, messages), any string matching
-`beai_rl_[A-Za-z0-9_-]{43}` and any fragment on an `/interview/` route, including data captured
+`beai_rl_[A-Za-z0-9_-]{16,}` and any fragment on an `/interview/` route, including data captured
 BEFORE the strip (the pageload transaction and first breadcrumb read `location.href`). The
 analytics path redaction MUST keep stripping the query and fragment of the interview branch,
 which is already analytics-unsafe, and `reusable` is a named interview page for grouping. The
