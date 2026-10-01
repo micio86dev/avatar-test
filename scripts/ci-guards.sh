@@ -3131,3 +3131,112 @@ public_api_contract_identical() {
   fi
   return 1
 }
+
+# ---------------------------------------------------------------------------
+# Reusable-link token scrubber parity (openspec `observability` spec).
+#
+# A reusable link token (`beai_rl_` + base64url) is a bearer credential, and it
+# is redacted from error reports by THREE scrubbers in three repos: the api's
+# SentryScrubber (PHP) and the sentry-scrub.ts of each Nuxt app. The spec says
+# all three MUST use ONE pattern and that the two Nuxt fixtures
+# (tests/unit/fixtures/reusable-link-scrub-cases.ts) MUST be byte-identical.
+# Until this guard, that was prose: the api once matched `{43}` while the apps
+# matched `{16,}`, and an over-narrow scrubber leaves a readable token tail in
+# an event nobody reviews. Each repo's own tests can only prove ITS scrubber
+# against ITS fixture, so only the wrapper, which sees all three, can compare.
+#
+# Usage: scrubber_pattern_divergence ROOT   (ROOT = the wrapper checkout)
+#
+# Prints one line per divergence on stdout; empty output means parity holds.
+# Returns 1 when it printed anything, 0 otherwise. A file that is missing, or
+# that carries no `const REUSABLE_LINK_TOKEN_PATTERN = ...` declaration this
+# guard can read, is a divergence, never a skip: a parity check that compared
+# nothing has not passed, and reporting it on stdout is what lets the
+# self-test prove it with the same non-empty-means-caught contract as the
+# scanners.
+#
+# Only the pattern BODY is compared. The PHP `'/body/'` delimiters and the JS
+# `/body/g` delimiters and flags are language syntax, not part of the rule. The
+# PHP form is read as a single-quoted string (no `\\` unescaping), so a body
+# using one would be reported as divergent rather than silently normalised:
+# fail closed.
+# ---------------------------------------------------------------------------
+
+# The pattern body declared in $1, on stdout. $2 is `php` or `ts`. Returns 1,
+# printing nothing, when the file does not exist or does not declare exactly
+# one readable pattern. The `[^*/]*` before `const` keeps a docblock or a `//`
+# comment that merely mentions the constant from being read as its declaration.
+ci_scrubber_pattern_body() {
+  [ -f "$1" ] || return 1
+  case "$2" in
+    php)
+      CI_SPB_BODIES=$(sed -n "s|^[^*/]*const[[:space:]]\{1,\}REUSABLE_LINK_TOKEN_PATTERN[[:space:]]*=[[:space:]]*'/\(.*\)/[A-Za-z]*'[[:space:]]*;.*\$|\1|p" "$1") ;;
+    *)
+      CI_SPB_BODIES=$(sed -n "s|^[^*/]*const[[:space:]]\{1,\}REUSABLE_LINK_TOKEN_PATTERN[[:space:]]*=[[:space:]]*/\(.*\)/[A-Za-z]*[[:space:]]*\$|\1|p" "$1") ;;
+  esac
+  [ -n "$CI_SPB_BODIES" ] || return 1
+  # More than one declaration is ambiguous: which one scrubs?
+  case "$CI_SPB_BODIES" in
+    *"
+"*) return 1 ;;
+  esac
+  printf '%s\n' "$CI_SPB_BODIES"
+}
+
+scrubber_pattern_divergence() {
+  CI_SPD_ROOT="$1"
+  CI_SPD_FAILED=0
+  CI_SPD_API="api/app/Support/Observability/SentryScrubber.php"
+  CI_SPD_FE="frontend/app/utils/sentry-scrub.ts"
+  CI_SPD_BO="backoffice/app/utils/sentry-scrub.ts"
+  CI_SPD_FIXTURE="tests/unit/fixtures/reusable-link-scrub-cases.ts"
+
+  CI_SPD_API_BODY=""
+  CI_SPD_FE_BODY=""
+  CI_SPD_BO_BODY=""
+  if CI_SPD_API_BODY=$(ci_scrubber_pattern_body "$CI_SPD_ROOT/$CI_SPD_API" php); then :; else
+    echo "$CI_SPD_API: no readable REUSABLE_LINK_TOKEN_PATTERN declaration (file missing, or not exactly one single-quoted '/.../' constant)"
+    CI_SPD_FAILED=1
+  fi
+  if CI_SPD_FE_BODY=$(ci_scrubber_pattern_body "$CI_SPD_ROOT/$CI_SPD_FE" ts); then :; else
+    echo "$CI_SPD_FE: no readable REUSABLE_LINK_TOKEN_PATTERN declaration (file missing, or not exactly one /.../ regex literal)"
+    CI_SPD_FAILED=1
+  fi
+  if CI_SPD_BO_BODY=$(ci_scrubber_pattern_body "$CI_SPD_ROOT/$CI_SPD_BO" ts); then :; else
+    echo "$CI_SPD_BO: no readable REUSABLE_LINK_TOKEN_PATTERN declaration (file missing, or not exactly one /.../ regex literal)"
+    CI_SPD_FAILED=1
+  fi
+
+  # Compare what WAS readable, so one missing file does not hide a divergence
+  # between the other two.
+  CI_SPD_REF=""
+  CI_SPD_DIFFERS=0
+  for CI_SPD_BODY in "$CI_SPD_API_BODY" "$CI_SPD_FE_BODY" "$CI_SPD_BO_BODY"; do
+    [ -n "$CI_SPD_BODY" ] || continue
+    if [ -z "$CI_SPD_REF" ]; then
+      CI_SPD_REF="$CI_SPD_BODY"
+    elif [ "$CI_SPD_BODY" != "$CI_SPD_REF" ]; then
+      CI_SPD_DIFFERS=1
+    fi
+  done
+  if [ "$CI_SPD_DIFFERS" -eq 1 ]; then
+    echo "token patterns diverge: api=$CI_SPD_API_BODY frontend=$CI_SPD_FE_BODY backoffice=$CI_SPD_BO_BODY"
+    CI_SPD_FAILED=1
+  fi
+
+  if [ ! -f "$CI_SPD_ROOT/frontend/$CI_SPD_FIXTURE" ]; then
+    echo "frontend/$CI_SPD_FIXTURE does not exist"
+    CI_SPD_FAILED=1
+  fi
+  if [ ! -f "$CI_SPD_ROOT/backoffice/$CI_SPD_FIXTURE" ]; then
+    echo "backoffice/$CI_SPD_FIXTURE does not exist"
+    CI_SPD_FAILED=1
+  fi
+  if [ -f "$CI_SPD_ROOT/frontend/$CI_SPD_FIXTURE" ] && [ -f "$CI_SPD_ROOT/backoffice/$CI_SPD_FIXTURE" ] &&
+     ! cmp -s "$CI_SPD_ROOT/frontend/$CI_SPD_FIXTURE" "$CI_SPD_ROOT/backoffice/$CI_SPD_FIXTURE"; then
+    echo "frontend/$CI_SPD_FIXTURE and backoffice/$CI_SPD_FIXTURE are not byte-identical"
+    CI_SPD_FAILED=1
+  fi
+
+  [ "$CI_SPD_FAILED" -eq 0 ]
+}
