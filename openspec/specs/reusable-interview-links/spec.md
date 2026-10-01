@@ -1878,9 +1878,10 @@ solve and what the owner decided, so that nobody discovers them in production.
    database) take about 22 seconds and create throwaway databases named `*_conc_*`; a
    hard-killed run can leave one behind on the test server (harmless, drop it manually). The
    throttle matrix takes about 36 seconds. Run broad suites in parallel.
-6. **Wording gap.** The candidate app's terminal `link_invalid` state reuses an existing
-   message that says the link "has expired or is not valid"; "expired" is slightly untrue for a
-   link that never expires.
+6. **Wording gap (closed).** The candidate app's terminal `link_invalid` state once reused a
+   message that said the link "has expired or is not valid", which is slightly untrue for a
+   link that never expires. The copy now says the link "is not valid or is no longer active",
+   and `interview-frontend` pins that it never claims expiry.
 7. **Error-report scrubber pattern parity.** The api uses `beai_rl_[A-Za-z0-9_-]{16,}`; the
    two Nuxt applications use `beai_rl_[A-Za-z0-9_-]{43}`, not end-anchored, so a secret longer
    than 43 characters would leave a tail. The patterns are compatible with this specification
@@ -1902,6 +1903,12 @@ solve and what the owner decided, so that nobody discovers them in production.
     search sends `q` in the query string of an authenticated GET, and an operator can search by
     an email address. The error-report scrubber is pinned for it; access logs of the hosting
     platform are outside this change. Recorded as a follow-up.
+12. **A lost redemption response cannot be retried.** If a redemption succeeds on the server
+    but its response never reaches the page, the visitor is enrolled without a session, and a
+    Retry with the same email is refused with 409 `duplicate_enrolment` because the enrolment
+    is never resumed. An idempotency key on the redemption would let a retry return the
+    original result. Out of scope for this change; recorded as a follow-up (see
+    `interview-frontend`, "Reusable Entry Route").
 
 ---
 
