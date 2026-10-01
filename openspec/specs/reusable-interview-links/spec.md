@@ -1903,6 +1903,12 @@ solve and what the owner decided, so that nobody discovers them in production.
     search sends `q` in the query string of an authenticated GET, and an operator can search by
     an email address. The error-report scrubber is pinned for it; access logs of the hosting
     platform are outside this change. Recorded as a follow-up.
+12. **A lost redemption response cannot be retried.** If a redemption succeeds on the server
+    but its response never reaches the page, the visitor is enrolled without a session, and a
+    Retry with the same email is refused with 409 `duplicate_enrolment` because the enrolment
+    is never resumed. An idempotency key on the redemption would let a retry return the
+    original result. Out of scope for this change; recorded as a follow-up (see
+    `interview-frontend`, "Reusable Entry Route").
 
 ---
 

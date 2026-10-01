@@ -2064,6 +2064,15 @@ the terminal route with reason `link_reopen`, reached with `router.replace`; the
 marker is read once and removed by that read. (5) The submit button reads "Starting…" while a
 request is in flight (disabled and `aria-busy`), and the form is `aria-busy` too.)
 
+(Known limitation: a redemption that succeeds on the server but whose response never reaches
+the page (a dropped connection, a timeout) leaves the visitor enrolled and without a session.
+The page shows the "failed" state, and Retry re-posts the held token and the same email, which
+the api refuses with 409 `duplicate_enrolment` because the enrolment now exists and is never
+resumed. The visitor cannot continue that interview: the token was stripped from the address
+bar, and only a different email, which creates a second enrolment, or an operator, gets them
+further. An idempotency key on the redemption would let a retry return the original result;
+it is out of scope for this change and is recorded as a follow-up.)
+
 #### Scenario: The link_invalid copy never claims expiry
 - WHEN the terminal page is rendered with `reason=link_invalid` in English or in Italian
 - THEN neither the title nor the body contains "expire" (English) or "scad" (Italian)
@@ -2272,13 +2281,37 @@ onto the field. It is written as a split plus linear tests, because the reposito
 refuses a super-linear regular expression. Lengths count code points, as the server counts
 them.)
 
-#### Scenario: Both fields are required
+#### Scenario: An empty submit flags both fields and focuses the name
 
-- GIVEN the form is shown
-- WHEN the visitor submits with both fields empty, then with only whitespace, then with only
-  one field filled
-- THEN no request is sent, each empty or blank field shows its localized required message, and
-  focus moves to the first invalid field
+- GIVEN the form is shown and both fields are empty
+- WHEN the visitor submits
+- THEN both errors are shown at once, "Enter your name." under the name and "Enter your
+  email." under the email (Italian: "Inserisci il tuo nome." and "Inserisci la tua email."),
+  each invalid field has `aria-invalid="true"` and its `aria-describedby`, focus is on the
+  name field, and no request is sent
+
+#### Scenario: Whitespace-only values are empty
+
+- GIVEN the form is shown and both fields hold only spaces
+- WHEN the visitor submits
+- THEN the values are trimmed before they are checked, so the same two required messages are
+  shown, focus is on the name field and no request is sent
+
+#### Scenario: A blank name with the email filled flags only the name
+
+- GIVEN the form is shown, the email is a well-formed address and the name is empty
+- WHEN the visitor submits
+- THEN only "Enter your name." is shown, the name field is `aria-invalid` and focused, the
+  email field has neither `aria-invalid` nor `aria-describedby`, "Enter your email." is
+  absent and no request is sent
+
+#### Scenario: A blank email with the name filled flags only the email
+
+- GIVEN the form is shown, the name is filled and the email is empty
+- WHEN the visitor submits
+- THEN only "Enter your email." is shown, the email field is `aria-invalid` and focused, the
+  name field has neither `aria-invalid` nor `aria-describedby`, "Enter your name." is absent
+  and no request is sent
 
 #### Scenario: Email format and length are checked
 
@@ -2408,7 +2441,12 @@ The reopen state sets a localized document title.
 degrades to "no marker", so a reload then shows `link_invalid` instead of a crashed page. The
 marker is read once and removed by that read. The reopen state is rendered by the terminal
 route (`/interview/terminal?reason=link_reopen`, localized path), reached with
-`router.replace`.)
+`router.replace`. The marker is set when the form is first shown for a fragment and is NOT
+touched by the retryable states: it stays set while the busy or failed notice is on screen,
+while a Retry is in flight, and when a 422 or a 409 returns the visitor to the form. It is
+removed only by a success, a 404, a 403, a resumed session, a malformed fragment, a fresh
+fragment (which sets it again for the new form), the read of a reload, or the page being left inside the app. A
+200 whose token cannot be stored is also the failed state and leaves it set.)
 
 #### Scenario: Reload while the form is shown
 
@@ -2435,6 +2473,17 @@ route (`/interview/terminal?reason=link_reopen`, localized path), reached with
 - GIVEN the form was shown (marker set)
 - WHEN the redemption succeeds, and separately when it ends in 404 or 403
 - THEN the marker is absent afterwards
+
+#### Scenario: The marker survives the busy and failed states
+
+- GIVEN the form was shown (marker set) and the redemption ended in 429, and separately in a
+  network failure
+- WHEN the busy or the failed notice is on screen, and again while a Retry is in flight
+- THEN the marker is still set
+- AND a reload at that point finds no fragment and no session, so it shows the reopen state,
+  not `link_invalid`, because the token held in memory is gone
+- AND a Retry that ends in 422 or 409 shows the form again with the marker still set, and a
+  Retry that ends in success, 404 or 403 removes it
 
 #### Scenario: Reopening the link starts again at the form
 
