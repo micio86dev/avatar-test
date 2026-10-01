@@ -222,15 +222,23 @@ Full rationale in `openspec/ROADMAP.md`. Summary:
 2. **DEFAULTS SET, LEGAL SIGN-OFF PENDING** — GDPR retention. The purge mechanism is
    parametric; the durations are a data controller decision. Sign-off MUST also cover
    `webhook_deliveries.payload` and `participants.display_name`, which postdate the original framing,
-   and also `participants.external_id` and `participants.source` (the calling system's own record id
-   and name). The purge retains those two columns like `candidate_ref`: a documented default pending
-   this sign-off, not a legal conclusion, since an external id can still be linkable personal data.
-   The sign-off MUST also name the `participants` rows created by reusable-link redemption (anonymous
-   visitors: placeholder email, no personal data supplied beyond what the visitor says in the
-   interview, and not matchable to a data subject for an access or erasure request by any identifier
-   BEAI holds), their interview artifacts, and the operator-authored `reusable_interview_links.label`.
-   The existing purge classes apply to them unchanged: a documented default pending this sign-off,
-   not a legal conclusion.
+   and also `participants.email`, `participants.external_id` and `participants.source` (the calling
+   system's own record id and name). The purge retains `external_id` and `source` like
+   `candidate_ref`: a documented default pending this sign-off, not a legal conclusion, since an
+   external id can still be linkable personal data.
+   The `participant_pii` purge class redacts `participants.display_name` (to `[purged]`) and
+   `participants.email` (to a non-identifying placeholder, `<sha256 of candidate_ref>@purged.beai.invalid`,
+   under a reserved non-routable domain) in the same pass, under the same window and conditions: no
+   new duration is introduced. The durations, and the sign-off covering `webhook_deliveries.payload`,
+   `participants.display_name`, `participants.email`, `participants.external_id` and
+   `participants.source`, remain the data controller's decision.
+   The sign-off MUST also name the `participants` rows created by reusable-link redemption. Since
+   `reusable-link-visitor-identity`, each visitor enters a full name and an email before the
+   interview: self-declared and UNVERIFIED, stored like any participant's, and matchable by email for
+   an access or erasure request. The legacy anonymous rows created before that change (placeholder
+   email, `<label> #<n>` name) remain. The sign-off also names their interview artifacts and the
+   operator-authored `reusable_interview_links.label`. The existing purge classes apply to all of
+   them unchanged: a documented default pending this sign-off, not a legal conclusion.
 3. **RATIFIED** — `framework_version` pinned at project creation; live projects are never
    retargeted by a later catalogue revision.
 4. **OPEN** — retry semantics. Gates only the C9 chain-PR 4 (RT-B).
