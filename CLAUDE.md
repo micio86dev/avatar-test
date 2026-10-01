@@ -225,6 +225,12 @@ Full rationale in `openspec/ROADMAP.md`. Summary:
    and also `participants.external_id` and `participants.source` (the calling system's own record id
    and name). The purge retains those two columns like `candidate_ref`: a documented default pending
    this sign-off, not a legal conclusion, since an external id can still be linkable personal data.
+   The sign-off MUST also name the `participants` rows created by reusable-link redemption (anonymous
+   visitors: placeholder email, no personal data supplied beyond what the visitor says in the
+   interview, and not matchable to a data subject for an access or erasure request by any identifier
+   BEAI holds), their interview artifacts, and the operator-authored `reusable_interview_links.label`.
+   The existing purge classes apply to them unchanged: a documented default pending this sign-off,
+   not a legal conclusion.
 3. **RATIFIED** — `framework_version` pinned at project creation; live projects are never
    retargeted by a later catalogue revision.
 4. **OPEN** — retry semantics. Gates only the C9 chain-PR 4 (RT-B).
