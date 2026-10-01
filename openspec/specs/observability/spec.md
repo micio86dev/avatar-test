@@ -796,6 +796,97 @@ a Clarity carve-out.)
 - THEN each is reported unsafe — the list shows display names and candidate references, so
   "only the detail page is sensitive" is wrong on its face
 
+<!-- added by reusable-interview-links -->
+
+### Requirement: A Credential Carried In A URL Fragment Or A Request Body Is Redacted Before Any Error Sink
+
+The reusable link token (`beai_rl_` + 43 base64url characters) is a live, non-expiring
+credential carried as a URL fragment (`/interview/reusable#<token>`) and as the `link_token`
+field of a request body. All three applications MUST scrub it before an event is sent to Sentry,
+by VALUE and not only by key, because a key-based denylist cannot reach a token embedded in a
+string:
+
+- `api` (`SentryScrubber`): the body/query/extra key `link_token` and the keys `token_hash` and
+  `token_hashes` MUST be filtered; any string at any depth (messages, URLs, breadcrumbs,
+  contexts, spans, log records) matching `beai_rl_[A-Za-z0-9_-]{16,}` MUST have the match
+  replaced, including in the URL-path pass (a token pasted into a client-chosen path segment is
+  the one carrier the query and fragment cut does not reach). The `{16,}` form is a deliberate
+  superset that also catches a truncated token.
+- `frontend` (candidate app, `utils/sentry-scrub.ts`): any string matching
+  `beai_rl_[A-Za-z0-9_-]{43}`, and any URL fragment on an `/interview/` route, MUST be removed
+  from every field, including the pageload transaction and first breadcrumb captured before the
+  app strips the fragment (the History instrumentation also records the strip's own
+  `replaceState`).
+- `backoffice` (`utils/sentry-scrub.ts`): any string matching `beai_rl_[A-Za-z0-9_-]{43}` MUST be
+  replaced, because the creation response (`entry_url`) passes through the app once.
+
+The two Nuxt scrubbers MUST apply the same rule, pinned by the same fixture set in both so they
+cannot drift apart: `tests/unit/fixtures/reusable-link-scrub-cases.ts` is byte-identical in the
+`frontend` and `backoffice` repositories (the two copies hashed identically, SHA-256, at the
+implementing branch heads), and each application's static `EXPECTED_DENIED_KEYS` list names
+`token_hash`. The analytics path redaction MUST continue to drop query and fragment for the
+interview branch.
+
+Any key that contains the word `token` at any position is already denied by every scrubber's
+content-word rule, so naming `token_hash` states the rule rather than changing behaviour, and a
+key literally named `token_prefix` is filtered too (the fail-closed side). `token_prefix` is an
+identification aid and not a credential: its 16-character VALUE under a neutral key is NOT
+scrubbed, and neither is a near miss.
+
+The Nuxt pattern is not end-anchored (parity with the capability's `{43}`), so a secret longer
+than 43 characters would leave a tail; the api's `{16,}` does not have that limitation. Unifying
+the three patterns is a recorded follow-up, and no automated wrapper guard compares the two Nuxt
+scrubbers yet (the parity above was checked by comparing the two fixture files).
+
+#### Scenario: api scrubs the body key, the hash key and the pattern
+
+- GIVEN an api error event with request body `{"link_token": "beai_rl_<43 chars>"}`, a context
+  `{"token_hash": "<64 hex>"}` and an exception message embedding the token
+- WHEN `SentryScrubber` runs
+- THEN the body value, the hash value and the token inside the message are replaced by the
+  filtered placeholder and unrelated keys are untouched
+
+#### Scenario: api scrubs the pattern at any depth and in any carrier
+
+- GIVEN tokens nested in breadcrumbs, `contexts.http`, extras, transaction spans, a log record,
+  a tag, a fingerprint and a URL path segment
+- WHEN the scrubber runs
+- THEN no carrier contains a token-shaped string
+
+#### Scenario: frontend scrubs a pre-strip pageload event
+
+- GIVEN an event whose `request.url`, transaction name and navigation breadcrumb contain
+  `.../interview/reusable#beai_rl_<43 chars>`
+- WHEN the frontend scrubber runs
+- THEN the fragment and the token are absent from every field
+
+#### Scenario: backoffice scrubs a token-shaped string
+
+- GIVEN a backoffice event whose fetch breadcrumb data or extra contains an `entry_url` with a
+  token in its fragment
+- WHEN the backoffice scrubber runs
+- THEN the token-shaped string is replaced
+
+#### Scenario: The two Nuxt scrubbers agree
+
+- GIVEN one shared fixture set of token-bearing events
+- WHEN it is run through both Nuxt scrubbers
+- THEN both produce equivalent redaction for every fixture, and the two fixture files are
+  byte-identical
+
+#### Scenario: A near miss is not over-redacted
+
+- GIVEN a string `beai_rl_` followed by 10 characters, the 16-character prefix under a neutral
+  key, and ordinary text containing `rl_`
+- WHEN the scrubbers run
+- THEN the strings are left untouched
+
+#### Scenario: Analytics drops the fragment
+
+- GIVEN the route `/interview/reusable#<token>` in the candidate app
+- WHEN the analytics path is computed
+- THEN it contains neither query, fragment nor token
+
 <!-- FOLLOW-UP (2026-09-10, from the backoffice Sentry-scrubber review) -->
 <!--
 `email` is absent from the Sentry scrubber denylist in ALL THREE apps —

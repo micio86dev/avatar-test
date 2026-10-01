@@ -1540,7 +1540,7 @@ reference.)
 
 ### Requirement: Single-Use and Expiry Are Disclosed Before the Copy
 
-Before an operator can copy a newly minted entry link, the UI MUST state that the
+Before an operator can copy a newly minted single-use entry link, the UI MUST state that the
 link is single-use and MUST show its expiry in absolute terms (rendered through
 the existing date-render convention), in the same view as the copy affordance —
 not as a toast shown after the copy action, and not in fine print elsewhere.
@@ -1549,6 +1549,13 @@ An operator who opens the link themselves to verify it spends it, because the
 exchange consumes the token before evaluating whether it can proceed. The
 disclosure exists to prevent that outcome, not merely to document it after the
 fact.
+
+This requirement applies to the `single-use` variant of the entry link panel only
+(links minted through `POST /api/entry-links`). Reusable links are governed by
+"Reusable Link Disclosure Is Shown Before The Copy"; they are not single-use and
+have no expiry, so neither statement applies to them. The single-use variant MUST
+remain unchanged.
+(Previously: stated for every newly minted entry link, with no reusable variant in existence.)
 
 #### Scenario: Disclosure is visible before the copy control is used
 
@@ -1565,6 +1572,13 @@ fact.
 - THEN it is rendered through the existing date-render convention, not a raw
   timestamp or ad hoc format
 
+#### Scenario: A reusable link shows neither a single-use statement nor an expiry
+
+- GIVEN a newly created reusable link
+- WHEN its panel renders
+- THEN it contains no "single-use" statement and no absolute expiry, and shows the reusable
+  disclosure instead
+
 ### Requirement: Re-Issue Action Never Claims Revocation
 
 The re-issue action and all copy accompanying it MUST be worded "Generate new
@@ -1573,12 +1587,26 @@ anywhere in the backoffice, in any locale: no mechanism invalidates a previously
 minted, unexpired link, and either word would state something the system does
 not do.
 
+This ban is scoped to the single-use re-issue action. It does not govern the
+reusable-link feature, which has a real revocation and therefore uses the verb
+"Disable" (see "Reusable Link Copy Is Localised In it And en And Says Disable"):
+"Disable" is permitted there because disabling a reusable link is a real,
+immediate effect, while "revoke"/"regenerate" remain absent from that feature too.
+(Previously: worded as a general ban with no reference to reusable links.)
+
 #### Scenario: No revoke or regenerate wording appears
 
 - GIVEN the re-issue action and its surrounding copy, in both `it` and `en`
 - WHEN the rendered text is inspected
 - THEN no string equivalent to "revoke" or "regenerate" is present for this
   action
+
+#### Scenario: The reusable feature uses Disable, not the re-issue wording
+
+- GIVEN the reusable links panel and its confirmation
+- WHEN the rendered text is inspected in `it` and `en`
+- THEN the action is worded "Disable" and no re-issue wording ("Generate new link") is offered
+  for a reusable link
 
 ### Requirement: Entry Link Action Disabled With a Stated Reason When Unusable
 
@@ -1882,6 +1910,445 @@ scrubber.
 - WHEN the participants list and the participant detail are opened
 - THEN the list sub-line and the detail line show the reference
 - AND a participant invited without one shows neither
+
+## ADDED Requirements (reusable-interview-links)
+
+Vocabulary: "reusable link" and "visitor" are defined in the capability
+`reusable-interview-links`. The "Invite drawer" is the drawer opened from the Invite action of
+a project row in the projects list (`ProjectTable.vue`, hosting the entry-link form and then
+the link panel). The "saved-project drawer" is the existing edit drawer of a saved project
+(`pages/projects/index.vue`). `EntryLinkPanel` is the single shared entry-link organism.
+
+The reusable option is written as ADDED requirements, not as a modification of "Entry Link
+Actions on Participant Detail and Participants List", which the candidate external reference
+change already modifies. The existing wording of that requirement, which places the Invite
+action on the participants list, is left untouched: the Invite action hosting the form lives in
+the project-row drawer (`ProjectTable.vue`), and the reusable checkbox is offered only there.
+
+### Requirement: Invite Form Offers A Reusable Link Option
+
+The Invite form in the Invite drawer MUST render, as its FIRST control (before every
+identity, timing and delivery field), a `CheckboxField` (the DESIGN.md §16.13 standard)
+labelled "Generate a reusable interview link that never expires" with the description
+"Anyone who opens it starts a new interview for this project. Use it for demos, events and
+testing." It MUST be unchecked every time the drawer opens. The description MUST be a
+`FieldDescription` nested in its `Field`.
+
+When checked, every other control of the form MUST NOT be rendered at all (hidden, not merely
+disabled; none of their values is submitted): the candidate reference, display name, email,
+the External reference fieldset, the timing controls and the send-email control. They are
+replaced by one optional text field "Link name" (at most 120 characters; help text example
+"Milan fair stand"). The form has no role or language control (both come from the project), so
+there is nothing to hide for them. The hiding is one wrapper around the existing fields, so a
+future field cannot be forgotten. The form follows the existing "Form Field Validation And
+Banner Contract" (`novalidate` with equivalent script validation, `FieldError` with
+`aria-invalid` and `aria-describedby`, i18n-keyed messages shown after blur, server 422 mapped
+onto the Link name field). Submitting in the reusable mode MUST call
+`POST /api/projects/{project}/reusable-links` (with the project's integer id) with only
+`label` and MUST NOT call `POST /api/entry-links`; the label is trimmed and OMITTED when empty,
+so an empty name sends `{}`. The reusable submission emits `reusable-created`, never the
+single-use `success` event. When unchecked, the form and its submission MUST be exactly the
+existing single-use form.
+
+(Reconciled with the implementation: the design sketched `{label: null}` for an empty name;
+the specified and implemented payload is `{}`, which the API accepts equally.)
+
+The checkbox MUST be offered only where the Invite action is offered and enabled: never to a
+`viewer`, never on the participant-detail "Generate new link" re-issue (always one specific
+candidate; that surface does not render the form), and never when the Invite action is
+disabled for a project that is not `active`, not yet live or past its deadline (the API still
+answers 403).
+
+#### Scenario: The checkbox is the first control
+
+- GIVEN an operator opens the Invite drawer for an active project
+- WHEN the form renders
+- THEN the first focusable control is the checkbox with the label and description above,
+  unchecked
+
+#### Scenario: Checking it swaps the fields
+
+- GIVEN the Invite form with the checkbox unchecked
+- WHEN the operator checks it
+- THEN the candidate reference, display name, email, External reference, timing and
+  send-email controls are absent from the DOM
+- AND an optional "Link name" field is present
+
+#### Scenario: Unchecked form is unchanged
+
+- GIVEN the checkbox is unchecked
+- WHEN the form is submitted with valid candidate data
+- THEN the request is the existing `POST /api/entry-links` payload and no reusable-link
+  request is made
+
+#### Scenario: Reusable submit posts only the label
+
+- GIVEN the checkbox is checked and "Link name" is `Milan fair stand`
+- WHEN the form is submitted
+- THEN `POST /api/projects/{project}/reusable-links` is called with
+  `{"label": "Milan fair stand"}` and no other key, and no `/entry-links` request is made
+- AND with an empty name the payload is `{}`
+
+#### Scenario: Link name length is validated
+
+- GIVEN a Link name of 121 characters, then 120 characters
+- WHEN the field is blurred or the form is submitted
+- THEN 121 shows a `FieldError` under the field (with `aria-invalid` and `aria-describedby`)
+  and sends no request, and 120 is accepted
+
+#### Scenario: A server 422 maps onto the Link name
+
+- GIVEN the API responds 422 naming `label`
+- WHEN the response is handled
+- THEN the message renders under the field through the shared mapper
+
+#### Scenario: Hidden values are never submitted
+
+- GIVEN the operator typed a candidate reference, then checked the checkbox and submitted
+- WHEN the request is inspected
+- THEN it contains no candidate reference or any other hidden field's value
+
+#### Scenario: A viewer never sees the checkbox
+
+- GIVEN a signed-in `viewer`
+- WHEN the projects list renders
+- THEN no Invite action, drawer or checkbox is rendered
+
+#### Scenario: The participant-detail re-issue never offers it
+
+- GIVEN an operator on a participant's detail page
+- WHEN "Generate new link" is used
+- THEN no reusable checkbox is rendered, before or after the link is minted
+
+#### Scenario: A project that cannot be entered disables the path
+
+- GIVEN a project that is `draft`, before `goes_live_at`, or past `deadline_at`
+- WHEN the operator views its Invite action
+- THEN the action is disabled with its stated reason and the checkbox is unreachable
+- AND a direct API call would still be refused with 403
+
+### Requirement: Reusable Link Disclosure Is Shown Before The Copy
+
+After a reusable link is created, `EntryLinkPanel` MUST render its reusable variant (the
+component's props are a discriminated union on `kind: 'single-use' | 'reusable'`, defaulting to
+single-use; `expires_at` is absent only for `reusable`). In the same view, in this DOM and
+visual order, and visible without any interaction before the copy control can be used: (1) a
+warning `Alert` reading "This link does not expire and can be used many times. Anyone who has
+it can start this interview, so share it only where you mean to. This is the only time the
+full link is shown."; (2) a line "Never expires · Reusable" with the note "It stops working if
+the project closes or the link is disabled. Desktop browsers only."; (3) the full URL as
+selectable text; (4) a Copy control copying the complete URL including its fragment. The
+reusable variant MUST NOT render a "Generate new link" button, an absolute expiry, or any word
+meaning revoke or regenerate. The clipboard-blocked hint of the single-use panel is kept, because
+the selectable URL is the same fallback.
+
+The disclosure MUST NOT be deferred to a post-copy toast. The URL is show-once: it MUST exist
+only in component state for this drawer session and MUST be discarded, never re-shown, when the
+drawer closes or the route changes; it MUST NOT be written to local or session storage, a query
+cache, the browser URL or history. The single-use variant MUST remain byte-for-byte what it is
+today (its rendered DOM is pinned, comments and placeholders excluded).
+
+#### Scenario: The disclosure precedes the copy
+
+- GIVEN a reusable link was just created
+- WHEN the panel renders
+- THEN the warning, the "Never expires · Reusable" line, the URL and then the Copy control
+  appear in that order, all visible without interaction
+
+#### Scenario: No generate button and no expiry
+
+- GIVEN the reusable panel
+- WHEN it is inspected
+- THEN there is no "Generate new link" control and no absolute-expiry element
+
+#### Scenario: Copy copies the full URL
+
+- GIVEN the reusable panel
+- WHEN the operator activates Copy
+- THEN the clipboard receives the complete `entry_url` including the `#` fragment
+
+#### Scenario: The URL is shown once
+
+- GIVEN the operator closes the drawer and reopens it for the same project
+- WHEN the panel area renders
+- THEN no URL is shown, and no storage, history entry or cache holds the token
+
+#### Scenario: The single-use variant is unchanged
+
+- GIVEN a single-use link is minted
+- WHEN the panel renders
+- THEN its DOM equals the pre-change snapshot (disclosure, absolute expiry, URL, Copy,
+  "Generate new link")
+
+### Requirement: The Reusable Links Panel Lists Links And Disables Them
+
+The saved-project drawer MUST render a `ReusableLinksPanel` organism after
+`ProjectQuestionsPanel`, only for a saved project and only for users with
+`can('participants.create')` (a `viewer`, and any identity that may edit a project but not
+create participants, neither sees it nor triggers the list request; no role literal is used).
+The gate lives in the page, so the panel never mounts and never fetches without it. It MUST
+list every link of that project in the order the API returns (active first, then newest), each
+row showing: the label (or a localized "Untitled link" fallback), the token prefix, "Created
+on <date> by <name>" (only the date when the creator is unknown), "Used N times · last used
+<date>" (or a "Never used" text when `last_used_at` is null), and a status badge Active or
+Disabled (the text is always rendered; colour is never the only signal). Dates MUST use the
+existing date-render convention. Label and prefix MUST render as escaped text. The panel MUST
+never display a URL, token or hash.
+
+Each active row MUST offer "Disable link" (with a per-row accessible name that still contains
+the visible text); disabled rows MUST offer no action. Disabling MUST go through the existing
+destructive `ConfirmDialog` pattern with `variant = destructive`, a confirm button labelled
+"Disable", and a description naming the concrete consequence (nobody will be able to start a
+new interview with it, interviews already in progress are not interrupted, and this cannot be
+undone). No request is sent until the operator confirms; Cancel and Escape perform no action
+and leave no stranded in-flight state. Confirming calls
+`DELETE /api/projects/{project}/reusable-links/{link}` with the project's integer id and the
+row's own `rlk_` id (never another row's) and, on 204, refetches the list so the row shows
+Disabled without a page reload; on failure the row stays Active and an error is shown. The panel
+MUST show a loading state before the first answer (so "no links" is never claimed early), an
+empty state explaining how to create one (Invite, then the reusable checkbox), and a load-error
+state whose Retry is offered only for errors a retry can fix (never for a 403, which would fail
+identically). `disableReusableLink` MUST be registered in the destructive-action architecture
+guard so that a component calling it without the confirmation dialog fails the suite.
+
+#### Scenario: Rows show the required fields
+
+- GIVEN a project with an active link used 3 times (last used yesterday) and a disabled link
+  never used
+- WHEN the drawer opens
+- THEN each row shows label, prefix, "Created on ... by ...", usage text and status, and no
+  URL or token is shown anywhere
+
+#### Scenario: Disable requires confirmation
+
+- GIVEN an active row
+- WHEN the operator clicks "Disable link"
+- THEN a destructive confirmation appears whose button reads "Disable" and whose description
+  names the consequence
+- AND no `DELETE` request is sent until confirmed
+
+#### Scenario: Cancelling changes nothing
+
+- GIVEN the confirmation is open
+- WHEN the operator cancels (Cancel or Escape)
+- THEN no request is sent and the row remains Active
+
+#### Scenario: Confirming disables the row in place
+
+- GIVEN the confirmation is open
+- WHEN the operator confirms and the API returns 204
+- THEN the row shows Disabled with no "Disable link" action, without a page reload
+
+#### Scenario: The clicked row is the one disabled
+
+- GIVEN several active rows
+- WHEN the operator disables the second one
+- THEN the `DELETE` request carries the second row's `rlk_` id
+
+#### Scenario: A failed disable keeps the row active
+
+- GIVEN the API returns an error on confirm
+- WHEN the response is handled
+- THEN the row stays Active and an error message is shown
+
+#### Scenario: Empty state
+
+- GIVEN a project with no links
+- WHEN the drawer opens
+- THEN the panel shows text explaining Invite then the reusable checkbox, and no rows
+
+#### Scenario: A load failure is stated
+
+- GIVEN the list request fails
+- WHEN the drawer opens
+- THEN a load-error state is shown, with Retry unless the failure is a 403
+
+#### Scenario: A viewer gets no panel and no request
+
+- GIVEN a signed-in `viewer`
+- WHEN the saved-project drawer opens
+- THEN no panel is rendered and no list request is sent
+
+#### Scenario: An identity that cannot create participants gets no panel
+
+- GIVEN an identity that may edit projects but may not create participants
+- WHEN the saved-project drawer opens
+- THEN no panel is rendered and no list request is sent
+
+#### Scenario: Labels are rendered as text
+
+- GIVEN a link whose label is `<b>x</b>`
+- WHEN the panel renders
+- THEN the literal text is shown and no element is injected
+
+#### Scenario: A new project has no panel
+
+- GIVEN the drawer is opened to create a project
+- WHEN it renders
+- THEN no reusable links panel is shown
+
+### Requirement: Participant Detail Shows The Reusable Link Origin
+
+The participant detail page MUST render one line "Started from reusable link: <label>" when
+the participant's `reusable_link` is present, using the label as escaped text. When the label
+is null, or empty or whitespace-only, the line MUST read "Started from reusable link" without a
+label segment (never "Started from reusable link: " with nothing after the colon). When
+`reusable_link` is null nothing MUST be rendered for it (no label, placeholder or empty
+container). The line MUST be visible to every role authorized to view the participant. The
+participants list gains no new column or sub-line.
+
+(Reconciled with the implementation: the design sketched a fallback label "Untitled link" in
+the detail line; the specified and implemented wording is the bare line, so the detail page
+never invents a name. A blank label is treated as no label, defensively.)
+
+#### Scenario: A visitor shows the origin line
+
+- GIVEN a participant with `reusable_link = {id, label: "Milan fair stand"}`
+- WHEN the detail page renders
+- THEN it shows "Started from reusable link: Milan fair stand"
+
+#### Scenario: A label-less link shows the bare line
+
+- GIVEN `reusable_link = {id, label: null}`, and separately a whitespace-only label
+- WHEN the detail page renders
+- THEN it shows "Started from reusable link" with no colon or label
+
+#### Scenario: Ordinary participants show nothing
+
+- GIVEN a participant with `reusable_link = null`, and an older payload without the key
+- WHEN the detail page renders
+- THEN no origin line, label or placeholder is in the DOM
+
+#### Scenario: A viewer sees the line
+
+- GIVEN a signed-in `viewer` opening a visitor
+- WHEN the detail page renders
+- THEN the line is visible
+
+#### Scenario: The label is escaped
+
+- GIVEN `reusable_link.label = "<b>x</b>"`
+- WHEN the detail page renders
+- THEN the literal text is shown and no element is injected
+
+#### Scenario: The participants list is unchanged
+
+- GIVEN the participants list
+- WHEN the table header and rows are inspected
+- THEN no column or sub-line for the origin exists
+
+### Requirement: Reusable Link Copy Is Localised In it And en And Says Disable
+
+Every user-facing string of this feature MUST be i18n-keyed and present, non-empty, in both
+`it` and `en`: the checkbox label and description, "Link name" label, help and validation (the
+existing shared too-long key is reused for the length error), the disclosure alert, the
+"Never expires · Reusable" line and project-closure note, the panel heading, row texts, status
+badges, "Disable link", the confirmation title, description and "Disable" label, the loading,
+empty and error states, and the detail line. The English strings quoted in this delta are
+normative; the Italian strings MUST convey the same meaning (never expires, many uses, anyone
+with it, shown once, disabling effect; the Italian verb is "Disattiva"). No string is hard-coded
+in a component. The verb is "Disable": the words "revoke", "revoked", "regenerate" (and their
+Italian equivalents) MUST NOT appear in any reusable-link string in either locale.
+
+#### Scenario: Both locales are complete
+
+- GIVEN the `it` and `en` locale files
+- WHEN the keys used by this feature are checked
+- THEN every key exists in both with non-empty text and no string is hard-coded in a component
+
+#### Scenario: No revoke or regenerate wording
+
+- GIVEN all reusable-link strings in `it` and `en`
+- WHEN they are scanned
+- THEN none contains "revoke", "regenerate" or their Italian equivalents
+
+#### Scenario: Switching locale changes copy, not data
+
+- GIVEN a link labelled `Milan fair stand` with prefix `beai_rl_AbCdEfGh`
+- WHEN the locale switches between `it` and `en`
+- THEN the copy changes language and the label and prefix are unchanged
+
+### Requirement: The Reusable Link Client Types Come From Regeneration
+
+`backoffice/types/api.ts` and `openapi.json` MUST be regenerated (`bun run codegen`) in the
+same change that consumes the new operations and fields, from the RELEASED api (api-first
+release order); `codegen:check` MUST be green. Generated types MUST include the create, list
+and disable operations and `reusable_link: {id: string; label: string | null} | null` as a
+REQUIRED key on the participant list and detail resources, and MUST NOT put it on the candidate
+session type or the M2M enrolment type. No cast may be added to satisfy the compiler. A
+typecheck-enforced contract file asserts the create, list and disable types derive from the
+generated client, that the reusable entry link type rejects `expires_at`, that the marker key
+is required, and that the candidate and M2M schemas lack the key entirely (a stricter check
+than an optional never-typed key, which would still expose the key).
+
+(Reconciled with the implementation: after the regeneration the typecheck still passes, because
+the unit and end-to-end test directories are outside the typecheck project and every participant
+fixture is a plain untyped object; so no typed fixture broke. The real guard is the contract
+file. Fixtures that claim to mirror the admin resource now carry `reusable_link: null`.)
+
+#### Scenario: Drift check is green
+
+- GIVEN the regenerated `openapi.json` and `types/api.ts`
+- WHEN `bun run codegen:check` runs
+- THEN it exits 0
+
+#### Scenario: Types match the wire
+
+- GIVEN the generated participant detail type
+- WHEN `reusable_link` is inspected
+- THEN it is a required key: an object with `id` and nullable `label`, or null
+
+#### Scenario: Other schemas lack the key
+
+- GIVEN the candidate session and M2M enrolment types
+- WHEN the contract file is type-checked
+- THEN neither has a `reusable_link` key
+
+### Requirement: The Reusable Link Flow Has End-To-End Coverage
+
+The backoffice Playwright suite MUST cover, on both Chromium and WebKit, the flow: an operator
+opens the Invite drawer, checks the reusable checkbox, creates a link, sees the disclosure with
+no Generate button, copies the URL (the clipboard write is captured in the page, because WebKit
+refuses the clipboard-read permission), reopens the saved-project drawer, sees the link with
+prefix and zero uses, disables it through the confirmation, and sees it Disabled. The suite
+MUST also cover that a `viewer` sees no checkbox and no links panel, the participant origin
+line (labelled, bare, ordinary), and the load-error state. The suite network-intercepts the
+API, like the sibling entry-link specs, with a stateful mock (create appends, DELETE disables
+idempotently); one visible load failure needs two mocked 5xx because the http client retries an
+idempotent GET once.
+
+(Reconciled with the implementation: the original scenario ran "against a real API" and asserted
+that redeeming after the disable returns 404. The suite is intercepted; the "404 after disable"
+assertion is owned by the api tests of the redemption and by the manual harness of the close-out,
+not by this suite.)
+
+#### Scenario: Operator creates and disables a link end to end
+
+- GIVEN a signed-in operator and an active project (Chromium and WebKit)
+- WHEN the flow above is executed against the intercepted API
+- THEN each step's assertion holds and the final row is Disabled
+
+#### Scenario: Viewer is excluded end to end
+
+- GIVEN a signed-in viewer (Chromium and WebKit)
+- WHEN the projects page and a saved-project drawer are opened
+- THEN no reusable checkbox and no links panel exist
+
+### Requirement: DESIGN.md Section 16 Documents The Reusable Variants Before They Ship
+
+`DESIGN.md` §16 MUST be updated, before the UI implementation, to document the `EntryLinkPanel`
+`reusable` variant (element order, warning, no Generate button), the `ReusableLinksPanel` (row
+anatomy, status badges, destructive Disable confirmation, empty state) and the reusable
+checkbox placement in the Invite form. No UI decision contradicting DESIGN.md MAY be
+implemented first. The section is §16.18 (§16.17 was already taken by the platform avatar
+templates), committed as `49777dd`.
+
+#### Scenario: DESIGN.md describes the new components
+
+- GIVEN `DESIGN.md` after this change
+- WHEN §16.18 is inspected
+- THEN it describes the reusable variant of the entry link panel, the reusable links panel and
+  the checkbox-first Invite form
 
 ## ADDED Requirements (self-service-password-reset)
 

@@ -853,7 +853,12 @@ operator/M2M surfaces, so adding fields to it would have leaked them.)
 The system MUST enforce that credentials issued for one guard type are rejected by
 all other guard types. The four guards are: `api` (user JWT), `api-m2m` (M2M
 opaque key), `api-candidate` (candidate JWT), and the sso-link exchange endpoint
-(consumes `typ:sso-link` once only).
+(consumes `typ:sso-link` once only). The reusable link token (`beai_rl_...`) is a
+FIFTH credential kind that is NOT a guard credential: it is accepted only by the
+body of `POST /api/reusable-links/redeem`, it authenticates no route, and it is
+refused by every guard and by the sso-link exchange; conversely every other
+credential kind is refused by the redemption.
+(Previously: four credential kinds; the reusable link token did not exist.)
 
 Non-interchangeability is enforced by TWO independent layers:
 
@@ -871,12 +876,36 @@ mechanism on the `api` guard is sub-resolution failure (`User::find` returns nul
 SSO-link JWTs are never a guard credential — they are consumed once only at the
 exchange endpoint.
 
+The reusable link token is not a JWT: presented as a Bearer credential it fails
+token parsing on every guard (401); presented to the exchange it fails parsing (401)
+and consumes nothing.
+
 #### Scenario: All four credential types tested against all four guards
 
 - GIVEN tokens of all four types (user, M2M, candidate, sso-link) are available
 - WHEN each is presented to a protected route on each guard
 - THEN only the matching credential type succeeds (HTTP 2xx)
 - AND all mismatches return HTTP 401
+
+#### Scenario: The reusable link token is refused by every guard
+
+- GIVEN a valid raw reusable link token
+- WHEN it is presented as a Bearer credential to a route on `api`, `api-m2m` and
+  `api-candidate`, and to the `/v1` public API and `/api/embed/exchange`
+- THEN each returns HTTP 401
+
+#### Scenario: The reusable link token is refused by the sso exchange without side effects
+
+- GIVEN a valid raw reusable link token
+- WHEN it is submitted as `token` to `GET /api/sso/exchange`
+- THEN HTTP 401 is returned, no `sso_jti:` key is written and no participant is created
+
+#### Scenario: Every other credential is refused by the redemption
+
+- GIVEN a user JWT, an M2M key, a candidate JWT and an sso-link JWT
+- WHEN each is submitted as `link_token` to `POST /api/reusable-links/redeem`
+- THEN each returns the generic 404, no participant is created, and the sso-link's jti is
+  not consumed
 
 ---
 
@@ -1373,12 +1402,31 @@ that consumes a jti before its own exchange or expiry; each minted link remains
 independently valid until it is either exchanged once or its 30-minute TTL
 elapses.
 
+This requirement governs single-use sso-link entry links only. Reusable interview
+links are a separate mechanism with their own explicit Disable semantics
+(capability `reusable-interview-links`); creating or disabling a reusable link
+changes nothing about how any sso-link behaves.
+(Previously: no statement about reusable links; the sso-link wording is unchanged.)
+
 #### Scenario: A superseded link remains valid until its own expiry
 
 - GIVEN an entry link minted for a participant, not yet exchanged or expired
 - WHEN a new entry link is minted for the same participant
 - THEN the previous link's token can still be exchanged successfully until its
   own `expires_at`, unless it is exchanged first
+
+#### Scenario: Disabling a reusable link does not revoke any sso-link
+
+- GIVEN an unexpired, unexchanged sso-link for a participant of project P and a reusable
+  link on P
+- WHEN the reusable link is disabled
+- THEN the sso-link can still be exchanged successfully
+
+#### Scenario: Minting an sso-link does not disable a reusable link
+
+- GIVEN an enabled reusable link on project P
+- WHEN an sso-link is minted for a participant of P
+- THEN the reusable link still redeems successfully
 
 ---
 
@@ -1971,3 +2019,177 @@ linkable datum.
 - WHEN the scrubber runs
 - THEN their values are replaced by the scrubber's filtered placeholder
 - AND unrelated keys, including `source`, are untouched
+
+---
+
+## ADDED Requirements (reusable-interview-links)
+
+Vocabulary: a "reusable link" and a "visitor" are defined in the capability
+`reusable-interview-links`. A visitor is a participant created by one redemption of a
+reusable link. The single-use `typ:sso-link` mechanism is unchanged. The delta is written as
+ADDED requirements, with only the two requirements whose wording would otherwise be
+contradicted ("Four Guards Mutually Non-Interchangeable", "No Revocation Semantics")
+modified in place above.
+
+### Requirement: Participants May Record The Reusable Link They Were Created By
+
+The `participants` table MUST carry a nullable `reusable_interview_link_id` (FK to
+`reusable_interview_links`, `ON DELETE SET NULL`) with the partial index
+`participants_org_reusable_link_index` on `(organization_id, reusable_interview_link_id)
+WHERE reusable_interview_link_id IS NOT NULL` (D22: leads with `organization_id`). It is NULL
+for every participant not created by a reusable-link redemption, including every
+pre-existing row. It MUST NOT be mass-assignable from request input or token claims and is
+written only by the redemption. It is a marker, not an identity: `candidate_ref` semantics
+(required, verbatim, unique per project, the JWT `sub`, the webhook correlation value) and the
+`(project_id, candidate_ref)` and `(project_id, email)` uniqueness are unchanged.
+`organization_id` on a visitor MUST be set from the project (the named invariant), never from
+input or claims.
+
+#### Scenario: The column and index exist and are nullable
+
+- GIVEN the migration is applied
+- WHEN the `participants` schema is inspected
+- THEN `reusable_interview_link_id` is a nullable FK with `ON DELETE SET NULL` and the
+  partial `(organization_id, reusable_interview_link_id)` index exists
+
+#### Scenario: Ordinary participants are unaffected
+
+- GIVEN participants created by the SSO exchange, the M2M create and the operator entry link
+- WHEN they are read
+- THEN `reusable_interview_link_id` is NULL on each and their behavior is unchanged
+
+#### Scenario: The marker is not mass-assignable
+
+- GIVEN a request or token claim carrying `reusable_interview_link_id`
+- WHEN any participant create or exchange path runs
+- THEN the stored value is NULL
+
+#### Scenario: Deleting a link keeps the participants
+
+- GIVEN a visitor whose link row is deleted
+- WHEN the participant is read
+- THEN the participant exists with `reusable_interview_link_id = NULL`
+
+#### Scenario: The purge leaves the marker and candidate_ref
+
+- GIVEN a visitor older than the `participant_pii` window
+- WHEN the purge runs
+- THEN `display_name` is overwritten with the sentinel and `candidate_ref` and
+  `reusable_interview_link_id` are unchanged
+
+### Requirement: Reusable-Link Redemption Creates A Visitor Participant
+
+`POST /api/reusable-links/redeem` (contract in `reusable-interview-links`) is a SECOND entry
+mechanism alongside the SSO exchange. It MUST insert one new participant per successful
+redemption (INSERT only: no `ON CONFLICT` upsert, no pre-flight status read, because
+`candidate_ref` is a fresh `rlv_<ULID>`), then mint the standard candidate JWT through the
+same `CandidateTokenFactory::mintCandidateToken()` as the exchange. It MUST NOT consume any
+`sso_jti:` key, MUST NOT accept or parse an `sso-link` JWT, and MUST NOT change any step of
+`GET /api/sso/exchange`.
+
+After the commit it MUST dispatch `ParticipantCreated` exactly once for the new visitor,
+feeding the same creation `progress` webhook trigger (and its
+`(organization_id, project_id, event_type, dedupe_key)` dedupe) as a first SSO exchange. A
+refused or rolled-back redemption (404, 403, 429, mint failure) MUST dispatch no event and
+create no `webhook_deliveries` row.
+
+#### Scenario: A redemption dispatches the creation event once
+
+- GIVEN a valid enabled link on an open project
+- WHEN it is redeemed
+- THEN a visitor participant exists and `ParticipantCreated` was dispatched exactly once,
+  after the commit, with the visitor's id
+
+#### Scenario: The creation progress delivery is deduplicated per visitor
+
+- GIVEN two visitors of the same link
+- WHEN their events are processed
+- THEN two distinct `progress` deliveries exist (one per visitor) and each visitor has exactly
+  one
+
+#### Scenario: Refused redemptions dispatch nothing
+
+- GIVEN an unknown token, a disabled link, a non-interviewable project, a throttled request,
+  and a forced mint failure
+- WHEN each is submitted
+- THEN no `ParticipantCreated` is dispatched and no `webhook_deliveries` row is created for
+  any
+
+#### Scenario: The SSO exchange is unaffected
+
+- GIVEN the existing SSO exchange scenarios (order, 401/403 mapping, upsert, event on first
+  exchange only)
+- WHEN the exchange is run after this change
+- THEN every outcome is identical and no code path of the redemption is involved
+
+#### Scenario: The redemption shares the token factory, not the exchange
+
+- GIVEN a redemption and an exchange
+- WHEN both mint the candidate JWT
+- THEN both use `mintCandidateToken()` and the redemption performs no Redis `sso_jti:`
+  operation
+
+### Requirement: The Redeemed Candidate Token Is The Normal Candidate Token
+
+The JWT returned by a redemption MUST be indistinguishable in structure from the one the
+exchange returns: `typ = candidate`, TTL 120 minutes, custom claims exactly `typ`,
+`candidate_ref`, `project_id`, `organization_id`, `role_code`, `lang` (with the tymon
+registered claims and `prv` = hash of `App\Models\Participant`), nothing else. In particular
+it MUST NOT carry the link's id, label, prefix, hash or any reusable-link claim, and it is
+accepted only by the `api-candidate` guard (`prv` blocks it on `api`; it is refused by
+`api-m2m`). `role_code` is the project's for a standard project and null for a potential
+project; `lang` is the visitor's `language`. The claims MUST be decoded from the payload
+segment directly in tests: tymon's JWT factory is a process-wide singleton, and an exchange
+followed by a redemption in the same process MUST NOT leak the exchange's claims
+(`mintCandidateToken()` resets with `emptyClaims()`).
+
+#### Scenario: Claims are exactly the normal set
+
+- GIVEN a JWT minted by a redemption
+- WHEN it is decoded
+- THEN its custom claims are exactly `typ`, `candidate_ref` (`rlv_...`), `project_id`,
+  `organization_id`, `role_code`, `lang`, plus registered claims and `prv`
+- AND no claim names a reusable link
+
+#### Scenario: A preceding exchange in the same process leaks nothing
+
+- GIVEN an sso-link exchanged, then a link redeemed, in the same process
+- WHEN the redemption JWT is decoded
+- THEN it carries no `display_name`, `email`, `org_id`, `external_id` or `source` claim
+
+#### Scenario: Lifetime is 120 minutes
+
+- GIVEN a JWT minted at time T
+- WHEN `exp` is read and time is advanced to T + 121 minutes
+- THEN `exp - iat` is 120 minutes and the token is refused with 401 after T + 121 minutes
+
+#### Scenario: Only the api-candidate guard accepts it
+
+- GIVEN the redeemed JWT
+- WHEN it is presented to an `auth:api` route, an `auth:api-m2m` route and an
+  `auth:api-candidate` route
+- THEN the first two return 401 and the third succeeds
+
+#### Scenario: The candidate session response is unchanged
+
+- GIVEN a visitor and an ordinary participant
+- WHEN each calls `GET /api/candidate/session`
+- THEN both responses have exactly the same key set, and neither contains a reusable-link
+  field
+
+### Requirement: Surfaces That Never Carry The Reusable-Link Origin
+
+The link origin is operator metadata and is exposed only on the admin participant resources
+(`admin-read-api`). It MUST NOT appear in the candidate session response, the `typ:candidate`
+claims, the `progress` and `evaluation` webhook payloads and their assemblers, the webhook
+delivery log serializer, the dashboard activity feed, the evaluations index, the M2M
+participant resources, the public `/v1` resources, or exports.
+
+#### Scenario: Webhooks, M2M and v1 omit the origin
+
+- GIVEN a visitor
+- WHEN the webhook payloads, `GET /api/m2m/participants/{id}`, `/v1/interviews/{id}` and an
+  export are produced
+- THEN none contains `reusable_link`, `reusable_interview_link_id`, a link id or a link label
+  at any nesting depth
+- AND each still identifies the visitor by `candidate_ref`
