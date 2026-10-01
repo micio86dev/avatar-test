@@ -584,8 +584,13 @@ On any step 5–9 failure: HTTP 403 (generic — access denied).
 
 Re-exchange for the same `(project_id, candidate_ref)` while the participant is
 `in_attesa` MUST update `display_name`, `role_code`, and `language` without
-creating a duplicate record. Concurrent exchanges MUST result in exactly one
+creating a duplicate record. It MUST also update `external_id` and `source`,
+each independently, only when the incoming sso-link carries that claim: an absent
+claim keeps the stored value (see "Exchange Persists The External Reference With
+Preserve-On-Absent Semantics"). Concurrent exchanges MUST result in exactly one
 participant row.
+(Previously: the upsert updated only `display_name`, `role_code`, and `language`;
+it said nothing about the external reference.)
 
 #### Scenario: Idempotent re-exchange while in_attesa
 
@@ -601,6 +606,13 @@ participant row.
 - WHEN both hit the upsert
 - THEN exactly one `Participant` row exists after both complete
 - AND no duplicate key error is surfaced to either caller
+
+#### Scenario: Re-exchange keeps the stored external reference when the claims are absent
+
+- GIVEN a `Participant` at `in_attesa` with `external_id = 4471` and `source = "acme-ats"`
+- WHEN a new valid sso-link without those claims is exchanged
+- THEN `display_name` / `role_code` / `language` are updated
+- AND `external_id` and `source` keep their stored values
 
 ---
 
@@ -796,6 +808,15 @@ non-numeric string; `prv` is NOT in required_claims — its absence alone does N
 TenantContextCandidate → SubstituteBindings`. It MUST return a JSON payload
 containing: participant fields, project config (non-sensitive subset), and
 `exit_redirect_url` (from C4 `Project`). The redirect trigger is NOT fired here.
+The payload MUST NOT contain `external_id` or `source` at any nesting level: the
+candidate has no use for the calling system's internal identifiers, and the
+candidate-facing response shape MUST stay exactly what it was before the external
+reference existed. This is structural, not conditional: the candidate-facing
+`ParticipantResource` is used only by this endpoint (and as the base shape of the
+operator/integration `ParticipantEnrolmentResource`), so a field added for operator
+surfaces cannot reach the candidate by default.
+(Previously: silent on the external reference; the participant resource was shared with
+operator/M2M surfaces, so adding fields to it would have leaked them.)
 
 #### Scenario: Session returns participant + project + exit_redirect_url
 
@@ -812,6 +833,18 @@ containing: participant fields, project config (non-sensitive subset), and
 - WHEN `GET /api/candidate/session` is called
 - THEN only participant and project data for org A is returned
 - AND no Org B data is accessible or disclosed
+
+#### Scenario: The session omits the external reference
+
+- GIVEN participant P has `external_id = 4471` and `source = "acme-ats"`
+- WHEN P's candidate JWT calls `GET /api/candidate/session`
+- THEN the response contains neither `external_id` nor `source` at any nesting level
+
+#### Scenario: The session key set is pinned
+
+- GIVEN participants with and without an external reference
+- WHEN `GET /api/candidate/session` is called for each
+- THEN both responses have exactly the same key set as before this change
 
 ---
 
@@ -1177,14 +1210,18 @@ is draft.
 
 ### Requirement: Shared Entry Link Minting Logic
 
-The entry-gate evaluation, `role_code` inheritance/validation, and terminal-status
-(`completato`/`errore`) mint refusal MUST be implemented in exactly one place,
+The entry-gate evaluation, `role_code` inheritance/validation, terminal-status
+(`completato`/`errore`) mint refusal, and the external-reference validation and
+claim assembly MUST be implemented in exactly one place,
 consumed by both the M2M mint (`POST /api/m2m/sso-link`) and the operator mint
 (below). Two independent implementations of the mint decision are a defect class,
 not a stylistic preference: one of them decides whether a candidate can start.
 
 The M2M endpoint's request contract, response contract, and observable behavior
-MUST remain byte-identical after this extraction.
+MUST remain byte-identical after this extraction for every request that does not
+carry the new optional `external_id`/`source` fields.
+(Previously: the shared logic covered gates, role_code and terminal-status refusal only;
+byte-identity applied to all requests.)
 
 #### Scenario: M2M mint response is unchanged after the extraction
 
@@ -1199,12 +1236,19 @@ MUST remain byte-identical after this extraction.
 - WHEN either the M2M mint or the operator mint is called for that project
 - THEN both refuse minting for the same underlying reason
 
+#### Scenario: External-reference validation is consistent across both mints
+
+- GIVEN a mint request with an invalid reference (e.g. `external_id = 0` or `source` of 181 characters)
+- WHEN either the M2M mint or the operator mint is called
+- THEN both refuse with HTTP 422 naming the same field
+- AND a valid reference yields the same claims from both mints
+
 ### Requirement: Operator-Facing Entry Link Mint Endpoint
 
 `POST /api/entry-links` MUST mint a candidate entry token for an authenticated
 backoffice operator, on the `auth:api` guard plus `TenantContext`. It MUST accept
-`project_id`, `candidate_ref`, `display_name`, and optional `role_code` and `lang`,
-mirroring the M2M mint's body.
+`project_id`, `candidate_ref`, `display_name`, and optional `role_code`, `lang`,
+`external_id` and `source`, mirroring the M2M mint's body.
 
 Minting an entry link starts an assessment for a candidate; it is not a read
 operation. Authorization MUST be `ParticipantPolicy::create`: `admin` and
@@ -1212,6 +1256,7 @@ operation. Authorization MUST be `ParticipantPolicy::create`: `admin` and
 
 `project_id` MUST be resolved scoped to the caller's tenant (via `TenantContext`),
 consistent with the M2M mint's own-organization scoping.
+(Previously: the optional body fields were `role_code` and `lang` only.)
 
 #### Scenario: Admin mints an entry link
 
@@ -1246,6 +1291,13 @@ consistent with the M2M mint's own-organization scoping.
 - WHEN `POST /api/entry-links` is called for that project
 - THEN HTTP 403 is returned
 - AND no token is minted
+
+#### Scenario: Optional external reference is accepted
+
+- GIVEN an authenticated operator and a valid project
+- WHEN `POST /api/entry-links` is called with a valid `external_id` and/or `source`
+- THEN HTTP 201 is returned with a redeemable entry link
+- AND a call without them behaves exactly as before
 
 ### Requirement: Entry Link Response Composes the Absolute URL
 
@@ -1327,3 +1379,595 @@ elapses.
 - WHEN a new entry link is minted for the same participant
 - THEN the previous link's token can still be exchanged successfully until its
   own `expires_at`, unless it is exchanged first
+
+---
+
+## ADDED Requirements (candidate-external-reference)
+
+Vocabulary: the "external reference" is the optional pair `external_id` (BIGINT, the
+calling system's own record id) and `source` (VARCHAR(180), the calling system it came
+from) on a participant (one candidate enrolment in one project). It is distinct from
+`candidate_ref`, which stays required, per-project unique, the JWT `sub` and the
+webhook correlation value. Webhooks do not carry the external reference; the purge
+retains it (see `data-retention`).
+
+### Requirement: Participants Carry An Optional External Reference
+
+The `participants` table MUST gain two nullable columns: `external_id` (64-bit integer,
+`BIGINT`) and `source` (string, at most 180 characters). Neither is backfilled: every
+row that existed before this change, and every enrolment created without them, holds
+NULL in both.
+
+`external_id` identifies the enrolment in the calling system's own records; `source`
+names the calling system. They are additive metadata: `candidate_ref` semantics
+(required, stored verbatim, unique per project, the sso-link `sub`, the webhook
+correlation value) MUST NOT change.
+
+Neither column, nor the pair, MUST be UNIQUE, and no CHECK constraint MUST require one
+to be set when the other is. A row is an enrolment, not a person: the same
+`(source, external_id)` legitimately repeats across projects and organizations.
+
+Two composite indexes MUST exist, both leading with `organization_id` (D22) and both
+PARTIAL, because most rows (every candidate created in the backoffice or through SSO)
+carry NULL in both columns and no query can use an index entry for them:
+`(organization_id, source, external_id) WHERE source IS NOT NULL` and
+`(organization_id, external_id) WHERE external_id IS NOT NULL`.
+
+The columns MUST NOT be mass-assignable from request input or token claims; they are
+written only from values that passed the shared validation contract.
+`Participant::external_id` MUST read back as an integer (or null), never a string.
+
+The migration MUST be additive and safe to run twice (a second run is a no-op),
+MUST build the indexes without blocking writes on the hot `participants` table
+(`CONCURRENTLY`, outside a transaction), MUST repair an INVALID index left behind by an
+aborted concurrent build, and MUST be reversible (`down` removes the indexes and then the
+columns; values written in the meantime are lost, which is accepted).
+
+#### Scenario: Columns and indexes exist
+
+- GIVEN the migration is applied
+- WHEN the `participants` schema is inspected
+- THEN `external_id` is a nullable BIGINT and `source` is a nullable VARCHAR(180)
+- AND index `(organization_id, source, external_id)` exists with predicate
+  `WHERE source IS NOT NULL`
+- AND index `(organization_id, external_id)` exists with predicate
+  `WHERE external_id IS NOT NULL`
+- AND no UNIQUE constraint covers `external_id`, `source`, or the pair
+
+#### Scenario: Existing rows stay valid
+
+- GIVEN participants that existed before the migration
+- WHEN the migration is applied
+- THEN every such row has `external_id = NULL` and `source = NULL`
+- AND every existing read and write path behaves as before for those rows
+
+#### Scenario: The same reference repeats across enrolments
+
+- GIVEN participant P1 in project A with `source = "acme-ats"` and `external_id = 4471`
+- WHEN participant P2 in project B (same or different organization) is created with the
+  same `source` and `external_id`
+- THEN both rows persist
+- AND a second participant in project A, with a different `candidate_ref` and email but
+  the same `source` and `external_id`, also persists
+
+#### Scenario: No pairing rule between the two fields
+
+- GIVEN a participant created with only `external_id = 99` and another with only
+  `source = "bulk-import"`
+- WHEN each is persisted
+- THEN both rows are stored with the other column NULL
+
+#### Scenario: external_id reads back as an integer
+
+- GIVEN a participant stored with `external_id = 9007199254740991`
+- WHEN the model is loaded
+- THEN `external_id` is the integer `9007199254740991`, not a string
+
+#### Scenario: The migration is rerunnable, self-repairing and reversible
+
+- GIVEN the migration has already been applied
+- WHEN it is run again
+- THEN it completes without error and without creating duplicate columns or indexes
+- AND an index that is present but INVALID is rebuilt
+- WHEN it is rolled back
+- THEN both indexes and both columns are removed
+
+#### Scenario: candidate_ref is unaffected
+
+- GIVEN a participant enrolled with `candidate_ref = "EXT-ABC-001"` and an external
+  reference
+- WHEN it is stored
+- THEN `candidate_ref` equals `"EXT-ABC-001"` byte-for-byte
+- AND `(project_id, candidate_ref)` uniqueness still applies
+
+### Requirement: External Reference Validation Is One Shared Contract
+
+Every surface that accepts an external reference MUST apply the same rules, defined in
+exactly one place: the operator entry link endpoint (immediate and scheduled paths),
+`POST /api/m2m/participants`, `POST /api/m2m/sso-link`, and the public
+`POST /v1/interviews` (as `candidate.external_id` / `candidate.source`).
+
+- `external_id` is OPTIONAL: it MAY be omitted or sent as an explicit `null` (both mean
+  absent). When present in a JSON body it MUST be a JSON integer, with
+  `1 <= external_id <= 9007199254740991` (2^53 - 1). Validation is STRICT: a numeric
+  string (`"42"`), a float (`12.0`, `1.5`) and a boolean are rejected, never coerced to
+  an integer (a boolean would otherwise silently persist as `1`). The cap is enforced at
+  validation, not only documented: JSON consumers parse numbers as IEEE-754 doubles and
+  lose precision above it.
+- `source` is OPTIONAL. When present it MUST be a string of at most 180 characters.
+  Surrounding whitespace is trimmed.
+- An empty string for either field, and a whitespace-only `source`, MUST be treated as
+  absent (normalised to NULL); it is never stored as `""` and never emitted as an empty
+  claim.
+- A violation MUST be refused with HTTP 422 naming the offending field (public `/v1`:
+  RFC 9457 problem+json with `errors[].field` = `candidate.external_id` or
+  `candidate.source`). A refused request MUST have no side effect: no row written, no
+  token minted.
+- A request that carries neither field MUST behave exactly as it did before this change.
+
+The public `GET /v1/interviews` filters are not a write surface and follow their own
+rule (see "Search And Filter By External Reference Never Cross Tenants"): they read
+query-string values, which are always strings, so their `external_id` uses the
+non-strict integer rule.
+
+#### Scenario: The upper bound is accepted
+
+- GIVEN a valid request with `external_id = 9007199254740991`
+- WHEN it is submitted to any write surface
+- THEN it is accepted and persisted (or minted) with that exact value
+
+#### Scenario: One past the cap is rejected
+
+- GIVEN a valid request with `external_id = 9007199254740992`
+- WHEN it is submitted to any write surface
+- THEN HTTP 422 is returned naming `external_id`
+- AND nothing is persisted and no token is minted
+
+#### Scenario: A value far above the cap is rejected
+
+- GIVEN a request with `external_id = 9007199254741992`
+- WHEN it is submitted
+- THEN HTTP 422 is returned naming `external_id`
+
+#### Scenario: Zero and negatives are rejected
+
+- GIVEN requests with `external_id = 0` and `external_id = -1`
+- WHEN each is submitted
+- THEN each returns HTTP 422 naming `external_id`
+- AND `external_id = 1` is accepted
+
+#### Scenario: A non-integer external_id is rejected
+
+- GIVEN requests whose `external_id` is `1.5`, `12.0`, `"abc"`, `"42"`, `true`, an array,
+  or an object
+- WHEN each is submitted
+- THEN each returns HTTP 422 naming `external_id`
+- AND nothing is persisted and no token is minted
+
+#### Scenario: An explicit null is absent
+
+- GIVEN a valid request with `external_id = null` and/or `source = null`
+- WHEN it is submitted
+- THEN it is accepted and the field is treated as absent
+
+#### Scenario: source length boundary
+
+- GIVEN a request whose `source` is exactly 180 characters
+- WHEN it is submitted
+- THEN it is accepted and stored unchanged
+- WHEN `source` is 181 characters
+- THEN HTTP 422 is returned naming `source`
+- AND a `source` of 180 multibyte characters (e.g. accented letters) is accepted
+
+#### Scenario: Empty and whitespace-only values normalise to absent
+
+- GIVEN a valid request with `source = ""`, or `source = "   "`, and/or `external_id = ""`
+- WHEN it is submitted
+- THEN it is accepted
+- AND the stored column (or the minted claim set) treats the field as absent, never `""`
+  and never whitespace
+
+#### Scenario: Surrounding whitespace is trimmed
+
+- GIVEN a valid request with `source = "  acme-ats  "`
+- WHEN it is submitted
+- THEN the stored value (or the minted claim) is `"acme-ats"`
+
+#### Scenario: Invalid reference on an otherwise valid request has no side effect
+
+- GIVEN an otherwise valid mint or create request with `source` of 181 characters
+- WHEN it is submitted
+- THEN HTTP 422 is returned
+- AND no participant row is written and no sso-link token is minted
+
+#### Scenario: Identical outcome on every surface
+
+- GIVEN the same input value for `external_id` or `source`
+- WHEN it is submitted to the operator entry link, M2M create, M2M sso-link, and public
+  v1 create
+- THEN every surface accepts or rejects it identically
+
+### Requirement: The sso-link Token Carries The External Reference Only When Present
+
+The `typ:sso-link` JWT minted by both `POST /api/m2m/sso-link` and the operator entry
+link (immediate path, through the shared minter) MUST carry an `external_id` claim (a
+JSON integer) and/or a `source` claim (a string) only when the corresponding value is
+present after normalisation. An absent value MUST NOT produce a claim key at all (no
+null-valued keys). All existing claims, `sub = candidate_ref`, the 30-minute TTL, the
+absence of a mint-time Redis write, the mint gate (409 for `completato`/`errore`), and
+the response shape are unchanged.
+
+The claims are readable by anyone holding the link (same class as the existing
+`email`/`display_name` claims); they MUST NOT be treated as secret, and callers MUST NOT
+put secrets in `source`. This is stated on both mint endpoints' documentation.
+
+#### Scenario: Both fields present
+
+- GIVEN a valid mint request with `external_id = 4471` and `source = "acme-ats"`
+- WHEN the token is minted
+- THEN the claims include `external_id = 4471` (integer) and `source = "acme-ats"`
+
+#### Scenario: Only external_id present
+
+- GIVEN a valid mint request with `external_id = 4471` and no `source`
+- WHEN the token is minted
+- THEN the claims include `external_id` and contain no `source` key
+
+#### Scenario: Only source present
+
+- GIVEN a valid mint request with `source = "acme-ats"` and no `external_id`
+- WHEN the token is minted
+- THEN the claims include `source` and contain no `external_id` key
+
+#### Scenario: Neither present leaves the token unchanged
+
+- GIVEN a valid mint request with neither field (or both empty strings)
+- WHEN the token is minted
+- THEN the claim set contains no `external_id` and no `source` key
+- AND the claim set is identical to the one minted before this change
+
+#### Scenario: A refused mint carries nothing
+
+- GIVEN a participant at `completato` or `errore` for `(project_id, candidate_ref)`
+- WHEN a mint is requested with an external reference
+- THEN HTTP 409 is returned, no token is minted, and the participant's stored external
+  reference is unchanged
+
+### Requirement: Exchange Persists The External Reference With Preserve-On-Absent Semantics
+
+In addition to the columns already written by step 9 of the Public SSO Exchange, the
+exchange upsert MUST write `external_id` and `source` from the sso-link claims.
+
+- INSERT (no existing row): each column takes its claim value, or NULL when the claim
+  is absent.
+- ON CONFLICT (existing row at `in_attesa`): each column MUST be updated independently
+  to the incoming value when the claim is present, and MUST keep its stored value when
+  the claim is absent (`COALESCE` of incoming over stored). A re-issue that omits the
+  fields therefore never erases stored values; a re-mint that supplies new values while
+  the row is still `in_attesa` overwrites them. Consequence, accepted: a stored value
+  cannot be cleared to NULL through this path.
+- The SET clause MUST still exclude `organization_id`, `project_id` and `candidate_ref`,
+  and MUST stay guarded by `status = 'in_attesa'`. A participant past `in_attesa` is
+  refused by the pre-flight read (403) and its stored external reference MUST remain
+  untouched.
+- A claim that violates the shared validation contract (`external_id` not an integer in
+  `[1, 9007199254740991]`, `source` not a non-empty string of at most 180 characters)
+  MUST be narrowed to absent, as if that claim were not in the token, and MUST NOT fail
+  the exchange: no 401 and no other error is raised because of these two claims, and the
+  remaining exchange steps run unchanged. The token is signed by BEAI's own minter, so
+  this is defence in depth rather than an input gate, and a participant must not be
+  locked out of an interview by a bad metadata value. Each exchange that drops a claim
+  MUST log `sso.exchange.external_reference_dropped` with the NAMES of the dropped
+  claims and the project and organization ids; it MUST NOT log the claim values.
+- The participant-created `progress` event dispatch and its payload are unchanged.
+
+#### Scenario: First exchange stores both fields
+
+- GIVEN no participant for `(project_id, "EXT-001")` and a valid sso-link carrying
+  `external_id = 4471` and `source = "acme-ats"`
+- WHEN the exchange succeeds
+- THEN the participant row has `external_id = 4471` and `source = "acme-ats"`
+
+#### Scenario: First exchange with only external_id
+
+- GIVEN a valid sso-link carrying only `external_id = 4471`
+- WHEN the exchange succeeds
+- THEN `external_id = 4471` and `source IS NULL`
+
+#### Scenario: First exchange with only source
+
+- GIVEN a valid sso-link carrying only `source = "acme-ats"`
+- WHEN the exchange succeeds
+- THEN `source = "acme-ats"` and `external_id IS NULL`
+
+#### Scenario: First exchange with neither
+
+- GIVEN a valid sso-link carrying neither claim (including a link minted before this change)
+- WHEN the exchange succeeds
+- THEN `external_id IS NULL` and `source IS NULL`
+
+#### Scenario: Re-issue without the fields preserves stored values
+
+- GIVEN a participant at `in_attesa` with `external_id = 4471` and `source = "acme-ats"`
+- WHEN a new sso-link for the same `(project_id, candidate_ref)` carrying neither claim
+  is exchanged
+- THEN the exchange succeeds
+- AND `external_id` is still `4471` and `source` is still `"acme-ats"`
+
+#### Scenario: Re-mint with new values overwrites while in_attesa
+
+- GIVEN a participant at `in_attesa` with `external_id = 4471` and `source = "acme-ats"`
+- WHEN a new sso-link carrying `external_id = 9000` and `source = "other-ats"` is
+  exchanged
+- THEN `external_id = 9000` and `source = "other-ats"`
+- AND there is still exactly one row for `(project_id, candidate_ref)`
+
+#### Scenario: A partial re-mint overwrites only the supplied field
+
+- GIVEN a participant at `in_attesa` with `external_id = 4471` and `source = "acme-ats"`
+- WHEN a new sso-link carrying only `source = "other-ats"` is exchanged
+- THEN `source = "other-ats"` and `external_id` is still `4471`
+
+#### Scenario: Rows past in_attesa are untouched
+
+- GIVEN a participant at `in_corso`, `in_valutazione`, `completato`, or `errore` with
+  `external_id = 4471` and `source = "acme-ats"`
+- WHEN an sso-link carrying different values is exchanged
+- THEN HTTP 403 with the generic body is returned
+- AND `external_id` and `source` are unchanged
+
+#### Scenario: A malformed claim is dropped and the exchange still succeeds
+
+- GIVEN a `typ:sso-link` JWT whose `external_id` claim is `0`, `"abc"`, `true`, or
+  `9007199254740992`, or whose `source` claim is empty, whitespace-only, not a string,
+  or longer than 180 characters
+- AND the jti has not been consumed
+- WHEN the exchange is called
+- THEN HTTP 200 is returned with a candidate JWT (NOT 401)
+- AND the participant row is created or updated as for a token without that claim: NULL
+  on insert, the stored value preserved on conflict
+- AND `sso.exchange.external_reference_dropped` is logged with the dropped claim NAMES
+  and the project and organization ids, and with no claim value
+
+#### Scenario: A valid claim survives next to a malformed one
+
+- GIVEN a `typ:sso-link` JWT with a valid `source = "acme-ats"` and `external_id = 0`
+- WHEN the exchange succeeds
+- THEN `source = "acme-ats"` is stored and `external_id` is NULL (or preserved)
+
+#### Scenario: Concurrent exchanges still yield one row with the reference
+
+- GIVEN two simultaneous valid exchanges for the same `(project_id, candidate_ref)`,
+  both carrying the same reference
+- WHEN both complete
+- THEN exactly one participant row exists and it carries the reference
+
+#### Scenario: The created progress event is unchanged
+
+- GIVEN a first exchange carrying an external reference
+- WHEN the participant-creation `progress` event is dispatched
+- THEN its payload contains no `external_id` and no `source`
+
+### Requirement: M2M Participant Create Accepts And Returns The External Reference
+
+`POST /api/m2m/participants` MUST accept optional `external_id` and `source` under the
+shared validation contract and persist them on both the immediate path and the
+scheduled path (`scheduled_at` present). The 201 response, and every M2M participant
+read (`GET /api/m2m/participants`, `GET /api/m2m/participants/{id}`, and any M2M
+endpoint that returns a participant), MUST carry both keys always present:
+`external_id` (integer or null) and `source` (string or null). A refused create
+(duplicate `candidate_ref` or email, cross-organization project, validation failure)
+MUST NOT modify the external reference of any existing row.
+
+These responses MUST be rendered by the operator/integration participant resource
+(`ParticipantEnrolmentResource`: the candidate-facing shape plus the two fields), a
+class distinct from the candidate-facing `ParticipantResource`, so that the fields
+cannot reach the candidate session by default. The same resource renders the scheduled
+201 of the operator entry link and the participant schedule actions.
+
+#### Scenario: Create with both fields
+
+- GIVEN an `ApiClient` with `participants:create`
+- WHEN it creates a participant with `external_id = 4471` and `source = "acme-ats"`
+- THEN HTTP 201 is returned with `external_id = 4471` and `source = "acme-ats"`
+- AND the stored row carries both values
+
+#### Scenario: Create with only external_id
+
+- GIVEN a create request with `external_id = 4471` and no `source`
+- WHEN it succeeds
+- THEN the response has `external_id = 4471` and `source = null`
+
+#### Scenario: Create with only source
+
+- GIVEN a create request with `source = "acme-ats"` and no `external_id`
+- WHEN it succeeds
+- THEN the response has `source = "acme-ats"` and `external_id = null`
+
+#### Scenario: Create with neither
+
+- GIVEN a create request with neither field
+- WHEN it succeeds
+- THEN the response contains both keys with null values
+- AND the participant otherwise behaves exactly as before
+
+#### Scenario: Scheduled path persists the reference
+
+- GIVEN a create request with `scheduled_at` and an external reference
+- WHEN it succeeds
+- THEN the scheduled participant row carries the reference and the response returns it
+
+#### Scenario: Index and show return the fields
+
+- GIVEN participants of Org A with and without an external reference
+- WHEN `GET /api/m2m/participants` and `GET /api/m2m/participants/{id}` are called
+- THEN each participant carries `external_id` and `source` (null when absent)
+
+#### Scenario: A refused duplicate does not touch the stored reference
+
+- GIVEN an existing participant for `(project_id, "EXT-001")` with `external_id = 4471`
+- WHEN a create for the same `candidate_ref` is submitted with `external_id = 9000`
+- THEN the request is refused as it is today
+- AND the stored `external_id` is still `4471`
+
+#### Scenario: Cross-organization project is not found
+
+- GIVEN an `ApiClient` of Org A and a `project_id` of Org B
+- WHEN a create with an external reference is submitted
+- THEN HTTP 404 is returned and no row is written
+
+### Requirement: Operator Entry Link Persists The External Reference
+
+`POST /api/entry-links` MUST accept optional `external_id` and `source` (flat body
+fields, shared validation contract).
+
+- Immediate path (no `scheduled_at`): no participant row exists at mint time; the
+  values travel in the sso-link token as claims (see "The sso-link Token Carries The
+  External Reference Only When Present") and are persisted by the exchange.
+- Scheduled path (`scheduled_at` present): the participant row is created at request
+  time with the values persisted, and the 201 response carries `external_id` and
+  `source` (null when absent).
+
+A scheduled start is stored as a UTC instant. A reschedule of an existing scheduled
+participant normalises the new start to UTC before it is stored
+(`RescheduleParticipant`), so the stored instant does not depend on the offset the
+caller used.
+
+#### Scenario: Immediate path carries the reference in the token
+
+- GIVEN an authorized operator and a valid project
+- WHEN `POST /api/entry-links` is called with `external_id = 4471` and
+  `source = "acme-ats"` and no `scheduled_at`
+- THEN HTTP 201 is returned with `entry_url` and `expires_at`
+- AND the redeemable token carries both claims
+- AND no participant row exists until the link is exchanged
+
+#### Scenario: Immediate path with each other combination
+
+- GIVEN the same request with only `external_id`, only `source`, or neither
+- WHEN it succeeds
+- THEN the token carries exactly the claims that were supplied
+
+#### Scenario: Scheduled path persists all four combinations
+
+- GIVEN a request with `scheduled_at` and (both / only `external_id` / only `source` /
+  neither)
+- WHEN it succeeds
+- THEN the row is created with exactly those values and NULL for the rest
+- AND the 201 body returns them
+
+#### Scenario: Invalid reference is refused before any side effect
+
+- GIVEN a request with `external_id = 0`
+- WHEN `POST /api/entry-links` is called
+- THEN HTTP 422 naming `external_id` is returned, no token is minted, and no row is
+  written
+
+#### Scenario: A rescheduled start is stored as UTC
+
+- GIVEN a scheduled participant and a new start expressed with a non-UTC offset
+- WHEN the participant is rescheduled
+- THEN the stored start is the same instant expressed in UTC
+
+### Requirement: Surfaces That Never Carry The External Reference
+
+The external reference is operator/integration metadata. The following MUST NOT contain
+`external_id` or `source`: the candidate session response (`GET /api/candidate/session`),
+the claims of the `typ:candidate` JWT, the `progress` and `evaluation` webhook payloads
+and their assemblers, the webhook delivery log serializer, the dashboard activity feed,
+and the evaluations index. (Resolved decision D1: webhooks do not carry the fields;
+`candidate_ref` remains the correlation handle.)
+
+The `typ:candidate` JWT MUST be built from its own claim set only. The claims of the
+`typ:sso-link` token it was exchanged from (`display_name`, `email`, `org_id`, and the
+external reference) MUST NOT be carried into it: the token factory resets its claim
+collection before minting the candidate token.
+
+#### Scenario: Candidate JWT claims are unchanged
+
+- GIVEN a participant with an external reference completes the exchange
+- WHEN the `typ:candidate` JWT is decoded
+- THEN its custom claims are exactly `typ`, `candidate_ref`, `project_id`,
+  `organization_id`, `role_code`, `lang` plus registered claims
+- AND contain neither `external_id` nor `source`, and none of the sso-link's own
+  `display_name`, `email` or `org_id` claims
+
+#### Scenario: Webhook payloads omit the reference
+
+- GIVEN a participant with `external_id = 4471` and `source = "acme-ats"`
+- WHEN the `progress` and `evaluation` payloads are assembled
+- THEN neither payload contains `external_id` or `source` at any nesting level
+- AND both still echo `candidate_ref` unchanged
+
+#### Scenario: Other operator surfaces omit the reference
+
+- GIVEN the same participant
+- WHEN the webhook delivery log, dashboard activity feed, and evaluations index are read
+- THEN none of them contains `external_id` or `source`
+
+### Requirement: Search And Filter By External Reference Never Cross Tenants
+
+Every search or filter surface that matches on `source` or `external_id` (the admin
+participants list `q` and the public `GET /v1/interviews` `external_id`/`source`
+filters) MUST be evaluated strictly inside the caller's `organization_id` (and, for the
+public API, the key's live/test mode). A value shared by participants of two
+organizations MUST NOT cause either organization to see the other's row, and no
+response MAY reveal whether another organization holds the same value.
+
+The public filters are exact matches (`source` case-sensitive, like `candidate_ref`).
+Because query-string values are always strings, the `external_id` filter uses the
+non-strict integer rule over the same bounds (`1..9007199254740991`). A malformed filter
+value (`external_id` that is not such an integer, or a `source` longer than 180
+characters) answers `400 validation_failed`, like every other malformed list filter; an
+EMPTY value means the filter is not applied. The JSON-body write surfaces remain strict
+and answer 422.
+
+#### Scenario: Admin q does not return another organization's row
+
+- GIVEN Org A and Org B each have a participant with `source = "acme-ats"` and
+  `external_id = 4471`
+- WHEN an Org A user searches `q=acme-ats` and `q=4471`
+- THEN only Org A's participant is returned in each case
+
+#### Scenario: Public filters do not return another organization's row
+
+- GIVEN the same two participants
+- WHEN an Org A key calls `GET /v1/interviews?source=acme-ats&external_id=4471`
+- THEN only Org A's interview is returned
+- AND an Org B-only value returns an empty list for Org A, indistinguishable from a
+  value nobody holds
+
+#### Scenario: Test-mode keys do not see live rows through the filters
+
+- GIVEN a live interview with `external_id = 4471`
+- WHEN a test-mode key filters `external_id=4471`
+- THEN the result is empty
+
+#### Scenario: A malformed public filter is a 400, an empty one is ignored
+
+- GIVEN `GET /v1/interviews?external_id=abc`, `?external_id=0`,
+  `?external_id=9007199254740992`, or a 181-character `?source=`
+- WHEN each is called
+- THEN `400 validation_failed` is returned
+- AND `?source=` and `?external_id=` with an empty value are ignored and answer 200
+
+### Requirement: The External Reference Is Scrubbed From Error Reports
+
+`SentryScrubber` MUST scrub the key `external_id`, and its plural `external_ids`, exactly
+as it scrubs `candidate_ref` and `display_name`, at any nesting depth of an error
+report's context, request data and breadcrumbs (including compound keys that contain
+it, e.g. `participant_external_id`). The backoffice and candidate-frontend scrubbers MUST
+deny the same two keys, keeping the documented "same set the api scrubber denies"
+invariant.
+
+`source` is deliberately NOT scrubbed: it is a generic key name (Sentry's own events use
+`source` for unrelated data) and its value names a system, not a person; the id is the
+linkable datum.
+
+#### Scenario: external_id keys are filtered from a report
+
+- GIVEN an error event whose context contains `external_id` and `external_ids`
+  (top-level and nested)
+- WHEN the scrubber runs
+- THEN their values are replaced by the scrubber's filtered placeholder
+- AND unrelated keys, including `source`, are untouched

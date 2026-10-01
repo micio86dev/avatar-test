@@ -1259,7 +1259,8 @@ Usage:
 
 1. **Structure.** `FieldGroup` > `Field` > `FieldLabel` + control + `FieldError` /
    `FieldDescription` (shadcn-vue). Never a raw `div` with `space-y-*`. `FieldSet` +
-   `FieldLegend` for grouped checkboxes/radios (e.g. a competency picker).
+   `FieldLegend` for grouped checkboxes/radios (e.g. a competency picker) and for a small
+   group of related optional inputs (e.g. the invite form's "External reference" fieldset).
 2. **Base styling.** `@tailwindcss/forms` stays installed as a Preflight-level reset
    only — it normalizes native control appearance so shadcn-vue's own classes have a
    consistent base to override, not the other way around. Visual state (default, focus,
@@ -1542,6 +1543,44 @@ wherever a Tavus template is shown, and at the picker where the cause is chosen.
   order is the API's (no grouping by ownership).
 - **Visual.** Primary family for row hover/highlight (`hover:bg-primary/10`), never brand orange;
   focus ring on every control.
+
+### 16.17 Platform (global) avatar templates (backoffice)
+
+A platform template is authored by a superadmin and offered to every organization; organizations pin
+it from the project form but never see or edit its configuration. Change: `sdd/global-avatar-templates`.
+
+- **"Platform" badge.** `BaseBadge` in the primary tint (`bg-primary/10 text-primary`, 6.91:1 on
+  white, AA). NOT lavender: §9.1 shows lavender text fails AA on white. Never orange. Shown in the
+  project table next to the template name, in the copy dialog, and on the management page. The text
+  is always present; colour is never the only signal.
+- **Project template picker** (`ProjectForm`). A native `<select>` with two `<optgroup>`s, "Your
+  organization" first, then "Platform" (a badge cannot live inside an `<option>`, so the badge renders
+  under the select while a platform template is selected). Platform options show name and provider
+  only, never configuration. A retired global that the project is already pinned to stays listed and
+  selectable with a "(retired)" suffix so the unchanged pin can be re-submitted; retired globals are
+  not offered as new choices.
+- **Default preselection** (create form, no value yet). The organization's own ACTIVE template, else
+  the first active global, else nothing. An inactive own template is never preselected, and an
+  existing pin is never overwritten.
+- **Management page** ("Platform templates", superadmin only, gated by the ability
+  `avatarTemplates.manageGlobal`; separate route root, server 403 is the real control).
+  - List with provider, "Platform" badge, state, usage ("N organizations / M projects") and
+    `PalSyncStatus` (§16.16). `is_active` reads "offered to every organization"; retire means "stop
+    offering it to new projects", and existing pins keep working. Offer/retire are explicit buttons.
+  - **Usage warning.** Before saving an edit to, retiring or deleting a global that is in use, an
+    `AlertDialog` states "N organizations / M projects use this template" and that the change reaches
+    every pinned project, including interviews that resume. Nothing is sent until confirmed; cancel
+    sends nothing and keeps the form values. Delete always states that it is irreversible.
+  - **Delete refusals** render in text, never as a generic error: 409 `template_active` says to
+    retire the template first; 409 `template_in_use` says "N organizations / M projects still use
+    this template" with the API counts. When in use, delete is disabled with the reason in text.
+  - All checkboxes are `CheckboxField` (§16.13). Row and menu hover/highlight in the primary family
+    (`hover:bg-primary/10`), never brand orange; focus ring on every control.
+- **Accessibility.** The two picker groups carry their group labels (native `optgroup label`). A
+  disabled action with a reason references it through `aria-describedby`. Errors render in a
+  `role="alert"` region, results in `role="status"`.
+- **i18n.** Every string (badge, group labels, "(retired)", dialog, refusal messages, nav label)
+  exists in `it` and `en`.
 
 ## 17. Updates to This Document
 
