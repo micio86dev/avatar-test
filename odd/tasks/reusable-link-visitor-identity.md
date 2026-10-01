@@ -72,8 +72,15 @@ parent. Every slice touches 2+ non-trivial files, so each runs as D (writer trig
 Each slice closes with at least one work-unit commit on its stacked branch; the hash and the checks are recorded in the
 Evidence line when observed. Checkboxes are checked only with observed outcomes.
 
-- [ ] wrapper-1 (VI-wr-1.1 to 1.6) docs before the UI slices: this document, DESIGN.md 16.19 and the 16.18 quotes,
-      CLAUDE.md ruling 2, the G-43 note [D]. Evidence: pending.
+- [x] wrapper-1 (VI-wr-1.1 to 1.6) docs before the UI slices: this document, DESIGN.md 16.19 and the 16.18 quotes,
+      CLAUDE.md ruling 2, the G-43 note [D]. Evidence: wrapper commit 992e0cd on `feature/vi-wrapper-1` (cut from
+      `origin/develop` 62e3bb0; 4 files, +263/-16, docs only). Acceptance greps: no match for "interviews started
+      from it" in DESIGN.md and none for "not matchable to a data subject" in CLAUDE.md; "purged.beai.invalid" has one
+      match in CLAUDE.md; AGENTS.md is still a symlink to CLAUDE.md; the three 16.18 quotes equal the strings in the
+      backoffice tasks. Guards: `scan_bun_only`, `scan_sanctum`, `scan_laravel12` and `scan_horizon` clean over the
+      edited files. `task test:scripts` reports 24 passed and 1 failed ("minified JSON resolves the real path"); the
+      identical failure occurs on `origin/develop` with the changes stashed, so it is environmental and pre-existing,
+      not caused by this slice. The Engram mirror `odd/reusable-link-visitor-identity/tasks` was written from this file.
 - [ ] api-1a (VI-api-1a.*) shared identity request helper, call sites migrated, pure refactor [D]. Evidence: pending.
 - [ ] api-1b (VI-api-1b.*) identity required, trimmed, stored; TrimStrings key exception; 422 [D]. Evidence: pending.
 - [ ] api-1c (VI-api-1c.*) `NotPlaceholderEmail`, `is()` normalization, limiter and arch pins [D]. Evidence: pending.
@@ -82,8 +89,17 @@ Evidence line when observed. Checkboxes are checked only with observed outcomes.
 - [ ] api-4a (VI-api-4a.*) the purge redacts the email with the name [D]. Evidence: pending.
 - [ ] api-4b (VI-api-4b.*) reserved domains refused on all five enrolment paths [D]. Evidence: pending.
 - [ ] api-5 (VI-api-5.*) admin participants `q` matches the email [D]. Evidence: pending.
-- [ ] fe-1a (VI-fe-1a.1 to 1a.7) vendored `Input` and `FieldError`, identity validation util, i18n keys [D]. Evidence:
-      pending.
+- [x] fe-1a (VI-fe-1a.1 to 1a.7) vendored `Input` and `FieldError`, identity validation util, i18n keys [D]. Evidence:
+      frontend commit 567ab80 on `feature/vi-fe-1a` (cut from `origin/develop` c4adc5d; 10 files, +568/-2, of which
+      about 350 are tests and about 56 are locale copy). RED observed first for each of the three specs (module
+      missing; 48 missing-key failures). Final: `bun run lint` exit 0 (3 warnings in the vendored `Input.vue`, none new
+      in kind), `bun run typecheck` exit 0, `bun run format:check` exit 0, `bun run test:unit` 76 files / 1888 tests
+      green, coverage 94.22% lines. Mutation checks: 7 on the validation util, 5 on the locale guards, 2 on the vendored
+      components, each caught by a test. Deviation: the frontend `Input.vue` drops `disabled:pointer-events-none`
+      (pre-commit review finding; DESIGN.md section 5 requires `not-allowed` on disabled controls, vendored source
+      included); the backoffice copy still has it, a follow-up. Size: ~570 lines against ~250 forecast, tests dominate
+      and nothing was trimmed (`size:exception` recommended). The host needed the git-ignored `public/proctor/` assets
+      copied from the main checkout for `proctor-assets.spec.ts` (local setup, not committed).
 - [ ] fe-1b (VI-fe-1b.*) `ReusableIdentityForm` molecule [D]. Evidence: pending.
 - [ ] fe-2a (VI-fe-2a.*) api snapshot, composable, pending-flag util, `link_reopen` terminal, scrub pin [D]. Evidence:
       pending.
@@ -125,6 +141,11 @@ failed, skipped or unavailable check recorded honestly.
   scrubber is pinned).
 - Legacy anonymous rows created before this change stay anonymous (placeholder email, `<label> #<n>` name).
 - Retention durations stay the data controller's decision; the purge remains disabled by default.
+- Backoffice `Input.vue` still carries `disabled:pointer-events-none` (a disabled input cannot show `not-allowed`);
+  fix it in bo-1 or a separate change, with a rendered-class-list test like the frontend one.
+- The `task test:scripts` failure "minified JSON resolves the real path" is pre-existing on `develop` (environmental).
 
 ## Progress
 - 2026-10-01: SDD planning artifacts saved to Engram (144 tasks); wrapper-1 started.
+- 2026-10-01: wrapper-1 (992e0cd) and fe-1a (567ab80) committed locally, not pushed, no PR. Both are independent of the
+  api slices. The native review of each candidate is the orchestrator's.
