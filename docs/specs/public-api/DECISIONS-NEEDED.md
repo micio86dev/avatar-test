@@ -459,6 +459,17 @@ Status legend: **open** (owner decision pending), **resolved** (owner ruled).
   index; the SSO ingress stores the address as received. The public create
   path lower-cases the address and checks duplicates case-insensitively,
   and the public list filter already matches on `lower(email)`.
+- **Reusable-link redemption (reusable-link-visitor-identity).** The
+  redemption now stores the address lower-cased and checks duplicates
+  case-insensitively, while the index stays case-sensitive and the admin,
+  M2M and SSO paths keep storing the address as received. The race between a
+  mixed-case insert from those paths and a visitor redemption of the same
+  address therefore remains open.
+- **v1 note (reusable-link-visitor-identity).** `POST /v1/interviews` gains
+  one additive 422 cause: an email in a reserved placeholder domain
+  (`@invalid.beai.local`, `@purged.beai.invalid`) is refused. `openapi.v1.json`
+  is byte-identical, and this log is the only place the cause is recorded
+  (`SPEC.md` and `openapi.yaml` are unchanged).
 - **Owner decides.** Whether to normalise the SSO path too and replace the
   unique index with a functional `lower(email)` index (a migration on a
   live table with a backfill that may collide).
