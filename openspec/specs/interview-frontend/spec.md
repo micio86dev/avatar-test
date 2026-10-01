@@ -2006,9 +2006,18 @@ output, analytics payloads, or any request other than the single redemption body
 browser gate still applies first: an unsupported browser is redirected to `/unsupported` and
 MUST NOT call the redemption (so no visitor is created).
 
-(Known wording gap: the terminal `link_invalid` state reuses the existing message "has expired or
-is not valid". "Expired" is slightly untrue for a link that never expires; new copy was not
-written.)
+The terminal `link_invalid` state shows copy that is true for every case that reaches it:
+single-use links that are expired, already invalid or malformed, and reusable links that are
+unknown, malformed or disabled. A reusable link never expires, so the copy MUST NOT claim expiry.
+English: title "This Link Is No Longer Valid", body "This interview link is not valid or is no
+longer active. Please ask whoever sent it to you for a new link." Italian: title "Questo link non
+è più valido", body "Questo link per il colloquio non è valido o non è più attivo. Chiedi un
+nuovo link a chi te lo ha inviato."
+
+#### Scenario: The link_invalid copy never claims expiry
+- WHEN the terminal page is rendered with `reason=link_invalid` in English or in Italian
+- THEN neither the title nor the body contains "expire" (English) or "scad" (Italian)
+- AND the body ends with a request to ask whoever sent the link for a new one
 
 #### Scenario: First visit redeems once and lands on a token-free URL
 
@@ -2170,7 +2179,7 @@ reusable-specific route rule MAY weaken them.
 
 The candidate app's Sentry scrubber MUST scrub, from every event at any depth (request URL,
 breadcrumbs, transaction and span names, contexts, extras, messages), any string matching
-`beai_rl_[A-Za-z0-9_-]{43}` and any fragment on an `/interview/` route, including data captured
+`beai_rl_[A-Za-z0-9_-]{16,}` and any fragment on an `/interview/` route, including data captured
 BEFORE the strip (the pageload transaction and first breadcrumb read `location.href`). The
 analytics path redaction MUST keep stripping the query and fragment of the interview branch,
 which is already analytics-unsafe, and `reusable` is a named interview page for grouping. The

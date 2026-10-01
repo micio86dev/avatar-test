@@ -813,19 +813,22 @@ string:
   the one carrier the query and fragment cut does not reach). The `{16,}` form is a deliberate
   superset that also catches a truncated token.
 - `frontend` (candidate app, `utils/sentry-scrub.ts`): any string matching
-  `beai_rl_[A-Za-z0-9_-]{43}`, and any URL fragment on an `/interview/` route, MUST be removed
+  `beai_rl_[A-Za-z0-9_-]{16,}`, and any URL fragment on an `/interview/` route, MUST be removed
   from every field, including the pageload transaction and first breadcrumb captured before the
   app strips the fragment (the History instrumentation also records the strip's own
   `replaceState`).
-- `backoffice` (`utils/sentry-scrub.ts`): any string matching `beai_rl_[A-Za-z0-9_-]{43}` MUST be
+- `backoffice` (`utils/sentry-scrub.ts`): any string matching `beai_rl_[A-Za-z0-9_-]{16,}` MUST be
   replaced, because the creation response (`entry_url`) passes through the app once.
 
-The two Nuxt scrubbers MUST apply the same rule, pinned by the same fixture set in both so they
-cannot drift apart: `tests/unit/fixtures/reusable-link-scrub-cases.ts` is byte-identical in the
-`frontend` and `backoffice` repositories (the two copies hashed identically, SHA-256, at the
-implementing branch heads), and each application's static `EXPECTED_DENIED_KEYS` list names
-`token_hash`. The analytics path redaction MUST continue to drop query and fragment for the
-interview branch.
+All three scrubbers (the api and the two Nuxt apps) MUST use this one pattern, deliberately
+over-inclusive and not end-anchored: a truncated token, a token followed by more URL-safe
+characters, and a token of any length are all scrubbed, while the 8-character display prefix
+(`beai_rl_` plus 8 characters) and a 15-character tail are not. The two Nuxt scrubbers MUST apply
+the same rule, pinned by the same fixture set in both so they cannot drift apart:
+`tests/unit/fixtures/reusable-link-scrub-cases.ts` (`REUSABLE_LINK_REDACTION_CASES`) is
+byte-identical in the `frontend` and `backoffice` repositories, and each application's static
+`EXPECTED_DENIED_KEYS` list names `token_hash`. The analytics path redaction MUST continue to drop
+query and fragment for the interview branch.
 
 Any key that contains the word `token` at any position is already denied by every scrubber's
 content-word rule, so naming `token_hash` states the rule rather than changing behaviour, and a
@@ -833,10 +836,9 @@ key literally named `token_prefix` is filtered too (the fail-closed side). `toke
 identification aid and not a credential: its 16-character VALUE under a neutral key is NOT
 scrubbed, and neither is a near miss.
 
-The Nuxt pattern is not end-anchored (parity with the capability's `{43}`), so a secret longer
-than 43 characters would leave a tail; the api's `{16,}` does not have that limitation. Unifying
-the three patterns is a recorded follow-up, and no automated wrapper guard compares the two Nuxt
-scrubbers yet (the parity above was checked by comparing the two fixture files).
+The three patterns are unified. A wrapper guard that compares the two Nuxt scrubber patterns, the
+api pattern and the two fixture copies (`cmp`) is a release-time task: it can only run against
+the pinned submodules, so it lands together with the pin bump that carries the unified patterns.
 
 #### Scenario: api scrubs the body key, the hash key and the pattern
 
