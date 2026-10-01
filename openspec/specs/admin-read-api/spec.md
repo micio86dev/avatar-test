@@ -476,10 +476,10 @@ unchanged.
 The `q` parameter of `GET /api/participants` MUST match, always inside the caller's
 `organization_id`:
 
-- `candidate_ref`, `display_name` and `source`: case-insensitive substring match. The
-  `LIKE` wildcards `%` and `_` and the escape character `\` in the term MUST be matched
-  literally, never as wildcards (a term of `_` matches only values containing an
-  underscore).
+- `candidate_ref`, `display_name`, `email` and `source`: case-insensitive substring
+  match. The `LIKE` wildcards `%` and `_` and the escape character `\` in the term MUST
+  be matched literally, never as wildcards (a term of `_` matches only values containing
+  an underscore).
 - `external_id`: exact numeric equality, applied ONLY when the trimmed term is a whole
   number from 1 to 9007199254740991 (ASCII digits only). A term that is not such a
   number MUST NOT be compared to `external_id` and MUST NOT raise an error, including an
@@ -493,6 +493,10 @@ participant with a NULL `source` never matches on `source`.
 were matched with a case-sensitive, unescaped `LIKE`, so `q=maria` did not find
 "Maria Rossi" and a `%` in the term acted as a wildcard. Aligning them is a bug fix made
 in the same change so the three text fields behave identically.)
+(Previously, before `reusable-link-visitor-identity`: `email` was not searched, so an
+operator could not find a participant by address, although the participants list and detail
+show it. The requirement keeps its name so existing references stay valid; the name
+predates the email match.)
 
 #### Scenario: q matches source case-insensitively and partially
 
@@ -555,6 +559,34 @@ in the same change so the three text fields behave identically.)
   `external_id = 4471`
 - WHEN an Org A user searches `q=acme-ats` and `q=4471`
 - THEN only Org A's participant is returned
+
+#### Scenario: q matches the email case-insensitively and partially
+
+- GIVEN participants with `email` `Ada@Example.test` (stored as received), `ada@example.test`
+  and `bob@example.test`
+- WHEN `q=ada@example` and `q=ADA@EXAMPLE` are searched
+- THEN each returns the first two participants, whatever case the address was stored in,
+  and not the third
+- AND the `email` match follows the same literal-wildcard rule as the other text fields (a
+  term of `50%` matches only an address containing a literal percent sign)
+
+#### Scenario: A search by email never crosses organizations
+
+- GIVEN Org A and Org B each hold a participant with `email = "ada@example.com"` (in
+  different projects)
+- WHEN an Org A user searches `q=ada@example.com`
+- THEN only Org A's participant is returned
+- AND the match stays inside the same OR group that is AND-ed with the organization scope
+  and the `status` filter
+
+#### Scenario: A purged participant's former address no longer resolves anyone
+
+- GIVEN a participant redacted by the retention purge whose former email was
+  `ada@example.com`
+- WHEN an operator searches `q=ada@example.com`
+- THEN no purged participant is returned, because the stored address is now the
+  participant's non-identifying placeholder
+- AND searching that placeholder finds the participant
 
 ### Requirement: External Reference Fields Are Typed In The OpenAPI Export
 

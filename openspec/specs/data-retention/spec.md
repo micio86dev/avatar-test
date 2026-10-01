@@ -7,10 +7,10 @@ past their retention window.
 
 The mechanism is fully built and fully tested. **The durations are not set.**
 Open product decision #2 needs legal sign-off, and that sign-off must cover
-`webhook_deliveries.payload` and `participants.display_name` — both of which
-postdate the original framing and both of which carry candidate data — and also
-`participants.external_id` and `participants.source`, which the purge retains as a
-documented default (see the artifact inventory).
+`webhook_deliveries.payload`, `participants.display_name` and `participants.email`
+(the purge redacts the name and the email together) — all of which carry candidate
+data — and also `participants.external_id` and `participants.source`, which the purge
+retains as a documented default (see the artifact inventory).
 
 Coverage target: 95%. Deletion is the one operation with no undo.
 
@@ -54,14 +54,20 @@ The mechanism MUST cover every artifact class that holds candidate data:
 | `snapshot` | The `interview_snapshots` row AND the object it points at on the storage disk |
 | `transcript` | `utterances` rows, selected on the utterance's own `ts` timestamp |
 | `webhook_payload` | `webhook_deliveries.payload`, overwritten — the delivery record itself is retained |
-| `participant_pii` | `participants.display_name`, overwritten — the opaque `candidate_ref` is retained |
+| `participant_pii` | `participants.display_name` AND `participants.email`, both overwritten (the name with the sentinel, the email with a non-identifying placeholder derived from the participant's own `candidate_ref`) — the opaque `candidate_ref` is retained |
 
-Both redactions overwrite with a SENTINEL rather than NULL. Both columns are
-`NOT NULL`, and relaxing them would weaken invariants live code depends on: C6's
-SSO exchange asserts a non-empty `display_name`, and C10 treats a delivery's
-payload as always present. The personal data is equally gone either way, so
-there is no GDPR argument for paying that price. A sentinel is also legible in a
-UI — `[purged]` reads as a deliberate act, where an empty name reads as a bug.
+(Previously: `participant_pii` overwrote only `participants.display_name`;
+`participants.email` was never redacted.)
+
+Both the name and the payload redactions overwrite with a SENTINEL rather than
+NULL, and the email is overwritten with a placeholder rather than NULL. All
+three columns are `NOT NULL`, and relaxing them would weaken invariants live
+code depends on: C6's SSO exchange asserts a non-empty `display_name`, C10
+treats a delivery's payload as always present, and `participants.email` is `NOT
+NULL` with `UNIQUE(project_id, email)` (CLAUDE.md ruling 8). The personal data
+is equally gone either way, so there is no GDPR argument for paying that price.
+A sentinel is also legible in a UI — `[purged]` reads as a deliberate act, where
+an empty name reads as a bug.
 
 Two of these are redactions rather than deletions, and the distinction is
 deliberate. A webhook delivery row is an integration audit record: whether a
@@ -70,18 +76,20 @@ The same holds for a participant — the opaque `candidate_ref` is the calling
 system's own identifier and carries no personal data, so removing the row would
 destroy the audit trail without protecting anybody.
 
-`participants.external_id` and `participants.source` are the calling system's own
-record id and the calling system's name. They belong to NO artifact class: every
-class MUST leave both columns exactly as they are (values retained verbatim, NULL
-left NULL, never overwritten with the sentinel), treated like `candidate_ref`.
-This is a DOCUMENTED DEFAULT pending legal sign-off, not a legal conclusion: an
-external id can still be linkable personal data in a given integration, so the GDPR
-retention sign-off (CLAUDE.md ruling 2, open product decision #2) MUST also name
-`participants.external_id` and `participants.source`, alongside
-`webhook_deliveries.payload` and `participants.display_name`. Should legal decide
+`participants.external_id` and `participants.source` are the calling system's
+own record id and the calling system's name. They belong to NO artifact class:
+every class MUST leave both columns exactly as they are (values retained
+verbatim, NULL left NULL, never overwritten with the sentinel), treated like
+`candidate_ref`. This is a DOCUMENTED DEFAULT pending legal sign-off, not a
+legal conclusion: an external id can still be linkable personal data in a given
+integration, so the GDPR retention sign-off (CLAUDE.md ruling 2, open product
+decision #2) MUST also name `participants.external_id` and
+`participants.source`, alongside `webhook_deliveries.payload`,
+`participants.display_name` and `participants.email`. Should legal decide
 otherwise, adding a class is additive.
 (Previously: the inventory did not mention the external reference, leaving its
-retention undefined.)
+retention undefined; it then listed `display_name` but not `email` in the
+sign-off.)
 
 #### Scenario: A snapshot purge removes the stored object, not only the row
 
@@ -111,31 +119,248 @@ silently permanent.
 
 #### Scenario: The participant_pii purge retains the external reference
 
-- GIVEN a participant older than the `participant_pii` window with `external_id = 4471`,
-  `source = "acme-ats"`, and a real `display_name`
+- GIVEN a participant older than the `participant_pii` window with `external_id
+  = 4471`, `source = "acme-ats"`, a real `display_name` and a real `email`
 - WHEN the purge runs
-- THEN `display_name` is overwritten with the sentinel
+- THEN `display_name` is overwritten with the sentinel and `email` with the
+  participant's placeholder
 - AND `candidate_ref`, `external_id` and `source` are unchanged
 
 #### Scenario: NULL is not coerced
 
-- GIVEN a participant past the window with `external_id = NULL` and `source = NULL`
+- GIVEN a participant past the window with `external_id = NULL` and `source =
+  NULL`
 - WHEN the purge runs
 - THEN both columns are still NULL (not the sentinel, not empty)
 
 #### Scenario: No other class touches the external reference
 
-- GIVEN a participant with an external reference, with snapshots, utterances, and webhook
-  deliveries past their windows
+- GIVEN a participant with an external reference, with snapshots, utterances,
+  and webhook deliveries past their windows
 - WHEN the `snapshot`, `transcript`, and `webhook_payload` classes are purged
 - THEN the participant's `external_id` and `source` are unchanged
 
+#### Scenario: No other class touches the participant's name or email
+
+- GIVEN a participant with a real name and email, with snapshots, utterances and
+  webhook deliveries past their windows, but inside the `participant_pii` window
+- WHEN the `snapshot`, `transcript` and `webhook_payload` classes are purged
+- THEN the participant's `display_name` and `email` are unchanged
+
 #### Scenario: The purge remains tenant-scoped and idempotent with the new columns
 
-- GIVEN participants of two organizations with the same `source` and `external_id`
+- GIVEN participants of two organizations with the same `source` and
+  `external_id`
 - WHEN the purge runs twice
 - THEN each organization's rows are processed inside its own scope only
 - AND the second run changes nothing
+
+### Requirement: The Participant Purge Also Redacts The Email
+
+When the `participant_pii` class redacts a participant's `display_name`, it
+MUST, in the SAME pass, on the SAME rows and under the SAME conditions
+(retention enabled, a ratified duration for `participant_pii`, `created_at`
+older than that class's cutoff, the configured batch size), also replace
+`participants.email` with a non-identifying placeholder. No separate class,
+duration, switch or schedule exists for the email: if the name is eligible the
+email is eligible, and if the class is disabled or unratified neither is
+touched.
+
+The placeholder MUST: (a) be derived deterministically from the participant's
+OWN opaque `candidate_ref` and from nothing else (no part of the former address,
+the name, the link label or any other personal data); (b) keep the column NOT
+NULL and keep `UNIQUE(project_id, email)` satisfied for every participant of a
+project, including several purged participants of the same project
+(`candidate_ref` is unique per project, so the placeholder is too); (c) fit the
+255-character column even for a 255-character `candidate_ref` (a candidate
+reference too long to carry the placeholder domain MUST still yield a
+deterministic, project-unique, at most 255-character placeholder); (d) be in a
+reserved non-routable domain and be recognized as a placeholder by the one
+shared predicate (`PlaceholderEmail::is()`), so that the existing mail guard
+refuses it exactly like `@invalid.beai.local` and an already-purged participant
+can never be mailed. The placeholder is `<sha256 hex of
+candidate_ref>@purged.beai.invalid`: a lower-case hex local part is always a
+valid address and always 84 characters, so (c) holds whatever the reference, and
+the reserved `.invalid` domain meets (d).
+
+The redaction MUST be idempotent and re-runnable: the set of participants a pass
+redacts is the due participants whose name is not yet the sentinel OR whose
+email is not yet their own placeholder (the purged spelling above, or the legacy
+`<candidate_ref>@invalid.beai.local`). Consequently (i) a second pass with no
+new expiries changes nothing, reports zero and writes no audit row; (ii) a
+participant whose name was already redacted by an earlier version of the purge,
+but whose real email is still stored, MUST have its email redacted by the next
+pass (a backfill of already-purged rows); (iii) a legacy anonymous row whose
+email already equals its own legacy placeholder is not rewritten for its email.
+The pass MUST never write to a participant that is not yet due (both fields
+kept). `candidate_ref`, `external_id`, `source`, `reusable_interview_link_id`,
+`organization_id`, `project_id`, status, scores and every other column stay
+exactly as they are. A pass MUST NOT abort, and MUST NOT leave other due rows
+unredacted, because one row's placeholder collides with another participant's
+stored address in the same project (a theoretical case: only a literal address
+equal to that placeholder can collide); such a row is reported and retried by
+the next pass.
+
+The audit row of the class (`data.purged`, `subject_type = participant_pii`) is
+unchanged in shape: class, count and cutoff only; it MUST NOT contain the
+redacted name or email. `--dry-run` reports the count of participants a real run
+would redact (including the backfill case) and writes nothing. Tenant scoping is
+unchanged: the pass works across organizations exactly as before, each row is
+rewritten only from its own `candidate_ref`, and no value is read from or
+written to another participant. The redaction creates no new read surface across
+tenants.
+
+(Reconciled with the implementation, where it differs from the original delta
+text: (1) the spelling the original delta left to design is the hash placeholder
+above. The legacy `<candidate_ref>@invalid.beai.local` overflows the
+255-character column for a long reference and is not always a valid address, and
+`.local` is mDNS, while `.invalid` is reserved by RFC 6761.
+`PlaceholderEmail::forPurged()` derives it in PHP and
+`PlaceholderEmail::purgedSqlExpression()` is its SQL twin, used by the purge so
+the old address is never read into the application; a test pins that the two
+agree for ASCII, multibyte and 255-character references.
+`PlaceholderEmail::is()` recognizes both reserved domains, ignoring case and
+surrounding whitespace, so the mail guard refuses a purged address exactly like
+a legacy one. (2) Each row is written alone, in its own transaction, so a
+collision (SQLSTATE `23505` on `participants_project_id_email_unique`) skips
+only that row: the warning names the participant id and never an address, the
+row is retried by the next pass, and any other database error propagates. (3)
+The count of the class, and with it the audit row, is the number of rows
+actually written: a participant deleted between the selection and the write is
+not counted. A dry run counts the selected set. (4) A legacy anonymous row is
+recognized only by its exact own legacy placeholder,
+`<candidate_ref>@invalid.beai.local`; any other spelling is replaced by the
+purged placeholder. (5) A re-issue of the entry link for a purged participant
+sends the stored name and email back; the own-placeholder exception accepts
+them, the link is minted, nothing is restored, and the invitation job refuses to
+send.)
+
+#### Scenario: A due participant has both fields redacted
+
+- GIVEN retention enabled with a `participant_pii` duration and a participant
+  older than the cutoff with `display_name = "Ada Lovelace"`, `email =
+  "ada@example.com"`, `candidate_ref = "ref-1"`, `external_id = "4471"`, `source
+  = "acme-ats"`
+- WHEN the purge runs
+- THEN `display_name` is `[purged]` and `email` is the participant's
+  non-identifying placeholder derived from `ref-1` (`<sha256 hex of
+  "ref-1">@purged.beai.invalid`), containing no part of the former address or
+  name
+- AND `candidate_ref`, `external_id`, `source`, `status` and
+  `reusable_interview_link_id` are unchanged
+
+#### Scenario: A reusable-link visitor with a real email is redacted like any participant
+
+- GIVEN a visitor created by redemption with a self-declared name and email,
+  older than the cutoff
+- WHEN the purge runs
+- THEN its name is `[purged]`, its email is its placeholder, and its
+  `candidate_ref` (`rlv_...`) and link marker are unchanged
+
+#### Scenario: A not-yet-due participant keeps both fields
+
+- GIVEN a participant newer than the cutoff with a real name and a real email
+- WHEN the purge runs
+- THEN `display_name` and `email` are both unchanged and the row is not written
+
+#### Scenario: Re-running the purge changes nothing
+
+- GIVEN a purge pass already redacted the due participants
+- WHEN the purge runs again with no new expiries
+- THEN no participant row changes, the class count is 0 and no second audit row
+  is written
+
+#### Scenario: Two purged participants of one project keep the unique constraint
+
+- GIVEN two due participants of the same project with different `candidate_ref`
+  values and different real emails (and a third, not-yet-due participant of that
+  project)
+- WHEN the purge runs
+- THEN both are redacted to distinct placeholders, `(project_id, email)` stays
+  unique and the pass does not fail
+- AND the not-yet-due participant keeps its real email
+
+#### Scenario: The placeholder fits the column for the longest candidate reference
+
+- GIVEN a due participant whose `candidate_ref` is 255 characters long
+- WHEN the purge runs
+- THEN the stored email is at most 255 characters, is deterministic for that
+  participant, differs from every other participant's in the project, and is
+  recognized by `PlaceholderEmail::is()`
+
+#### Scenario: A purged participant can never be mailed
+
+- GIVEN a participant redacted by the purge
+- WHEN an invitation is attempted, and when an operator re-issues the entry link
+  with `send_email` true (the API default)
+- THEN the invitation job refuses the address through the shared placeholder
+  predicate, the link is still minted and returned, and no mail is sent
+
+#### Scenario: The former address no longer resolves anyone
+
+- GIVEN a participant redacted by the purge whose former email was
+  `ada@example.com`
+- WHEN an operator searches the participants list with `q=ada@example.com`, and
+  the same address is enrolled again in the same project
+- THEN the search returns no purged participant, and the new enrolment succeeds
+  without a uniqueness conflict
+
+#### Scenario: A participant whose name was already purged gets its email redacted next
+
+- GIVEN a participant older than the cutoff with `display_name = "[purged]"`
+  (redacted by an earlier version of the purge) and a real `email`
+- WHEN the purge runs
+- THEN its email becomes its placeholder, the participant is counted once, and a
+  second run counts zero
+
+#### Scenario: A legacy anonymous row is not rewritten
+
+- GIVEN a legacy anonymous visitor already holding
+  `<candidate_ref>@invalid.beai.local`, due for purge
+- WHEN the purge runs
+- THEN its name becomes `[purged]`, its email is unchanged (it already equals
+  its own legacy placeholder) and the pass does not fail
+
+#### Scenario: A colliding placeholder does not abort the pass
+
+- GIVEN two due participants in one project, and another participant of that
+  project holding exactly the placeholder address the first would receive
+- WHEN the purge runs
+- THEN the second due participant is redacted, the colliding row is reported and
+  left for the next pass, and the command does not terminate with an error for
+  the other rows
+
+#### Scenario: Disabled or unratified retention touches neither field
+
+- GIVEN retention is disabled, and separately retention is enabled with no
+  duration for `participant_pii`
+- WHEN the purge runs
+- THEN no participant's name or email changes, and the skipped class is reported
+  as before
+
+#### Scenario: Dry run writes nothing
+
+- GIVEN due participants, one of which already has the sentinel name but a real
+  email
+- WHEN the purge runs with `--dry-run`
+- THEN the reported count includes every participant a real run would redact,
+  and no row changes
+
+#### Scenario: The audit trail carries no personal data
+
+- GIVEN a purge that redacted participants
+- WHEN the `data.purged` audit row for `participant_pii` is read
+- THEN it contains the class, the count and the cutoff, and neither a name nor
+  an email address
+
+#### Scenario: Tenant scoping is unchanged
+
+- GIVEN participants of two organizations (in different projects) with the same
+  `candidate_ref`, and due
+- WHEN the purge runs twice
+- THEN each participant is redacted from its own `candidate_ref` only, each
+  organization's rows are processed inside its own scope, no row of one tenant
+  receives a value derived from another, and the second run changes nothing
 
 ### Requirement: The purge resolves the storage disk through the same configuration point as the writer
 
