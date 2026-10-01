@@ -32,8 +32,11 @@ feature set with real E2E runs and native reviews, and leave local containers on
 - [x] H1 [wrapper, inline] `.atl/skill-registry.md` committed (it is tracked and was committed before; adds graphify).
 - [x] H2 [frontend] `link_invalid` copy true for never-expiring links (it/en); unit tests pin both locales.
 - [x] H3 [api, frontend, backoffice] one `beai_rl_[A-Za-z0-9_-]{16,}` scrubber pattern everywhere, shared byte-identical
-      fixture with exact cases, mutation-proven. The wrapper guard that compares them is a RELEASE-TIME task: it can only
-      run against pinned submodules, so it lands with the pin bump (CI would be red otherwise).
+      fixture with exact cases, mutation-proven. The wrapper guard that compares them (`scrubber_pattern_divergence`,
+      step c2 of wrapper-ci.yml, with its self-test fixtures) is ADDED on this branch (commit 6f616e8). It runs against
+      the pinned submodules, which still carry the old `{43}` patterns, so this branch MUST NOT be merged to develop on
+      its own: it is merged only inside `release/0.49.0`, in the same change as the pin bump to the releases that carry
+      `{16,}` (the CI of that release PR is the first run of the guard on the wrapper).
 - [x] H4 [api] empty list filter values are "not provided" on every v1 list; `?field[]=` on a scalar filter is a 400;
       the webhook `interview_id` filter now validates and is proven narrowing. SPEC.md 3.2 states the rule.
 - [x] H5 [api] internal notes no longer reach the exported OpenAPI; guard test (phrases, decision ids, and now any
@@ -46,8 +49,9 @@ feature set with real E2E runs and native reviews, and leave local containers on
 - [x] H8 [all] native reviews with the owner's consent (see the record below), findings fixed or refuted.
 - [x] H9 [wrapper] this document, specs and the public contract updated.
 - [ ] H10 [open decision] anonymous reusable-link visitors versus asking name and email (GDPR); the owner decides.
-- [ ] H11 [release, not authorized] push, PRs, merge, release 0.49.0, pins, SDKs, the scrubber guard, the first Railway
-      build of `avatar-test`.
+- [ ] H11 [release, authorized by the owner on 2026-10-01: "pubblica sempre usando Git flow"] push, PRs, merge, release
+      0.49.0 with the pin bump and SDKs (the scrubber guard is already on this branch and is enabled by that pin bump),
+      the first Railway build of `avatar-test`.
 
 ## Route declaration and trigger evidence
 - Every code task touches 2+ non-trivial files in repos of their own: one bounded writer per repo (writer trigger).
