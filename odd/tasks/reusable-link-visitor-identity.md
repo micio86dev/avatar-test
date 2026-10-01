@@ -177,7 +177,9 @@ orchestrator pushed them (api backend#104 to #111, frontend #46, #47, #50, #51, 
       email (decision R4, pinned in bo-1). Wrapper chain checks: every requirement named in the spec index exists exactly
       once, none has zero scenarios, no duplicate names, `scan_bun_only` over `openspec/specs` clean, AGENTS.md still a
       symlink to CLAUDE.md.
-- [ ] api-R, fe-R, bo-R (VI-api-R.*, VI-fe-R.*, VI-bo-R.*) release preparation, gated [D]. Evidence: pending.
+- [ ] api-R, fe-R, bo-R (VI-api-R.*, VI-fe-R.*, VI-bo-R.*) release preparation, gated [D]. Evidence: api 0.65.0 and
+      frontend 0.22.0 are reported released (see the review and checks record); the executor did not run these tasks, so
+      they stay unchecked until their own evidence is recorded; bo-R is not reported.
 - [ ] release chain (VI-wr-R.1 to R.4) gated on an explicit user request; no deploy is inferred [I]. Evidence: pending.
 - [ ] wrapper-3 (VI-wr-3.1, 3.2) pins and close [D]. Evidence: pending.
 
@@ -189,15 +191,21 @@ actions and the cross-repo test runs. wrapper-2a, 2b and 2c are mechanical spec 
 touches several large files and needs the reconciliation reading of the merged api, frontend and backoffice code.
 
 ## Review and checks record (per task)
-Native reviews as reported by the orchestrator (receipt-driven development on; the executor ran none):
-- api 1c + 2: approved with advisories. api 3 + 4a: approved with advisories. api 4b + 5: approved with advisories.
-  Across these three reviews 8 findings were fixed and 7 were answered with evidence.
+Native reviews, as reported by the coordinator (receipt-driven development on; the executor ran none):
 - api 1a + 1b: ESCALATED. The review ended with an inconclusive finding R3-001 of unknown causality, and the tooling
   does not expose its text, so it is neither fixed nor refuted. Open.
-- frontend fe-1a: approved. fe-3: approved. fe-2a: the review opened a correction, resolved structurally by folding
-  fe-2a into fe-2b (PR frontend#50); its lineage remains open because abandoning it needs a maintainer authorization.
-  fe-2b: review pending.
-- backoffice bo-1 and the wrapper slices: no native review result had been reported when this was written.
+- api 1c + 2, 3 + 4a and 4b + 5: approved with advisories; 8 advisories were fixed and 7 were answered with evidence.
+- frontend fe-1a, fe-2b, fe-3 and the fix batch: approved. fe-2a was folded into fe-2b (PR frontend#50); its review
+  lineage stays open because abandoning it needs a maintainer authorization.
+- backoffice bo-1: under the review budget, verified independently.
+- wrapper 2a, 2b and 2c (PRs beai#48, #49, #50): approved with advisories, fixed in follow-up commits on
+  `feature/vi-wrapper-2c`. wrapper-1 (PR beai#45) could not be reviewed by the tool (`lens_context_budget_exceeded`, even
+  for its first commit alone, because `CLAUDE.md` and `DESIGN.md` are larger than the reviewer context); its `CLAUDE.md`
+  text was checked manually by the coordinator and is accurate.
+Release (reported by the coordinator, not observed by the executor): api 0.65.0 and frontend 0.22.0 were released and
+deployed back to back at 18:48 UTC on 2026-10-01 (a window of about one minute). Production checks passed: the 422 is
+identical with and without a token, a valid identity with a bogus token gets the 404, a reserved-domain address is
+refused, and the migrations were fine. The backoffice release and the wrapper pins (wrapper-3) are not recorded here.
 Functional checks (observed): api 7790 tests, 0 failed (full suite on the tip); frontend unit 2030, host E2E 146 passed;
 backoffice unit 3383, E2E 408 (chromium and webkit). Per-slice focused results and mutation counts are in the Evidence
 lines above. Known environmental noise: api tests that read the wrapper `docs/` directory error when the worktree sits
@@ -248,8 +256,17 @@ pre-existing failure.
   scrubber is pinned); recorded in the live reusable-interview-links spec as a known limitation.
 - Legacy anonymous rows created before this change stay anonymous (placeholder email, `<label> #<n>` name).
 - Retention durations stay the data controller's decision; the purge remains disabled by default.
-- Release preparation (api-R, fe-R, bo-R), the gated release chain and the wrapper pins (wrapper-3) are not started;
-  the bo-1 and fe-2a snapshots must be re-synced from the api release branch (`info.version` changes).
+- A redemption that succeeds on the server whose response is lost cannot be retried: the same email gets 409
+  `duplicate_enrolment` and the enrolment is never resumed, so the visitor cannot continue. An idempotency key on the
+  redemption would fix it; out of scope here (live specs `interview-frontend` and `reusable-interview-links`, known
+  limitation 12).
+- The purge's collision warning says the row is "retried next run", which is misleading: the placeholder is
+  deterministic, so a colliding row is skipped on every pass until an operator resolves the holder row. The spec now
+  says so; the log wording in `PurgeExpiredDataCommand` is a candidate fix in the api.
+- The `email_sent` flag of the entry-link response reports queuing, not delivery: it is `true` for a purged or legacy
+  placeholder participant that is not a reusable-link visitor, although the job then refuses to send. Pre-existing for
+  legacy rows; now stated in the data-retention spec.
+- bo-R and wrapper-3 (pins and close) are not recorded as done; wrapper-1 (beai#45) was reviewed manually only.
 - The `task test:scripts` failure "minified JSON resolves the real path" is pre-existing on `develop` (environmental).
 
 ## Progress
@@ -265,3 +282,5 @@ pre-existing failure.
   search. The deltas of this change are fully applied to the live specs: 11 requirements added, 12 replaced in full and
   1 removed (the index counts), plus the admin-read-api search requirement modified by the owner decision. Next:
   release preparation (api-R, fe-R, bo-R), then the gated release chain and wrapper-3, none of which is started.
+- 2026-10-01: the wrapper slices were pushed (beai#45, #48, #49, #50) and reviewed; advisories fixed in commits after
+  a4f637a. api 0.65.0 and frontend 0.22.0 were released and deployed at 18:48 UTC (reported by the coordinator).
