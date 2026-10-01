@@ -110,17 +110,22 @@ confirmed to exist in its repository when this document was written.
       fixtures are byte-identical (`cmp` exit 0 between the frontend B5 and backoffice B6c branch heads); re-check at the
       pinned tags. Checked: every requirement of every touched spec has at least one scenario (scratch script, see the
       checks record).
-- [ ] B7b.1 / B7b.11 wrapper verify (`task verify:openapi`, `task test:scripts`, `sh sdks/generate.sh` with a clean
-      `git diff --exit-code sdks/`; no SDK drift is expected because v1 did not change). NOT done.
+- [x] B7b.1 / B7b.11 wrapper verify: `task verify:openapi` exit 0 (openapi.json semantically identical across api,
+      frontend and backoffice); `sh sdks/generate.sh` run twice with no drift on the second run; the only SDK change
+      is the version header (v1 did not change). Wrapper CI (Cross-Stack Consistency, Public API Contract, Public API
+      SDKs) green on #42 and #43.
 - [ ] B7b.9 manual local harness on rebuilt images (create from the backoffice, open the URL in a desktop Chromium, a
-      second visit, Disable, reopen, first visitor still finishes). NOT done.
-- [ ] R.1 to R.5 api release `0.63.0` (Git Flow release branch, `VERSION` + `composer.json`, re-export for
-      `info.version`, tag, back-merge). NOT done; needs explicit authorization for push, tag and PR.
-- [ ] R.6 / R.7 frontend and backoffice releases (`VERSION` AND `package.json`) with the generated client re-synced from
-      the released api. NOT done.
-- [ ] B7b.10 submodule pins to the released tags (api first, pins last) and SDK regeneration. NOT done.
-- [ ] Deploy and production smoke checks (`CANDIDATE_APP_URL` must be set in the api environment before the first link
-      is created, or create answers 500 and stores nothing). NOT done; deploy only on explicit request.
+      second visit, Disable, reopen, first visitor still finishes). NOT done: no manual browser walkthrough was
+      performed, locally or in production. Production was checked with read-only requests only (see Progress).
+- [x] R.1 to R.5 api release `0.63.0`: PR #99, tag `v0.63.0` at `9284001`, back-merge #100. Both migrations ran in the
+      deploy step.
+- [x] R.6 / R.7 frontend `0.20.0` (PR #41, tag at `4cf151e`, back-merge #42) and backoffice `0.45.0` (PR #59, tag at
+      `3b58885`, back-merge #60), clients re-synced from the released api (`codegen:check` OK).
+- [x] B7b.10 submodule pins and SDK regeneration: wrapper `0.48.0` (PR #42, tag `v0.48.0` at `658e0c2`, back-merge #43).
+- [x] Deploy and production smoke (read-only, authorised by the owner): Railway api, worker, scheduler, frontend and
+      backoffice all SUCCESS on the release commits. A link was NOT created in production, so the create path
+      (including the `CANDIDATE_APP_URL` requirement: unset means create answers 500 and stores nothing) is
+      unverified there; check that variable before the first real link.
 
 ## Route declaration and trigger evidence
 - Every slice touches 2+ non-trivial files in a repo of its own, so each ran through one bounded SDD apply executor
@@ -185,8 +190,13 @@ confirmed to exist in its repository when this document was written.
 - 2026-09-30: planning artifacts saved to Engram; B1a started.
 - 2026-10-01: api slices B1a to B4 done locally and stacked into api PR #98; frontend B5 and backoffice B6a, B6b merged
   into develop (frontend#40, backoffice#57), B6c in backoffice#58; wrapper B7a (DESIGN.md 16.18) committed.
-- 2026-10-01: B7b documentation parts committed on `feature/reusable-links-b7a-design` (not pushed, no PR). Releases,
-  pins, SDK regeneration and deploy are not started.
+- 2026-10-01: B7b documentation parts committed on `feature/reusable-links-b7a-design` (not pushed, no PR).
+- 2026-10-01: released in api order and deployed on Railway, each deploy checked before the next: api 0.63.0, frontend
+  0.20.0, backoffice 0.45.0, wrapper 0.48.0 (docs, specs, pins, SDKs). Production checks, all read-only: health 200;
+  `POST /api/reusable-links/redeem` answers the same generic 404 for an invalid, empty, array-shaped and query-string
+  token and never a 500; the admin reusable-links endpoint answers 401 without credentials, also through the backoffice
+  proxy; frontend `/interview/reusable` answers 200; no exceptions in the api and worker logs after the deploy. Merged
+  branches and release worktrees were removed.
 
 ## Follow-ups for the owner (not done on purpose)
 - Trusted proxies: the api configures no `trustProxies`, so behind the hosting edge the per-IP bucket (10 per minute)
@@ -205,7 +215,7 @@ confirmed to exist in its repository when this document was written.
 - Run the native reviews (`gentle-ai review`) for the unreviewed slices if wanted.
 
 ## Next step
-1. Confirm CI on api PR #98 and the merge state of backoffice#58.
-2. With explicit authorization: api release 0.63.0, then re-sync the frontend and backoffice clients from the released
-   api, release both, then the wrapper close-out (B7b.1, B7b.9, B7b.10, B7b.11: verify, manual harness, pins, SDK
-   regeneration), then the deploy only on explicit request.
+Everything above is released and deployed. What is left is the owner's:
+1. Walk through the feature once in production or on a rebuilt local stack (B7b.9), and confirm `CANDIDATE_APP_URL` is
+   set in the Railway api environment before creating the first real link.
+2. Decide the trusted-proxy change (first follow-up), then the native reviews if wanted.
