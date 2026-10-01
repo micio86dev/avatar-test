@@ -2147,10 +2147,11 @@ event_type, dedupe_key)` dedupe) as a first SSO exchange. A refused or rolled-ba
 
 The reusable-link redemption MUST store the participant email trimmed and lower-cased and MUST
 detect a duplicate in the same project case-insensitively (`lower(email)` semantics), mirroring
-the v1 `EnrolCandidate` path. It MUST NOT change how any other enrolment path handles the
-email: the SSO exchange, the M2M participant create and sso-link mint, and the operator entry
-link continue to store the address as they receive it and to refuse a duplicate with their
-existing vocabulary (the v1 problem+json `409 duplicate_enrolment`,
+the v1 `EnrolCandidate` path. It MUST NOT change how any other enrolment path stores or
+compares the email, apart from the one additive refusal of a reserved placeholder address
+described below: the SSO exchange, the M2M participant create and sso-link mint, and the
+operator entry link continue to store the address as they receive it and to refuse a duplicate
+with their existing vocabulary (the v1 problem+json `409 duplicate_enrolment`,
 `EnrolmentRefusalReason::DuplicateEmail = 'duplicate_email'`, the entry-link `409 {message:
 'entry_link_participant_duplicate_email', reason: 'duplicate_email'}`, the M2M and
 scheduled-participant mapping of the `participants_project_id_email_unique` violation to

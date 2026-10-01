@@ -772,9 +772,10 @@ depends only on `display_name` and `email`: the same invalid identity MUST yield
 byte-identical response whatever `link_token` is (valid, disabled, unknown, malformed, wrongly
 typed, absent). Rules, identical to every other enrolment path: `display_name` is a required
 string of at most 255 characters; `email` is a required, well-formed email address of at most
-255 characters. Because the identity input is trimmed and empty strings become null before
-validation (see "Identity Input Is Trimmed And The Email Is Normalized"), a whitespace-only
-value is "required" and fails.
+255 characters that is not under a reserved placeholder domain (see the reconciliation below).
+Because the identity input is trimmed and empty strings become null before validation (see
+"Identity Input Is Trimmed And The Email Is Normalized"), a whitespace-only value is "required"
+and fails.
 
 A failure MUST return the framework's standard HTTP 422 validation body (`message` plus
 `errors` keyed ONLY by `display_name` and/or `email`). The response MUST NOT name `link_token`,
@@ -858,9 +859,10 @@ only `email` and discloses nothing about the reserved domains.)
 
 ### Requirement: Identity Input Is Trimmed And The Email Is Normalized
 
-The framework's `TrimStrings` middleware MUST be skipped on this route for the single input key
-`link_token` and for no other key: `display_name` and `email` are trimmed exactly like on every
-other enrolment endpoint, while the token keeps its one-spelling rule. The stored
+The framework's `TrimStrings` middleware MUST be skipped for the single input key `link_token`
+(registered on the key, so it takes effect on this route, the only one that reads it) and for no
+other key: `display_name` and `email` are trimmed exactly like on every other enrolment
+endpoint, while the token keeps its one-spelling rule. The stored
 `display_name` MUST be the trimmed value, otherwise verbatim (no case change, no sanitization;
 it is rendered as escaped text). The stored `email` MUST be the trimmed value lower-cased with
 multibyte-safe lower-casing. The rest of the application's `TrimStrings` behavior MUST be
@@ -1595,28 +1597,31 @@ survives the purge nowhere.)
 
 ### Requirement: No Mail Is Ever Sent To A Visitor Address
 
-Redemption MUST send no email of any kind (no welcome, no confirmation, no notification). Every
-code path that mails a participant MUST go through ONE shared guard that refuses to send when
-the participant is a visitor (carries the link marker `reusable_interview_link_id`) OR its
-address is a placeholder (the `@invalid.beai.local` suffix recognized by
-`PlaceholderEmail::is()`, covering legacy anonymous visitors and the backfilled rows the
-convention already covers). A visitor's address is self-declared and unverified, so mailing it
-would turn every link holder into a sender of BEAI mail to arbitrary third parties. The
-convention for placeholder addresses (the domain and the construction of the address) stays
-owned by that one class. A refusal MUST be logged with a message that states why the send was
-refused (visitor address or placeholder) and MUST NOT contain the address and MUST NOT claim
-the row "predates the mandatory-email column". The operator's "Generate new link" on a visitor
-(`send_email` defaults to true in the API) MUST still return the link and MUST queue no mail;
-the backoffice re-issue already sends `send_email: false`, so the guard is a second line of
-defence.
+Redemption MUST send no email of any kind (no welcome, no confirmation, no notification). No
+code path MAY mail a participant that is a visitor (carries the link marker
+`reusable_interview_link_id`) or whose address is a placeholder. The placeholder rule is ONE
+shared predicate, `PlaceholderEmail::is()`, which recognizes the two reserved domains
+`@invalid.beai.local` and `@purged.beai.invalid` (covering legacy anonymous visitors, the
+backfilled rows the convention already covers and purged participants) and is applied by the
+invitation job; the visitor rule is applied at the dispatch site, the operator entry-link
+controller (see the reconciliation below). A visitor's address is self-declared and unverified,
+so mailing it would turn every link holder into a sender of BEAI mail to arbitrary third
+parties. The convention for placeholder addresses (the domains and the construction of the
+address) stays owned by that one class. A refusal MUST be logged with a message that states why
+the send was refused (visitor address or placeholder) and MUST NOT contain the address and MUST
+NOT claim the row "predates the mandatory-email column". The operator's "Generate new link" on
+a visitor (`send_email` defaults to true in the API) MUST still return the link and MUST queue
+no mail; the backoffice re-issue already sends `send_email: false`, so the refusal is a second
+line of defence.
 
 (Previously: the guard recognized only the placeholder address; visitors carried a placeholder,
 so the marker was not needed.)
 
-(Reconciled with the implementation: the original delta described ONE shared guard that sees
-the participant. The invitation job is scalar-only: it receives the address, the link and
-display strings, never the participant, so it cannot see the visitor marker. The refusal for a
-visitor therefore happens at the one dispatch site, the operator entry-link controller: the
+(Reconciled with the implementation: the original delta required ONE shared guard that sees the
+participant and refuses both a visitor and a placeholder. The invitation job is scalar-only: it
+receives the address, the link and display strings, never the participant, so it cannot see the
+visitor marker. The refusal for a visitor therefore happens at the one dispatch site, the
+operator entry-link controller: the
 entry-link minter reports whether the `candidate_ref` it mints for is an existing row carrying
 the link marker, and the controller then queues no invitation, still mints and returns the
 link, and reports `email_sent: false`, so the response stays truthful. It writes one log line
