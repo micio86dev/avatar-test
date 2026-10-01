@@ -585,6 +585,120 @@ field.
 - WHEN the export-drift check runs after this change
 - THEN it fails until the exports are regenerated
 
+### Requirement: Participant List And Detail Carry The Reusable Link Origin
+
+The participants list resource (`GET /api/participants`) and the participant detail resource
+(`GET /api/participants/{id}`) MUST carry `reusable_link`, always present: an object
+`{"id": "rlk_...", "label": <string|null>}` when the participant was created by a reusable-link
+redemption (its `reusable_interview_link_id` is set), and `null` otherwise. `id` is the link's
+public id; the internal id, `token_prefix`, `token_hash`, `lang`, counters and any URL MUST NOT
+be included. Access rules, the cross-tenant 404 and the lifecycle read-gate are unchanged.
+
+The origin MUST be resolved with ONE eager load of the link (`id`, `public_id` and `label`
+only) on the list query and an explicit load on the detail read, never a lazy per-row load, and
+the relation is tenant-scoped: a foreign key that points at another organization's link MUST
+never resolve that link's label. The detail read loads it on the show path only (the shared
+`read()` that also serves the transcript and the evaluation does not).
+
+#### Scenario: A visitor carries the origin on the list
+
+- GIVEN a visitor created by a link labelled `Milan fair stand`
+- WHEN the participants list is read
+- THEN that row has `reusable_link = {"id": "rlk_...", "label": "Milan fair stand"}`
+
+#### Scenario: A label-less link carries a null label
+
+- GIVEN a visitor created by a link with no label
+- WHEN the list or detail is read
+- THEN `reusable_link.label` is `null` and `reusable_link.id` is the public id
+
+#### Scenario: An ordinary participant carries null
+
+- GIVEN a participant created by the SSO exchange, the M2M API or the operator entry link
+- WHEN the list and detail are read
+- THEN the `reusable_link` key is present with value `null`
+
+#### Scenario: Detail exposes the origin to every authorized role
+
+- GIVEN a visitor
+- WHEN an `admin`, an `operator` and a `viewer` of its organization read the detail
+- THEN each receives the same `reusable_link` object
+
+#### Scenario: Only the two keys are exposed
+
+- GIVEN a visitor's `reusable_link` object
+- WHEN its keys are inspected
+- THEN they are exactly `id` and `label`
+
+#### Scenario: The list adds no per-row query
+
+- GIVEN a page of participants mixing visitors of different links and ordinary rows
+- WHEN the list is read
+- THEN exposing `reusable_link` issues the same number of queries as one visitor alone
+
+#### Scenario: Cross-tenant detail is still not found
+
+- GIVEN a visitor of organization B
+- WHEN an organization A user reads its detail
+- THEN HTTP 404 is returned and no field is disclosed
+
+#### Scenario: A foreign link never resolves
+
+- GIVEN a participant of organization A whose link key points at a link of organization B
+- WHEN the list and detail are read
+- THEN B's label is never disclosed
+
+#### Scenario: A deleted link degrades to null
+
+- GIVEN a visitor whose link row was deleted (the FK became NULL)
+- WHEN the detail is read
+- THEN `reusable_link` is `null`
+
+#### Scenario: A real redemption reads back with its origin
+
+- GIVEN a participant created by a real redemption over HTTP
+- WHEN an admin reads the list and the detail
+- THEN both carry the link's public id and label
+
+### Requirement: The Reusable Link Origin Is Classified And Typed
+
+`reusable_link` is an admin-only field. The exposure catalogue (`T-EXPOSE-001`,
+`ExposureCatalogue`) MUST carry entries classifying it as admin-only in the same change that
+adds it: the sub-keys `reusable_link.id` and `reusable_link.label` are excluded from the public
+Interview resource, with a classification comment (an admin-only origin marker, never on `/v1`,
+exports or webhooks; integrators filter on the `rlv_` prefix), and the exposure fixture MUST be
+a visitor WITH a link (a null fixture would flatten to a bare `reusable_link` leaf and hide the
+shape). No public or export surface MAY carry it. The Scramble export MUST type `reusable_link`
+on `Admin\ParticipantResource` and `Admin\ParticipantDetailResource` as a REQUIRED key whose
+value is a nullable object with `id` (string) and nullable `label` (string); the candidate-facing
+participant schema, the M2M enrolment schema and every `/v1` schema MUST NOT contain it.
+
+#### Scenario: The exposure gate passes with a classified entry
+
+- GIVEN the catalogue entries for `reusable_link.id` and `reusable_link.label` classified
+  admin-only and a linked fixture
+- WHEN the T-EXPOSE-001 test runs
+- THEN it passes
+
+#### Scenario: The gate fails without the entry
+
+- GIVEN the same field without a catalogue entry, or the entry kept with an unlinked fixture
+- WHEN the T-EXPOSE-001 test runs
+- THEN it fails until the field is classified
+
+#### Scenario: The export types the field and omits it elsewhere
+
+- GIVEN a fresh `scramble:export` against PostgreSQL
+- WHEN the schemas are inspected
+- THEN `reusable_link` is a required nullable object (`id` string, `label` nullable string) on
+  the two admin participant resources and appears in no candidate, M2M or `/v1` schema
+
+#### Scenario: Export drift is detected
+
+- GIVEN `openapi.json` committed without the field
+- WHEN the export-drift check runs
+- THEN it fails until the export is regenerated
+
 ### Requirement: Downloadable Artifacts Are Limited to Transcript and Evaluation
 
 Only the transcript (assembled from `Utterance` rows, `text/plain`) and the

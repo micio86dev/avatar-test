@@ -1582,6 +1582,95 @@ it from the project form but never see or edit its configuration. Change: `sdd/g
 - **i18n.** Every string (badge, group labels, "(retired)", dialog, refusal messages, nav label)
   exists in `it` and `en`.
 
+### 16.18 Reusable interview link: checkbox-first invite flow and the reusable panel variant (backoffice)
+
+A reusable link is a non-expiring, many-use entry for one project: anyone who opens it starts a new
+interview (demos, events, testing). Change: `sdd/reusable-interview-links`; normative requirements
+are in its `admin-backoffice` and `interview-frontend` specs, and this section records the UI
+decisions the design already made so no UI task has to invent them. It reuses existing components
+(`CheckboxField`, `EntryLinkPanel`, `ConfirmDialog`, `Alert`); it adds no token and no colour.
+
+- **Checkbox-first Invite mode.** In the Invite drawer opened from a project row
+  (`EntryLinkForm`), the FIRST control, before every identity, timing and delivery field, is a
+  `CheckboxField` (§16.13, `id="entry-link-form-reusable"`), unchecked on every open.
+  - Label: "Generate a reusable interview link that never expires".
+  - Description (a `FieldDescription` inside its `Field`): "Anyone who opens it starts a new
+    interview for this project. Use it for demos, events and testing."
+  - **Checking it HIDES, never disables.** The candidate reference, display name, role, language,
+    the "External reference" fieldset (§16 rule 1), the timing fields, the send-email control and
+    the scheduled-at control are removed from the DOM (`v-if`, the form's own precedent). A disabled
+    field that cannot be filled would read as a bug (§16 rule 7); an absent one reads as a different
+    mode. Values typed before checking are never submitted.
+  - One optional `Field` "Link name" (`id="entry-link-form-link-name"`, at most 120 characters) takes
+    their place, with the help "Names the link and the interviews started from it, e.g. Milan fair
+    stand." Validation follows the form contract: `novalidate`, `FieldError` with `aria-invalid` and
+    `aria-describedby`, messages i18n-keyed and shown after blur, server 422 mapped onto the field.
+    Submitting calls the reusable-links endpoint, never the single-use one. Unchecked, the form is
+    exactly today's form.
+  - **Where it is offered.** Only where the Invite action is offered and enabled: never for a
+    `viewer`, never when the action is disabled for a draft, not-yet-live or past-deadline project,
+    and never on the participant-detail "Generate new link" re-issue (always one specific candidate).
+- **`EntryLinkPanel` `reusable` variant** (`kind="reusable"`, shown in the same drawer after a
+  successful create). DOM and visual order is load-bearing, and everything is visible without any
+  interaction before Copy can be used:
+  1. Warning `Alert` (`data-testid="entry-link-disclosure"`): "This link does not expire and can be
+     used many times. Anyone who has it can start this interview, so share it only where you mean to.
+     This is the only time the full link is shown."
+  2. The line "Never expires · Reusable" (`data-testid="entry-link-never-expires"`) followed by "It
+     stops working if the project closes or the link is disabled. Desktop browsers only."
+  3. The full URL as selectable text (`data-testid="entry-link-url"`, the same monospace block as the
+     single-use panel).
+  4. Copy, which copies the complete URL INCLUDING its `#` fragment.
+
+  There is **no "Generate new link" button**, no absolute-expiry line and no "single-use" statement.
+  The disclosure is never deferred to a toast. The URL is show-once: it lives only in component state
+  for this drawer session, is discarded when the drawer closes or the route changes, and is never
+  written to storage, history, the browser URL or a query cache. The single-use variant is unchanged.
+  Whether the existing "clipboard blocked" hint also appears here is decided at implementation, see
+  the spec.
+- **`ReusableLinksPanel`** (organism, saved-project drawer, after the "Questions" panel; self-fetching
+  like `ProjectQuestionsPanel`). Shown only for a saved project and only to users who can create
+  participants; a `viewer` gets neither the panel nor the list request. It is a list, not an editor.
+  - **Row anatomy.** Label (fallback "Untitled link"), the token prefix in monospace, "Created on
+    {date} by {name}" (the shared date convention), "Used {count} times · last used {date}" ("Never
+    used" when there is no last use), and a status badge "Active" or "Disabled". Label and prefix are
+    escaped text. The panel never shows a URL, token or hash: the full link cannot be recovered, by
+    design. The badge carries text, so colour is never the only signal; which existing badge variants
+    map to the two states is decided at implementation, see the spec.
+  - **Disable.** Only active rows offer "Disable link"; disabled rows offer no action. It opens the
+    existing destructive-action pattern: `ConfirmDialog` with `variant="destructive"`, title "Disable
+    this link?", description "Nobody will be able to start a new interview with it. Interviews
+    already in progress are not interrupted. This cannot be undone.", confirm button "Disable". No
+    request is sent until confirmed; Cancel, Escape and the backdrop send nothing and leave the row
+    Active. On success the row flips to Disabled without a reload; on failure it stays Active and an
+    error is shown.
+  - **Empty state.** "No reusable links yet. Create one from the project list: Invite candidate, then
+    tick the reusable link option." A load failure shows a translated error state.
+- **Participant detail marker.** The participant detail page shows one line under the candidate
+  reference (and the external-reference line when present): "Started from reusable link: {label}"
+  (`data-testid="participant-reusable-link"`, label escaped). With no label it reads "Started from
+  reusable link" with no colon. A participant that did not come from a reusable link renders nothing
+  (no placeholder, no empty container). It is visible to every role that can view the participant.
+  The participants list gains no column or sub-line.
+- **Vocabulary: "Disable", never "revoke" or "regenerate".** The ban on those two words stays binding
+  for the single-use re-issue ("Generate new link", where nothing invalidates the old link). A
+  reusable link has a real, immediate disable, so its verb is "Disable"; "revoke" and "regenerate"
+  (and their Italian equivalents) appear in no reusable-link string in either locale.
+- **Candidate route states.** The candidate `interview/reusable` page reuses `NoticeShell` for its
+  non-terminal states: loading, busy ("many people are starting right now", with Retry) and a
+  generic failed state (with Retry). An invalid, disabled or unknown link is the existing terminal
+  "link not valid" notice with no retry control.
+- **Accessibility.** Every state is stated in text (Active/Disabled, the never-expires line, the
+  disclosure); colour is never the only signal. The checkbox follows §16.13 (`aria-labelledby`,
+  `aria-describedby`, Space key). Field errors are `role="alert"`, the confirmation is a dialog with
+  focus management from `ConfirmDialog`, and tests locate controls by role or `data-testid`, never by
+  CSS selector (§5).
+- **i18n.** Every string above exists, non-empty, in `it` and `en`: `entryLink.reusable.*`
+  (checkbox, link name, disclosure, never-expires line, closure note), `reusableLinks.*` (panel,
+  rows, badges, disable action and confirmation, empty and error states),
+  `participants.detail.reusableLink*` and `interview.reusable.*`. The English strings quoted here are
+  normative; the Italian strings carry the same meaning.
+
 ## 17. Updates to This Document
 
 When updating `DESIGN.md`:

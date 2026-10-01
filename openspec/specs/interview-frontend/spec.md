@@ -1483,12 +1483,20 @@ code, or documentation MAY claim it reads the token internally.
 
 ### Requirement: Candidate session persistence
 
-The system MUST persist the candidate JWT returned by the exchange in `localStorage`,
-bounded by the interview's lifecycle rather than the browser's:
+The system MUST persist the candidate JWT returned by the exchange or by a reusable-link
+redemption in `localStorage`, bounded by the interview's lifecycle rather than the browser's:
 - Cleared on reaching `done`, on reaching `terminal`, on any `401` response from a
   candidate call, and immediately before an exit or error redirect fires.
 - Purged on read when the token's `exp` claim has already passed — an abandoned
   session self-cleans on next load without a network round-trip.
+
+The stored record MUST carry an `entry` marker: `'reusable'` when it was stored by the
+reusable entry route, and no `entry` key at all when stored by the single-use or the hosted
+route (those records stay byte-identical to what they were). The reusable entry route resumes
+a stored session ONLY when its marker is `'reusable'`; the single-use route's existing
+matching on `candidate_ref` and `project_id` is unchanged. Clearing conditions apply to both
+kinds identically.
+(Previously: a single stored shape with no origin marker; only the single-use route existed.)
 
 The composable MUST expose store, read, clear, and expiry-check operations; no other
 module MAY read or write the candidate token directly.
@@ -1516,6 +1524,31 @@ module MAY read or write the candidate token directly.
 - GIVEN a stored candidate token whose `exp` claim is in the past
 - WHEN the composable reads the stored session
 - THEN the stored value is discarded and reading returns "no session", without a network call
+
+#### Scenario: The reusable route stores the marker
+
+- GIVEN a successful reusable redemption
+- WHEN the session is stored
+- THEN the stored record has `entry: 'reusable'` alongside the token, `exp`, `candidateRef` and
+  `projectId`
+
+#### Scenario: The single-use route stores no reusable marker
+
+- GIVEN a successful single-use exchange, and a hosted session
+- WHEN the session is stored
+- THEN the stored record has no `entry` key
+
+#### Scenario: A reusable session clears like any other
+
+- GIVEN a stored `entry: 'reusable'` session
+- WHEN the session reaches `done`, `terminal` or a `401`
+- THEN it is cleared, exactly as a single-use session
+
+#### Scenario: A stored reusable session is not matched by a single-use link
+
+- GIVEN a stored reusable session with `candidate_ref = "rlv_..."`
+- WHEN a single-use link for a different `candidate_ref` is opened
+- THEN the existing claims match fails and the exchange proceeds as before
 
 ---
 
@@ -1898,3 +1931,266 @@ presented to the candidate as an error state.
 - WHEN that bound is reached
 - THEN the outgoing session is released and the candidate sees the currently-shipped
   fallback presentation, not an error screen
+
+---
+
+## ADDED Requirements (reusable-interview-links)
+
+Vocabulary: the "reusable entry route" is the page `frontend/app/pages/interview/reusable.vue`
+(URL `/interview/reusable`, `/en/interview/reusable` for the `en` locale), opened with the link
+token in the URL fragment. "Visitor" and "reusable link" are defined in the capability
+`reusable-interview-links`. The single-use route `/interview/{token}` is unchanged.
+
+### Requirement: Reusable Entry Route
+
+The system MUST expose `/interview/reusable` as a client-only entry route (a static route that
+outranks `interview/[token]`) that redeems a reusable link at most once per page load and
+renders no durable UI of its own (a determinate loading state, never a blank screen, and the
+terminal or error states below). It MUST NOT call `GET /api/sso/exchange`. It MUST set a
+localized document title (WCAG 2.4.2) while its inline states are on screen: the accessibility
+audit reports `document-title` as serious without one.
+
+The fragment MUST be stripped by an early client plugin that runs on EVERY route, before the
+router and before page code: a phone scanning a kiosk QR code hits the SA-11 gate, whose
+redirect to `/unsupported` carries the fragment across, so stripping only on the reusable page
+would leave the token in the address bar there. The plugin MUST declare `order: -50` through the
+object form of `defineNuxtPlugin` (Nuxt reads a plugin's `order` statically, from the raw file
+text and only from that form, and its metadata extraction returns nothing when the raw text,
+comments included, contains a function-form call; a file-name prefix alone is NOT enough). At
+the default order the router plugin reads `window.location` first and its `app:created` replay
+writes the fragment back into the address bar and into `history.state.current`. The plugin MUST
+also strip and discard a `#beai_rl_` fragment pasted into the same tab later (`hashchange`).
+
+On mount, in this order:
+1. Read the URL fragment (without `#`). If a non-empty `beai_rl_` fragment exists, it is the
+   link token. Strip the fragment from the address bar with `history.replaceState` keeping
+   `history.state` (replacing the current history entry, never pushing) BEFORE any network call
+   and before any other asynchronous work (the page also captures idempotently itself, so it
+   does not depend on the plugin's timing). The token is held only in page memory from here on,
+   in a one-shot holder: it is taken once and cleared. A fragment that does not match
+   `^beai_rl_[A-Za-z0-9_-]{43}$` is present but yields no token.
+2. If a token was read: clear any stored candidate session first (a kiosk never resumes the
+   previous visitor), then call `POST /api/reusable-links/redeem` with the JSON body
+   `{"link_token": <token>}` exactly once; on HTTP 200 persist the returned `access_token`
+   through the candidate session composable with `entry: 'reusable'` and `navigateTo` the
+   token-free session route `/interview/session` (localized path) with `replace: true`. Every
+   visit with a fragment yields a NEW visitor, never a resumed one. A 200 whose token cannot be
+   stored is a retryable failure, never a navigation to a dead session route.
+3. If a fragment was present but malformed: show the terminal `link_invalid` state with NO
+   network call.
+4. If no fragment was read (for example a reload after the strip): if a stored, unexpired
+   candidate session with `entry === 'reusable'` exists, navigate to the session route (which
+   resumes through `POST /start`); otherwise show the terminal `link_invalid` state with NO
+   network call. A stored session without the `reusable` marker MUST NOT be resumed here.
+
+The redemption is performed by one composable (`useReusableLinkRedeem`) that never throws and
+maps the response onto exactly five outcomes; it MUST drop the HTTP client's error object
+(which keeps the request options, and with them the token) and keep only the response body.
+Response types come from the generated client, never hand-written.
+
+Outcome mapping: HTTP 404 -> terminal `link_invalid` (existing reason, no retry control). HTTP
+403 -> the same handling the single-use entry route gives an exchange 403: a validated https
+`redirect_url` is followed through `safeExternalRedirect`, otherwise a terminal generic `403`
+state; no gate detail is disclosed and nothing new is invented. HTTP 429 -> an inline "busy"
+state; a network failure or a 5xx -> an inline "failed" state. Both inline states are retryable
+on the page itself (the generic error route's back navigation cannot work, because the URL no
+longer holds the token) and are NEVER `link_invalid`, which would be untrue; Retry re-calls
+redeem with the token still held in memory, and the token is never written back to the URL,
+storage or history. A reload after such an error has no fragment and therefore falls to step 4.
+The redemption MUST NOT be repeated by re-renders or by a hydration re-run (an in-flight guard
+makes it at most once per mount).
+
+The token MUST NOT appear, after the strip, in the address bar, history entry or
+`history.state`, router state or query, `localStorage`, `sessionStorage`, the DOM, console
+output, analytics payloads, or any request other than the single redemption body. The SA-11
+browser gate still applies first: an unsupported browser is redirected to `/unsupported` and
+MUST NOT call the redemption (so no visitor is created).
+
+(Known wording gap: the terminal `link_invalid` state reuses the existing message "has expired or
+is not valid". "Expired" is slightly untrue for a link that never expires; new copy was not
+written.)
+
+#### Scenario: First visit redeems once and lands on a token-free URL
+
+- GIVEN a desktop browser with no stored session opens `/interview/reusable#beai_rl_<43 chars>`
+- WHEN the page mounts
+- THEN exactly one `POST /api/reusable-links/redeem` with body `{"link_token": "<token>"}` is
+  made, the returned JWT is stored with `entry: 'reusable'`, and the browser is navigated to
+  `/interview/session` with `replace: true`
+- AND the token is nowhere in the address bar or history
+
+#### Scenario: The fragment is stripped before any request
+
+- GIVEN the page mounts with a fragment
+- WHEN the network and `history` calls are ordered
+- THEN `history.replaceState` removing the fragment happens before the redemption request is
+  issued, `history.state` is preserved, and no history entry is added
+
+#### Scenario: The plugin strips the fragment before the router can write it back
+
+- GIVEN the built application opened at `/interview/reusable#beai_rl_<43 chars>` and at
+  `/unsupported#beai_rl_<43 chars>` (the SA-11 redirect)
+- WHEN the application has started
+- THEN the address bar and `history.state` hold no fragment on either route, and the plugin
+  declares `order: -50` in object form with no function-form call text anywhere in its file
+
+#### Scenario: A fragment pasted later is stripped and discarded
+
+- GIVEN the application is running on any route
+- WHEN a `#beai_rl_...` fragment appears through a same-document navigation
+- THEN it is stripped and discarded and never redeemed from there
+
+#### Scenario: Always a new visitor, never the previous one
+
+- GIVEN a stored, unexpired session (reusable or single-use) from a previous visitor
+- WHEN `/interview/reusable#<token>` is opened
+- THEN the stored session is cleared before the redemption and the resulting session belongs to
+  the newly created visitor, with no `POST /start` resume of the old one
+
+#### Scenario: Reload after the strip resumes the stored reusable session
+
+- GIVEN the visitor is on the session route (or reloads `/interview/reusable` with no fragment)
+  and holds an unexpired session with `entry: 'reusable'`
+- WHEN the page loads
+- THEN no redemption request is made and the visitor is routed to the session route and
+  resumes through `POST /start`
+
+#### Scenario: A single-use session is not resumed here
+
+- GIVEN no fragment and a stored unexpired session WITHOUT `entry: 'reusable'`
+- WHEN `/interview/reusable` is opened
+- THEN the terminal `link_invalid` state is shown and no network call is made
+
+#### Scenario: No fragment and no session is terminal
+
+- GIVEN no fragment and no stored session (or an expired one, purged on read)
+- WHEN `/interview/reusable` is opened
+- THEN the terminal `link_invalid` state is shown, with no retry control and no network call
+
+#### Scenario: A malformed fragment is terminal without a request
+
+- GIVEN `/interview/reusable#beai_rl_short`
+- WHEN the page mounts
+- THEN the terminal `link_invalid` state is shown and no request is made
+
+#### Scenario: 404 is link_invalid
+
+- GIVEN the redemption returns 404 (unknown, malformed or disabled link)
+- WHEN the response is handled
+- THEN the terminal `link_invalid` state is shown with no retry control
+
+#### Scenario: 403 uses the existing exchange-403 handling
+
+- GIVEN the redemption returns 403 with a generic body
+- WHEN the response is handled
+- THEN the candidate is redirected to a validated https `redirect_url` when there is one, and
+  otherwise sees the same terminal generic screen as an exchange 403, and no gate detail
+
+#### Scenario: 429 and failures are retryable, not link_invalid
+
+- GIVEN the redemption returns 429, 502 or fails at the network layer
+- WHEN the response is handled
+- THEN the inline retryable state is shown (busy for 429, failed otherwise), never
+  `link_invalid`
+- AND Retry re-sends the redemption with the in-memory token and the token is not written to
+  the URL, storage or history
+
+#### Scenario: Redeem is called at most once per mount
+
+- GIVEN the page mounts with a fragment
+- WHEN reactive re-renders or a hydration re-run occur
+- THEN only one redemption request is made
+
+#### Scenario: The token leaks nowhere else
+
+- GIVEN a completed redemption
+- WHEN the address bar, history state, router query, `localStorage`, `sessionStorage`, the DOM,
+  console output and every other network request are inspected
+- THEN none contains the token
+
+#### Scenario: An unsupported browser never redeems
+
+- GIVEN a mobile user agent (or a viewport under 1024 px, or Firefox) opens
+  `/interview/reusable#<token>`
+- WHEN the SA-11 gate runs
+- THEN the browser is redirected to `/unsupported`, the address bar holds no fragment, and no
+  redemption request is made
+
+#### Scenario: Localized paths behave identically
+
+- GIVEN `/en/interview/reusable#<token>`
+- WHEN it is opened
+- THEN the behavior is the same and the copy is English
+
+#### Scenario: The static route outranks the dynamic one
+
+- GIVEN `/interview/reusable`
+- WHEN the router resolves it
+- THEN `pages/interview/reusable.vue` handles it, `interview/[token].vue` does not, and no
+  `GET /api/sso/exchange` is made
+
+#### Scenario: A single-use link is unaffected
+
+- GIVEN a normal `/interview/<sso-link-jwt>` link
+- WHEN it is opened after this change
+- THEN it behaves exactly as in "Single-use entry-route exchange"
+
+### Requirement: The Reusable Entry Route Is Not Indexed, Sends No Referrer, And Keeps The Camera And Microphone Policy
+
+The page MUST declare `<meta name="robots" content="noindex, nofollow">` and
+`<meta name="referrer" content="no-referrer">`. The Nitro `routeRules` patterns
+`/interview/**` and `/en/interview/**` MUST cover `/interview/reusable` and
+`/en/interview/reusable` (no `nuxt.config` change is needed, and a test over the declared
+patterns pins it) so that the responses carry
+`Permissions-Policy: camera=(self) microphone=(self) geolocation=()` together with the three
+other headers every interview route sets (`X-Frame-Options: DENY`,
+`X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`). No
+reusable-specific route rule MAY weaken them.
+
+#### Scenario: The page is noindex and no-referrer
+
+- GIVEN `/interview/reusable` is rendered
+- WHEN the document head is inspected
+- THEN the robots meta is `noindex, nofollow` and the referrer meta is `no-referrer`
+
+#### Scenario: Default-locale path carries the interview headers
+
+- GIVEN a GET request to `/interview/reusable`
+- WHEN the server responds
+- THEN `Permissions-Policy` equals `camera=(self) microphone=(self) geolocation=()` and the
+  three other interview headers are present with their exact values
+
+#### Scenario: Prefixed-locale path carries the interview headers
+
+- GIVEN a GET request to `/en/interview/reusable`
+- WHEN the server responds
+- THEN the same four headers are present
+
+### Requirement: The Link Token Never Reaches Error Reports Or Analytics From The Candidate App
+
+The candidate app's Sentry scrubber MUST scrub, from every event at any depth (request URL,
+breadcrumbs, transaction and span names, contexts, extras, messages), any string matching
+`beai_rl_[A-Za-z0-9_-]{43}` and any fragment on an `/interview/` route, including data captured
+BEFORE the strip (the pageload transaction and first breadcrumb read `location.href`). The
+analytics path redaction MUST keep stripping the query and fragment of the interview branch,
+which is already analytics-unsafe, and `reusable` is a named interview page for grouping. The
+general rule is in `observability`; these scenarios pin the candidate app.
+
+#### Scenario: A pageload event captured before the strip is clean
+
+- GIVEN a Sentry event whose `request.url`, transaction name and first navigation breadcrumb
+  contain `https://app.example/interview/reusable#beai_rl_<43 chars>`
+- WHEN the event passes through the scrubber
+- THEN the fragment and any token-shaped string are absent from every field
+
+#### Scenario: A token-shaped string in any field is replaced
+
+- GIVEN an event whose message, extra data and a nested context contain a token-shaped string
+- WHEN it is scrubbed
+- THEN each occurrence is replaced by the filtered placeholder and unrelated text is untouched
+
+#### Scenario: Analytics paths drop the fragment
+
+- GIVEN the interview branch route `/interview/reusable#<token>`
+- WHEN the analytics path is computed
+- THEN the result contains neither the fragment nor the token

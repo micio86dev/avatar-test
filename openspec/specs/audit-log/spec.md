@@ -67,8 +67,9 @@ another's trail.
 ### Requirement: Recorded payloads never contain secrets
 
 The before/after payloads MUST exclude credential-bearing attributes:
-`password`, `key_hash`, `webhook_secret`, `token`, `secret`, `api_key`, and any
+`password`, `key_hash`, `token_hash`, `webhook_secret`, `token`, `secret`, `api_key`, and any
 attribute whose name ends in `_token`.
+(Previously: the denylist did not name `token_hash`; it ends in `_hash`, so neither `key_hash` nor the `_token` suffix rule covered it. There is deliberately no generic `_hash` suffix rule: `token_hash` is named.)
 
 Redaction MUST be a denylist applied inside the recorder, never left to each
 call site. A call site that forgets is the normal failure mode, and the
@@ -76,6 +77,8 @@ consequence here is a permanent, queryable copy of a credential sitting in a
 table built to be read.
 
 An audit trail that captures credentials is a breach with good intentions.
+
+`token_prefix` is an identification aid, not a credential, and is NOT on the denylist.
 
 #### Scenario: A credential attribute is redacted
 
@@ -90,6 +93,18 @@ an auditor needs, and the secret itself is exactly what they do not.
 
 - WHEN a changed attribute is an array containing a denylisted key
 - THEN that key's value is redacted at any depth
+
+#### Scenario: token_hash is redacted at any depth
+
+- GIVEN a changed attribute that is, or nests at any depth, a key named `token_hash`
+- WHEN the recorder redacts it
+- THEN the name is kept with the redaction marker and the value is absent
+
+#### Scenario: token_prefix is not redacted
+
+- GIVEN a payload containing `token_prefix = "beai_rl_AbCdEfGh"`
+- WHEN the recorder redacts it
+- THEN the value is kept
 
 ### Requirement: Recording never breaks the operation it records
 
@@ -108,6 +123,7 @@ The failure MUST be logged.
 - WHEN an audited mutation runs
 - THEN the mutation completes successfully
 - AND the failure is logged
+
 ### Requirement: Catalogue Mutations Are Audited
 
 Every catalogue write — competency, role, BARS indicator, or default
@@ -127,3 +143,73 @@ capability's existing redaction and append-only rules.
 - WHEN a superadmin edits a competency's `en` name in the open draft
 - THEN an `audit_logs` row is written naming the actor, the competency
   subject, and the before/after name values
+
+### Requirement: Reusable Link Mutations Are Audited
+
+Creating and disabling a reusable interview link MUST each produce exactly one `audit_logs`
+row, subject to this capability's existing actor, tenant-scope, append-only, redaction and
+never-break-the-operation rules.
+
+- `reusable_link.created`: actor = the creating user; subject type = the reusable link
+  (`reusable_interview_link`); subject = the link (public id `rlk_...`); `before` empty;
+  `after` = `{id, project_id, label, lang, token_prefix}`, where `id` is the link's public id
+  and `project_id` is the project's PUBLIC id (`prj_...`, never the internal integer).
+- `reusable_link.disabled`: actor = the disabling user; same subject; `before` =
+  `{disabled_at: null}`; `after` = `{disabled_at: <ISO-8601 time of the disable>}`. The row is
+  written after the disabling transaction commits. Disabling an already-disabled link is not a
+  mutation and MUST NOT write a row.
+
+(Reconciled with the implementation: the original delta named the key `revoked_at`; the
+implemented column and audit key are `disabled_at`.)
+
+Neither the raw token nor `token_hash` MUST ever be passed to, or appear in, `before`, `after`
+or any other column of these rows. Redemptions are NOT audited (they are not administrative
+mutations; `uses_count`, `last_used_at` and the visitor's `reusable_interview_link_id` record
+them). The rows carry the link's `organization_id` and are readable only inside that tenant.
+
+#### Scenario: Creating a link is audited
+
+- GIVEN an admin creates a link with label `Milan fair stand`
+- WHEN the trail is read
+- THEN one row exists with action `reusable_link.created`, the admin as actor, the link as
+  subject and `after` containing the public id, the project's `prj_` public id, label, lang
+  and token prefix
+
+#### Scenario: Disabling a link is audited
+
+- GIVEN an admin disables an active link
+- WHEN the trail is read
+- THEN one row exists with action `reusable_link.disabled`, `before.disabled_at` null and
+  `after.disabled_at` set
+
+#### Scenario: A repeated disable writes no second row
+
+- GIVEN a link already disabled
+- WHEN it is disabled again (HTTP 204)
+- THEN the trail contains no second `reusable_link.disabled` row for it
+
+#### Scenario: The token and the hash are absent from both rows
+
+- GIVEN the created and disabled rows of one link
+- WHEN every column, including nested `before` and `after`, is searched for the raw token and
+  for `token_hash`
+- THEN neither appears; `token_prefix` appears in the created row only
+
+#### Scenario: Redemptions add no audit row
+
+- GIVEN 5 redemptions of a link
+- WHEN the trail is read
+- THEN no audit row was written by them
+
+#### Scenario: The rows are tenant-scoped
+
+- GIVEN organization A created a link
+- WHEN an organization B reader queries the trail
+- THEN A's `reusable_link.*` rows are not returned
+
+#### Scenario: A failing recorder does not break the mutation
+
+- GIVEN the audit write will throw
+- WHEN a link is created or disabled
+- THEN the creation still returns 201 (with its URL) or the disable still returns 204, and the
+  failure is logged
