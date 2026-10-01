@@ -4,10 +4,10 @@
 
 A reusable interview link is ONE opaque, non-expiring, revocable URL bound to exactly one
 organization and one project, for demos, trade-fair kiosks and internal testing. Every
-redemption creates a fresh "visitor" participant in that project and returns the standard
-candidate JWT. The full URL is shown exactly once, at creation; only a SHA-256 hash is
-stored. Single-use, 30-minute `typ:sso-link` entry links are a different mechanism and do
-not change.
+redemption creates a fresh "visitor" participant in that project, identified by the name and
+email the visitor enters, and returns the standard candidate JWT. The full URL is shown
+exactly once, at creation; only a SHA-256 hash is stored. Single-use, 30-minute
+`typ:sso-link` entry links are a different mechanism and do not change.
 
 Coverage target: 95% on redemption, tenant scoping, authorization and secret handling
 (security-critical); 85% overall.
@@ -17,6 +17,13 @@ the original specification RECONCILED with what was implemented and verified (ap
 B1a to B4, frontend B5, backoffice B6a to B6c). Where the implementation differs from the
 original delta, the implementation won and the spec says so inline ("Reconciled with the
 implementation") and in the closing section.
+
+It was amended by the change `reusable-link-visitor-identity`: a visitor now ALWAYS provides
+a name and an email before the interview starts, a duplicate email in the project is refused
+with 409, and the retention purge redacts the email together with the name. That text is
+reconciled with the implementation in the same way (api slices 1a to 5; the frontend, the
+backoffice copy and the admin participants search are specified in `interview-frontend`,
+`admin-backoffice` and `admin-read-api`).
 
 ---
 
@@ -28,13 +35,18 @@ implementation") and in the closing section.
   (a lost link means creating a new one).
 - Per-link usage caps, per-link expiry dates, scheduled activation windows (the project's
   own `goes_live_at` / `deadline_at` already bound every redemption).
-- Collecting visitor name or email on the reusable page (visitors stay anonymous).
+- Verifying ownership of a visitor's email (one-time code or confirmation link): the identity
+  is self-declared and unverified.
 - Terminating visitor sessions already in progress when a link is disabled.
 - A participants-list filter by link and dashboard KPI exclusion (visitors are included; see
   "Visitors Are Ordinary Participants Downstream").
 - Public `/v1` exposure of the link marker; creating reusable links through M2M credentials.
 - Mobile support: the candidate app's SA-11 desktop-only gate still applies.
-- A kiosk privacy notice (UI copy; not specified here).
+- A per-tenant privacy-policy URL, a consent checkbox, or tenant-editable notice text: the
+  visitor sees one short fixed it/en notice (see `interview-frontend`).
+- G-43 (a functional `lower(email)` unique index for all enrolment paths) and normalizing the
+  other enrolment paths' email handling.
+- Backfilling or deleting legacy anonymous visitor rows.
 - Solving proxy trust for the per-IP limiter (see "Known limitations and owner decisions").
 
 ---
@@ -44,8 +56,11 @@ implementation") and in the closing section.
 - **link**: one row of `reusable_interview_links`.
 - **link token**: the raw secret, shown once inside the URL fragment.
 - **visitor**: the participant row created by one redemption.
+- **visitor identity**: the `display_name` and `email` a visitor types before a redemption.
+- **identity fields**: those two body fields of the redeem request.
 - **Disable**: the only revocation verb (UI word, API word, audit word and column name).
-- **redemption**: one successful call of `POST /api/reusable-links/redeem`.
+- **redemption**: one successful call of `POST /api/reusable-links/redeem`, which requires a
+  valid identity.
 - **link id**: the link's public id, `rlk_` followed by a 26-character ULID. It is the only
   identifier of a link in any API payload or URL.
 
@@ -608,89 +623,107 @@ and resources) in the same change that adds them.
 `POST /api/reusable-links/redeem` MUST be publicly accessible (no auth guard), MUST declare
 `withoutMiddleware([TenantContext, RejectStaleCredentials])` like `/sso/exchange`, and MUST
 read the token ONLY from the request BODY field `link_token`. It MUST NOT read the token from
-the query string, a header, or a field named `token`: the default guard's parser chain reads
-a `token` input and an array-shaped `token` once produced a 500 before the controller ran
+the query string, a header, or a field named `token`: the default guard's parser chain reads a
+`token` input and an array-shaped `token` once produced a 500 before the controller ran
 (`embed-exchange` precedent), and a secret in a URL ends up in access logs. The field name and
-a NAMED rate limiter (never the numeric `throttle:x,y` form) are part of the contract. Any
-`Authorization` header on the request MUST be ignored: it never authenticates and never
-changes the outcome.
+a NAMED rate limit (never the numeric `throttle:x,y` form) are part of the contract. Any
+`Authorization` header on the request MUST be ignored: it never authenticates and never changes
+the outcome. The body MUST also carry the mandatory identity fields `display_name` and `email`
+(see "Identity Fields Are Validated First And Independently Of The Token").
 
-The framework's `TrimStrings` input middleware MUST be skipped for this one route (every
-other endpoint keeps trimming). A secret has exactly one spelling: without the skip,
-`<token>\n` and `  <token>  ` would be trimmed into the valid token, a second spelling the
-strict format exists to refuse. With the skip they are refused with the generic 404 like every
-other near miss.
+The framework's `TrimStrings` input middleware MUST be skipped on this route for the single
+input key `link_token` only; `display_name` and `email` are trimmed like on every other
+endpoint. A secret has exactly one spelling: without the skip, `<token>\n` and ` <token> `
+would be trimmed into the valid token, a second spelling the strict format exists to refuse.
+With the skip they are refused with the generic 404 like every other near miss.
 
 On success the response MUST be HTTP 200 with exactly `{"access_token": "<typ:candidate
-JWT>"}`, the same shape as `GET /api/sso/exchange` 200, and nothing else (no participant,
-link, project or label data).
+JWT>"}`, the same shape as `GET /api/sso/exchange` 200, and nothing else (no participant, link,
+project or label data, and no echo of the identity).
+
+(Previously: the body carried only `link_token`; `TrimStrings` was skipped for the whole route;
+the redemption had no identity input.)
 
 The redemption MUST execute in this order:
 
-1. The named limiter `reusable-link-redeem` runs as route middleware, before the controller.
-   It always counts the request against the per-IP bucket and, when the body token is
-   well-formed, against the per-link bucket; a request over either limit is answered 429
-   before any database read.
-2. The format check (failure: the generic 404, no database read).
-3. A pre-read of the enabled link by `token_hash` with the tenant scope lifted (missing or
+1. The named limiter `reusable-link-redeem` runs as route middleware, before the controller. It
+   always counts the request against the per-IP bucket and, when the body token is well-formed,
+   against the per-link bucket; a request over either limit is answered 429 before any database
+   read.
+2. Validation of the identity fields `display_name` and `email` (failure: HTTP 422, identical
+   for any `link_token` value, no database read). `link_token` is never part of this
+   validation.
+3. The format check (failure: the generic 404, no database read).
+4. A pre-read of the enabled link by `token_hash` with the tenant scope lifted (missing or
    disabled: the generic 404).
-4. The rest of the work runs with the link's organization as the tenant context. The project
-   is resolved without the tenant global scope, pinned to the link's `organization_id` and
+5. The rest of the work runs with the link's organization as the tenant context. The project is
+   resolved without the tenant global scope, pinned to the link's `organization_id` and
    `project_id` (soft-deleted or missing: the generic 404).
-5. The accessibility gates and the interviewability predicate, evaluated freshly OUTSIDE the
+6. The accessibility gates and the interviewability predicate, evaluated freshly OUTSIDE the
    row lock (failure: the generic 403).
-6. Inside ONE transaction: `SELECT ... FOR UPDATE` the link by id and organization; if it was
-   disabled in the meantime, the generic 404; otherwise insert the visitor, increment
-   `uses_count`, set `last_used_at`, and mint the candidate JWT.
-7. After the commit, dispatch `ParticipantCreated`.
+7. Inside ONE transaction: `SELECT ... FOR UPDATE` the link by id and organization; if it was
+   disabled in the meantime, the generic 404; if a participant of the same project already
+   holds the normalized email (case-insensitive), HTTP 409 `{"message": "duplicate_enrolment"}`
+   and a full rollback; otherwise insert the visitor (a `(project_id, email)` unique violation
+   is the same 409), increment `uses_count`, set `last_used_at`, and mint the candidate JWT.
+8. After the commit, dispatch `ParticipantCreated`.
 
-(Reconciled with the implementation: the original delta evaluated the project gates inside
-the locked transaction. The implementation evaluates them BEFORE the lock, to keep the lock
-short, and re-checks the one thing that can change the outcome under contention, the disabled
-flag, under the lock. The residual window in which a project closes between the gates and the
-lock equals the one `GET /api/sso/exchange` has, and the interview start re-checks
-interviewability. Tests pin the observable behaviour, not the lock order.)
+(Reconciled with the implementation: the `TrimStrings` exception is registered on the input key
+`link_token` for the whole application, not on the route; see "Identity Input Is Trimmed And
+The Email Is Normalized".)
+
+(Reconciled with the implementation: the original delta evaluated the project gates inside the
+locked transaction. The implementation evaluates them BEFORE the lock, to keep the lock short,
+and re-checks the things that can change the outcome under contention, the disabled flag and
+the duplicate email, under the lock. The residual window in which a project closes between the
+gates and the lock equals the one `GET /api/sso/exchange` has, and the interview start
+re-checks interviewability. Tests pin the observable behaviour, not the lock order.)
 
 #### Scenario: Successful redemption
 
 - GIVEN an active link on an open project
-- WHEN `POST /api/reusable-links/redeem` is called with `{"link_token": "<token>"}`
+- WHEN `POST /api/reusable-links/redeem` is called with `{"link_token": "<token>",
+  "display_name": "Ada Lovelace", "email": "ada@example.com"}`
 - THEN HTTP 200 is returned with exactly one key, `access_token`
-- AND one visitor participant exists, `uses_count` is 1 and `last_used_at` is set
+- AND one visitor participant exists with that name and email, `uses_count` is 1 and
+  `last_used_at` is set
 
 #### Scenario: The token is read only from the body field link_token
 
-- GIVEN a valid token
-- WHEN it is sent as a query parameter `link_token`, as a body field `token`, or in an
+- GIVEN a valid token and a valid identity
+- WHEN the token is sent as a query parameter `link_token`, as a body field `token`, or in an
   `X-Link-Token` header, with no `link_token` body field
 - THEN the generic 404 is returned and no participant is created
 
 #### Scenario: A hostile token input cannot break the endpoint
 
-- GIVEN a request with a query `token[]=x`, a body `token` that is an array, and a valid
-  `link_token`
+- GIVEN a request with a query `token[]=x`, a body `token` that is an array, a valid identity
+  and a valid `link_token`
 - WHEN it is submitted
-- THEN HTTP 200 is returned (the outcome depends only on `link_token`), never a 500
+- THEN HTTP 200 is returned (the outcome depends only on the identity and `link_token`), never
+  a 500
 
 #### Scenario: An Authorization header is ignored
 
-- GIVEN a request carrying an expired or unrelated `Authorization: Bearer` value and a valid
-  `link_token`
+- GIVEN a request carrying an expired or unrelated `Authorization: Bearer` value, a valid
+  identity and a valid `link_token`
 - WHEN it is submitted
 - THEN HTTP 200 is returned as if the header were absent
 - AND the same request with an invalid `link_token` returns the generic 404, not 401
 
-#### Scenario: Surrounding whitespace is not trimmed away
+#### Scenario: Surrounding whitespace is not trimmed away from the token
 
-- GIVEN a valid token followed by a newline, and a valid token surrounded by spaces
+- GIVEN a valid token followed by a newline, and a valid token surrounded by spaces, each with
+  a valid identity
 - WHEN each is submitted as `link_token`
 - THEN each returns the generic 404 and no participant is created
-- AND other endpoints still trim their string input as before
+- AND other endpoints still trim their string input as before, and the identity fields of this
+  endpoint are trimmed
 
 #### Scenario: The endpoint has no tenant context and still resolves the right project
 
 - GIVEN no authenticated user and no tenant resolver state
-- WHEN a valid token is redeemed
+- WHEN a valid token with a valid identity is redeemed
 - THEN the link and project are resolved correctly and the visitor's `organization_id` equals
   the project's, while a soft-deleted project still yields the generic 404
 
@@ -704,10 +737,17 @@ interviewability. Tests pin the observable behaviour, not the lock order.)
 #### Scenario: The order of checks is pinned
 
 - GIVEN the limiter thresholds lowered to 2
-- WHEN the third garbage request from one IP arrives, and separately the third request for
-  one unknown well-formed token arrives from varying IPs
-- THEN the first is answered 429 by the IP limiter before any format check, and the second is
-  answered 429 by the per-link limiter with no read of the link table
+- WHEN the third garbage request from one IP arrives, and separately the third request for one
+  unknown well-formed token arrives from varying IPs
+- THEN the first is answered 429 by the IP limiter before any identity or format check, and the
+  second is answered 429 by the per-link limiter with no read of the link table
+
+#### Scenario: Identity is validated before the token path
+
+- GIVEN an invalid identity and any of: a valid, a disabled, an unknown, a malformed or an
+  absent `link_token`
+- WHEN each is submitted
+- THEN every response is the same 422 and no read of the link table occurs
 
 #### Scenario: A disable that commits between the pre-read and the lock wins
 
@@ -715,69 +755,244 @@ interviewability. Tests pin the observable behaviour, not the lock order.)
 - WHEN the link is disabled and that disable commits before the redemption takes the row lock
 - THEN the redemption returns the generic 404 and writes nothing
 
+#### Scenario: A duplicate email under the lock is a 409 and rolls back
+
+- GIVEN a redemption that passed the gates and holds the row lock, with an email already
+  enrolled in the project
+- WHEN the duplicate check runs
+- THEN the response is HTTP 409 `{"message":"duplicate_enrolment"}` and `uses_count`,
+  `last_used_at`, the participant table and the event queue are unchanged
+
+### Requirement: Identity Fields Are Validated First And Independently Of The Token
+
+The redeem body MUST be `{"link_token": <string>, "display_name": <string>, "email":
+<string>}`. `display_name` and `email` are both MANDATORY. Validation of the identity fields
+MUST run after the rate limiter and BEFORE any evaluation of `link_token`, so its outcome
+depends only on `display_name` and `email`: the same invalid identity MUST yield the
+byte-identical response whatever `link_token` is (valid, disabled, unknown, malformed, wrongly
+typed, absent). Rules, identical to every other enrolment path: `display_name` is a required
+string of at most 255 characters; `email` is a required, well-formed email address of at most
+255 characters that is not under a reserved placeholder domain (see the reconciliation below).
+Because the identity input is trimmed and empty strings become null before validation (see
+"Identity Input Is Trimmed And The Email Is Normalized"), a whitespace-only value is "required"
+and fails.
+
+A failure MUST return the framework's standard HTTP 422 validation body (`message` plus
+`errors` keyed ONLY by `display_name` and/or `email`). The response MUST NOT name `link_token`,
+MUST NOT echo any submitted value, and MUST NOT contain any value derived from the token. A 422
+MUST create no participant, MUST NOT read the link table, and MUST NOT change `uses_count` or
+`last_used_at`. Validation covers ONLY the two identity fields: `link_token` is never part of a
+validation rule set and is never named in an error, so a malformed token with a valid identity
+still yields the generic 404 and not a 422.
+
+(Reconciled with the implementation: the original delta did not refuse a reserved placeholder
+address, and the spec index left it to design. The `email` rule list also carries
+`NotPlaceholderEmail`, which refuses, with the framework's own invalid-email message, any
+address under the two reserved placeholder domains, `@invalid.beai.local` and
+`@purged.beai.invalid`, whatever its case or surrounding whitespace. Without it a visitor could
+type an address that makes the row claim to be synthesised or purged, and an address equal to
+the placeholder the retention purge derives for another participant could collide with it. The
+rule is shared with the four other enrolment paths (see `participant-sso`); the error names
+only `email` and discloses nothing about the reserved domains.)
+
+#### Scenario: A missing name or email is a 422 naming only the identity fields
+
+- GIVEN a well-formed, enabled link on an open project
+- WHEN the redeem body omits `display_name`, then omits `email`, then omits both
+- THEN each response is HTTP 422 whose `errors` keys are exactly the missing fields
+  (`display_name`, `email`, or both)
+- AND no participant is created, `uses_count` and `last_used_at` are unchanged, and no event is
+  dispatched
+
+#### Scenario: Empty, whitespace-only and wrongly typed values are refused
+
+- GIVEN a valid token
+- WHEN `display_name` is `""`, `" "`, an array, an object or a number, and separately `email`
+  is `""`, `" "`, an array or a number
+- THEN each request is HTTP 422 with an error on the offending field only
+
+#### Scenario: Malformed and oversized identity values are refused
+
+- GIVEN a valid token
+- WHEN `email` is `"not-an-email"`, `"a@"`, or longer than 255 characters, and separately
+  `display_name` is 256 characters
+- THEN each request is HTTP 422 with an error on the offending field
+- AND a `display_name` of exactly 255 characters is accepted
+
+#### Scenario: The 422 is identical for every token value
+
+- GIVEN the same invalid identity (for example a missing `email`)
+- WHEN it is submitted with a valid enabled token, a disabled token, a well-formed unknown
+  token, a malformed token, an array `link_token`, a null `link_token`, and no `link_token` at
+  all
+- THEN every response is HTTP 422 with a byte-identical body
+- AND a request with no body at all is the same 422 (both identity fields missing), never a 404
+
+#### Scenario: The 422 never names the token or echoes input
+
+- GIVEN a request with `display_name = "<script>x</script>"`, an invalid `email =
+  "zz-sentinel"`, and `link_token = "beai_rl_..."`
+- WHEN the 422 is produced
+- THEN the body contains neither `link_token`, nor the token, nor `zz-sentinel`, nor the
+  submitted name
+
+#### Scenario: Identity validation precedes the token path
+
+- GIVEN a disabled link's token, and separately an unknown well-formed token
+- WHEN each is submitted with an invalid identity
+- THEN each returns HTTP 422 (not 404) and the link table is not read
+
+#### Scenario: A valid identity with a bad token falls through to the generic 404
+
+- GIVEN a valid identity
+- WHEN `link_token` is malformed, unknown, or belongs to a disabled link
+- THEN the response is the generic 404, never a 422
+
+#### Scenario: An address under a reserved placeholder domain is refused
+
+- GIVEN a valid token and a valid name
+- WHEN `email` is `"x@invalid.beai.local"`, `"X@PURGED.BEAI.INVALID"`, or either of them with
+  surrounding whitespace
+- THEN each request is HTTP 422 with an error on `email` only, naming neither the domains nor
+  the token
+- AND no participant is created and `uses_count` is unchanged
+
+### Requirement: Identity Input Is Trimmed And The Email Is Normalized
+
+The framework's `TrimStrings` middleware MUST be skipped for the single input key `link_token`
+(registered on the key, so it takes effect on this route, the only one that reads it) and for no
+other key: `display_name` and `email` are trimmed exactly like on every other enrolment
+endpoint, while the token keeps its one-spelling rule. The stored
+`display_name` MUST be the trimmed value, otherwise verbatim (no case change, no sanitization;
+it is rendered as escaped text). The stored `email` MUST be the trimmed value lower-cased with
+multibyte-safe lower-casing. The rest of the application's `TrimStrings` behavior MUST be
+unchanged.
+
+(Reconciled with the implementation: the exception is registered on the input KEY,
+`trimStrings(except: ['link_token'])` in the application bootstrap, not on the route. No other
+endpoint reads that key, and an architecture test pins the source files that may mention it, so
+a new reader of `link_token` cannot silently inherit "never trimmed". On the redemption route
+the observable behaviour is as specified: the name and the email are trimmed, a whitespace-only
+value becomes null and fails `required`, and the token keeps its single spelling.)
+
+#### Scenario: Name and email are trimmed, the email is lower-cased
+
+- GIVEN a valid token
+- WHEN the body carries `display_name = " Ada Lovelace "` and `email = "
+  Ada.Lovelace@Example.COM "`
+- THEN the visitor is stored with `display_name = "Ada Lovelace"` and `email =
+  "ada.lovelace@example.com"`
+
+#### Scenario: A whitespace-padded token is still refused
+
+- GIVEN a valid token and a valid identity
+- WHEN `link_token` is sent as the token followed by a newline, and as the token surrounded by
+  spaces
+- THEN each returns the generic 404 and no participant is created
+
+#### Scenario: The name is stored verbatim
+
+- GIVEN a valid token
+- WHEN `display_name = "Zoe O'Brien-Zizek <b>"` (any Unicode letters, quotes, angle brackets)
+- THEN the stored name equals the trimmed input byte for byte
+
+#### Scenario: Other endpoints keep trimming
+
+- GIVEN the admin and M2M enrolment endpoints
+- WHEN they receive padded `display_name` and `email`
+- THEN they trim them exactly as before this change
+
 ### Requirement: Unknown, Malformed And Disabled Tokens Are Indistinguishable
 
-A missing, null, non-string, array, empty, oversized, wrongly formatted, unknown, or
-disabled `link_token` (and a token whose link's project is soft-deleted or gone) MUST
-produce the SAME HTTP 404 with a byte-identical body, `{"message": "Not found."}`, produced
-by one response helper, containing no value derived from the input. The caller MUST NOT be
-able to tell these cases apart by status, body or any header other than inherently varying
-ones (date, request id, rate-limit counters). The framework's model-not-found rendering MUST
-NOT be reachable on this path (it names the model class). No Laravel `validate()` is used on
-this path (a 422 would distinguish malformed from unknown). A 403 is reachable only by a
-holder of a valid, ENABLED token, so it discloses nothing the holder does not already have.
+For every request whose identity fields are VALID, a missing, null, non-string, array, empty,
+oversized, wrongly formatted, unknown, or disabled `link_token` (and a token whose link's
+project is soft-deleted or gone) MUST produce the SAME HTTP 404 with a byte-identical body,
+`{"message": "Not found."}`, produced by one response helper, containing no value derived from
+the input. The caller MUST NOT be able to tell these cases apart by status, body or any header
+other than inherently varying ones (date, request id, rate-limit counters). The framework's
+model-not-found rendering MUST NOT be reachable on this path (it names the model class).
+Validation on this path covers ONLY `display_name` and `email`: `link_token` is never part of a
+validation rule set and is never named in an error, so a 422 can only depend on the identity
+fields and never distinguishes a malformed token from an unknown one. A 403 and a 409 are
+reachable only by a holder of a valid, ENABLED token, so they disclose nothing the holder does
+not already have (a 409 discloses only enrolment in that one project; see "A Duplicate Email In
+The Same Project Is Refused With 409 And Never Resumed").
+
+(Previously: no framework validation ran on this path, because a 422 would have distinguished
+malformed from unknown; a request with no body was one of the 404 cases; the 404 matrix did not
+carry an identity.)
 
 A credential of another type submitted as `link_token` (an `sso-link` JWT, a user JWT, an M2M
-key, a candidate JWT) MUST be treated as malformed: generic 404, and it MUST NOT be
-consumed, spent or otherwise affected (an `sso-link` presented here keeps its jti
-unconsumed). The same holds when such a credential is presented as a Bearer credential with
-no body.
+key, a candidate JWT) MUST be treated as malformed: generic 404, and it MUST NOT be consumed,
+spent or otherwise affected (an `sso-link` presented here keeps its jti unconsumed). The same
+holds when such a credential is presented as a Bearer credential with a valid identity and no
+`link_token`.
 
 #### Scenario: Every failure class returns identical bytes
 
-- GIVEN: no body; `{"link_token": null}`; `{"link_token": ["x"]}`; `{"link_token": 123}`;
-  `{"link_token": ""}`; a 10 KB string; `beai_rl_` + 42 characters; a well-formed unknown
-  token; a disabled link's token; a token whose project was soft-deleted
+- GIVEN a valid identity and, as `link_token`: the key absent; `null`; `["x"]`; `123`; `""`; a
+  10 KB string; `beai_rl_` + 42 characters; a well-formed unknown token; a disabled link's
+  token; a token whose project was soft-deleted
 - WHEN each is submitted
 - THEN every response is HTTP 404 with a byte-identical body
 - AND no response echoes any part of the submitted value
 
+#### Scenario: A request with no body is a 422, not a 404
+
+- GIVEN a request with no body
+- WHEN it is submitted
+- THEN the response is the identity 422 (both identity fields missing) and no token-derived
+  value appears in it
+
 #### Scenario: Other credentials are refused without being spent
 
-- GIVEN a valid unexpired `sso-link` JWT, a user JWT, an M2M key and a candidate JWT
+- GIVEN a valid unexpired `sso-link` JWT, a user JWT, an M2M key and a candidate JWT, and a
+  valid identity
 - WHEN each is submitted as `link_token`
 - THEN each returns the generic 404
 - AND the `sso-link` can still be exchanged successfully afterwards (its jti was not consumed)
 
 #### Scenario: A disabled link is not distinguishable from an unknown one
 
-- GIVEN link L disabled and a never-issued well-formed token U
+- GIVEN link L disabled and a never-issued well-formed token U, and a valid identity
 - WHEN both are redeemed
 - THEN the responses are byte-identical
+
+#### Scenario: The 422 and the 409 do not weaken the guarantee
+
+- GIVEN an invalid identity, and separately a valid identity with a duplicate email on a valid
+  enabled link
+- WHEN each is submitted with token variants
+- THEN the 422 is identical for every token variant, and the 409 is returned only for a valid,
+  enabled token on an open project, never for an unknown, malformed or disabled one
 
 ### Requirement: Redemption Is Rate Limited Per IP And Per Link
 
 The endpoint MUST be protected by the named limiter `reusable-link-redeem` with two limits
 enforced on every request: 10 per minute per client IP (the address the framework resolves,
-`$request->ip()`) AND 100 per hour per link, keyed by the SHA-256 of the presented
-well-formed token and never by the raw token, and never by the client address. Both limits
-MUST be overridable through configuration without a code change: the environment variables
+`$request->ip()`) AND 100 per hour per link, keyed by the SHA-256 of the presented well-formed
+token and never by the raw token, and never by the client address. Both limits MUST be
+overridable through configuration without a code change: the environment variables
 `REUSABLE_LINK_REDEEM_PER_IP_PER_MINUTE` and `REUSABLE_LINK_REDEEM_PER_LINK_PER_HOUR`
 (configuration `reusable_links.redeem.per_ip_per_minute` and `per_link_per_hour`, both present
 in `.env.example`).
 
-EVERY attempt MUST count against its buckets: successes, 403s and 404s alike. Counting only
-successes would make the rate-limit headers differ between a valid and an unknown token, an
-existence oracle. The per-link limit MUST apply identically to well-formed tokens that exist
-and that do not, so a 429 discloses nothing about existence. Malformed input (not a
-well-formed token, including arrays and null) counts only against the IP bucket. The limiter
-reads the token from the body only, exactly like the controller. A limited request MUST
-return HTTP 429 with a `Retry-After` header, MUST be evaluated before any database lookup of
-the link, and MUST NOT create a participant or change `uses_count`.
+EVERY attempt MUST count against its buckets: successes, 403s, 404s, 409s and 422s alike (the
+limiter runs before identity validation and never reads the identity). Counting only successes
+would make the rate-limit headers differ between a valid and an unknown token, an existence
+oracle. The per-link limit MUST apply identically to well-formed tokens that exist and that do
+not, so a 429 discloses nothing about existence. Malformed input (not a well-formed token,
+including arrays and null) counts only against the IP bucket. The limiter reads the token from
+the body only, exactly like the controller. A limited request MUST return HTTP 429 with a
+`Retry-After` header, MUST be evaluated before any identity validation and any database lookup
+of the link, and MUST NOT create a participant or change `uses_count`.
+
+(Previously: "successes, 403s and 404s alike"; the limiter was evaluated before the format
+check only.)
 
 Because the framework reports the TIGHTER of the two buckets in the `X-RateLimit-*` headers,
-header sequences of a real and an unknown token are comparable only when each series comes
-from a disjoint block of client addresses.
+header sequences of a real and an unknown token are comparable only when each series comes from
+a disjoint block of client addresses.
 
 #### Scenario: The 11th request in a minute from one IP is throttled
 
@@ -786,9 +1001,17 @@ from a disjoint block of client addresses.
 - THEN HTTP 429 with `Retry-After` is returned and no participant is created
 - AND after the window passes the IP is served again
 
+#### Scenario: 422 and 409 attempts count
+
+- GIVEN 5 requests with an invalid identity and 5 requests that end in 409 from one IP within a
+  minute
+- WHEN an 11th request with a fully valid identity arrives
+- THEN HTTP 429 is returned and no participant is created
+
 #### Scenario: The 101st redemption of one link in an hour is throttled
 
-- GIVEN a valid link redeemed 100 times within an hour from varying IPs
+- GIVEN a valid link redeemed 100 times within an hour from varying IPs, each with a distinct
+  valid identity
 - WHEN a 101st redemption arrives
 - THEN HTTP 429 is returned, `uses_count` stays 100 and no participant is created
 
@@ -802,12 +1025,19 @@ from a disjoint block of client addresses.
 
 #### Scenario: The per-link limit does not reveal whether a token exists
 
-- GIVEN a real token and an unknown well-formed token each submitted 101 times in an hour
-  from varying IPs
+- GIVEN a real token and an unknown well-formed token each submitted 101 times in an hour from
+  varying IPs
 - WHEN the 101st request of each is answered
 - THEN both return the same 429 response
-- AND the `X-RateLimit-Remaining` sequences of the two series are equal when each series
-  uses a disjoint block of client addresses
+- AND the `X-RateLimit-Remaining` sequences of the two series are equal when each series uses a
+  disjoint block of client addresses
+
+#### Scenario: A well-formed token counts against its link bucket even with an invalid identity
+
+- GIVEN 100 requests with an invalid identity for one well-formed token within an hour from
+  varying IPs
+- WHEN a 101st request arrives with a valid identity
+- THEN HTTP 429 is returned and nothing is created
 
 #### Scenario: Limits are configuration-driven
 
@@ -824,7 +1054,8 @@ from a disjoint block of client addresses.
 
 #### Scenario: Malformed array input is throttled, not a 500
 
-- GIVEN more than the per-IP limit of requests with `{"link_token": ["x"]}`
+- GIVEN more than the per-IP limit of requests with `{"link_token": ["x"]}` and a valid
+  identity
 - WHEN the requests are submitted
 - THEN the early ones return 404 and the later ones 429, never 500
 
@@ -838,7 +1069,8 @@ from a disjoint block of client addresses.
 
 - GIVEN a well-formed token sent only in the query string
 - WHEN it is submitted
-- THEN it is counted against the IP bucket only and answered with the generic 404
+- THEN it is counted against the IP bucket only and answered with the generic 404 (valid
+  identity) or the identity 422 (invalid identity)
 
 ### Requirement: Project State Is Re-Checked At Every Redemption
 
@@ -910,15 +1142,15 @@ own: a closed, paused or past-deadline project stops it.
 
 ### Requirement: Each Redemption Creates One Fresh Visitor Participant
 
-A successful redemption MUST insert exactly ONE new participant (an INSERT, never an upsert;
-no `ON CONFLICT` path and no pre-flight status read apply) in the link's own organization and
-project, with:
+A successful redemption MUST insert exactly ONE new participant (an INSERT, never an upsert; no
+`ON CONFLICT` path and no resume of an existing enrolment apply) in the link's own organization
+and project, with:
 
 | Column | Value |
 |---|---|
 | `candidate_ref` | `rlv_<ULID>`, fresh per visitor (distinct from the link's `rlk_` id) |
-| `email` | `<candidate_ref>@invalid.beai.local` (the existing placeholder convention, built by the one `PlaceholderEmail` helper) |
-| `display_name` | `"<label> #<n>"`, `n` = the link's `uses_count` AFTER the increment; label fallback `"Reusable link"` when the label is NULL |
+| `email` | the visitor's `email`, trimmed and lower-cased; never a placeholder constructed by the redemption |
+| `display_name` | the visitor's `display_name`, trimmed, otherwise verbatim; never `"<label> #<n>"` |
 | `reusable_interview_link_id` | the link |
 | `role_code` | the project's `role_code` for a `standard` project, NULL for `potential` |
 | `language` | the link's stored `lang` (non-null) |
@@ -926,42 +1158,50 @@ project, with:
 | `status` / scheduling | `in_attesa`; `scheduling_status` NULL (immediate path) |
 | `organization_id` | set from the project (forceFill), never from input |
 
-The request body MUST NOT influence any of these values: extra fields such as `project_id`,
-`organization_id`, `candidate_ref`, `display_name`, `role_code`, `lang` or `mode` are ignored.
-The UNIQUE `(project_id, candidate_ref)` and `(project_id, email)` constraints MUST NOT
-change and never collide (fresh ULID per visitor; a theoretical collision is a unique
-violation that rolls the redemption back, never a merge). `uses_count` MUST increase by 1 and
-`last_used_at` MUST be set to now in the same transaction.
+(Previously: `email` was the placeholder `<candidate_ref>@invalid.beai.local` and
+`display_name` was `"<label> #<n>"` with the label fallback `"Reusable link"`; the body
+influenced none of the columns.)
+
+Apart from `display_name` and `email`, the request body MUST NOT influence any of these values:
+extra fields such as `project_id`, `organization_id`, `candidate_ref`, `role_code`, `lang` or
+`mode` are ignored. The UNIQUE `(project_id, candidate_ref)` and `(project_id, email)`
+constraints MUST NOT change; `candidate_ref` never collides (fresh ULID per visitor; a
+theoretical collision is a unique violation that rolls the redemption back, never a merge),
+while an `(project_id, email)` collision is the 409 specified in "A Duplicate Email In The Same
+Project Is Refused With 409 And Never Resumed". `uses_count` MUST increase by 1 and
+`last_used_at` MUST be set to now in the same transaction. The link `label` no longer
+contributes to any visitor column.
 
 #### Scenario: N redemptions create N distinct participants in one project
 
 - GIVEN one link on project P of organization A
-- WHEN the token is redeemed 5 times
+- WHEN the token is redeemed 5 times with 5 distinct emails
 - THEN 5 participants exist with 5 distinct `candidate_ref` values matching
   `^rlv_[0-9A-Za-z]{26}$`, all with `organization_id = A` and `project_id = P`
-- AND `uses_count = 5`, `last_used_at` is set, and display names are `<label> #1` to
-  `<label> #5`
+- AND `uses_count = 5`, `last_used_at` is set, and each participant carries the name and the
+  normalized email its visitor submitted
 - AND no participant was created in any other project or organization
 
 #### Scenario: Visitor fields are exactly as specified
 
 - GIVEN a link with `label = "Milan fair stand"`, `lang = "en"` on a standard-role project
-- WHEN it is redeemed
-- THEN the visitor has `email = "<candidate_ref>@invalid.beai.local"`,
-  `display_name = "Milan fair stand #1"`, `language = "en"`, `role_code` = the project's,
-  `mode = "live"`, `status = "in_attesa"`, `scheduling_status = NULL`,
-  `reusable_interview_link_id` = the link
+- WHEN it is redeemed with `display_name = " Ada Lovelace "` and `email = "Ada@Example.com"`
+- THEN the visitor has `email = "ada@example.com"`, `display_name = "Ada Lovelace"`, `language
+  = "en"`, `role_code` = the project's, `mode = "live"`, `status = "in_attesa"`,
+  `scheduling_status = NULL`, `reusable_interview_link_id` = the link
 
-#### Scenario: A link without a label uses the fallback name
+#### Scenario: No anonymous identity is produced
 
-- GIVEN a link with `label = NULL`
-- WHEN it is redeemed
-- THEN `display_name = "Reusable link #1"`
+- GIVEN links with a label and with `label = NULL`
+- WHEN each is redeemed with a valid identity
+- THEN no created `display_name` contains `#` followed by a counter or the label, and no
+  created `email` is constructed from `candidate_ref` or ends with `@invalid.beai.local` by the
+  redemption's doing
 
 #### Scenario: A potential-type project yields a NULL role
 
 - GIVEN a link on a `potential` project
-- WHEN it is redeemed
+- WHEN it is redeemed with a valid identity
 - THEN the visitor's `role_code` is NULL
 
 #### Scenario: The link's stored lang wins over later project changes
@@ -972,44 +1212,67 @@ violation that rolls the redemption back, never a merge). `uses_count` MUST incr
 
 #### Scenario: Body input never overrides server values
 
-- GIVEN a redemption body that also carries `project_id` of another project, `organization_id`
-  of another organization, `candidate_ref = "EXT-1"`, `display_name = "Mallory"`,
-  `mode = "test"`
+- GIVEN a redemption body that carries a valid identity and also `project_id` of another
+  project, `organization_id` of another organization, `candidate_ref = "EXT-1"`, `role_code =
+  "SRX"`, `lang = "it"`, `mode = "test"`
 - WHEN it is redeemed
-- THEN the visitor is created with the server-side values only, in the link's own project
+- THEN the visitor is created with the server-side values for every column except
+  `display_name` and `email`, in the link's own project
 
-#### Scenario: A placeholder email satisfies the NOT NULL and uniqueness rules
+#### Scenario: Distinct visitors keep distinct emails
 
-- GIVEN 100 visitors of one link
+- GIVEN 100 redemptions of one link with 100 distinct emails
 - WHEN the rows are inspected
-- THEN every `email` is distinct and ends with `@invalid.beai.local`
+- THEN every `email` is distinct and equals its visitor's normalized input
 
 ### Requirement: Redemption Is Atomic, Serialized And Race-Safe With Disable
 
 The link row MUST be locked (`SELECT ... FOR UPDATE`) for the duration of the redemption
 transaction, so that concurrent redemptions are serialized: N concurrent redemptions of one
-link MUST yield N distinct visitors, `uses_count` = N (no lost update; the counter is derived
-from the locked row, never from the pre-read), and N distinct display-name numbers. The
-disabled flag MUST be re-checked under that lock. The JWT mint MUST happen inside the
-transaction so that a mint failure rolls back everything (no participant, `uses_count`
-unchanged, no event). `ParticipantCreated` MUST be dispatched only after the commit, exactly
-once per successful redemption.
+link with N distinct emails MUST yield N distinct visitors and `uses_count` = N (no lost
+update; the counter is derived from the locked row, never from the pre-read). The disabled flag
+and the duplicate-email check MUST be evaluated under that lock. The JWT mint MUST happen
+inside the transaction so that a mint failure rolls back everything (no participant,
+`uses_count` unchanged, no event). A 409 MUST roll back everything in the same way.
+`ParticipantCreated` MUST be dispatched only after the commit, exactly once per successful
+redemption.
+
+(Previously: "N distinct display-name numbers" was part of the serialization guarantee; the
+duplicate-email check and the 409 rollback did not exist.)
 
 A redemption racing a disable MUST either complete before it (and create its visitor) or be
-refused after it (generic 404); a visitor MUST NEVER be created after the disable commits.
+refused after it (generic 404); a visitor MUST NEVER be created after the disable commits. Two
+redemptions with the same email MUST create exactly one participant: through one link they are
+serialized by the row lock, through different links or paths the `(project_id, email)` unique
+constraint decides and the loser receives the 409.
 
 #### Scenario: Concurrent redemptions are serialized
 
-- GIVEN a real PostgreSQL database with committed data and 10 parallel redemptions of one
-  valid link, each in its own process and database session
+- GIVEN a real PostgreSQL database with committed data and 10 parallel redemptions of one valid
+  link with 10 distinct emails, each in its own process and database session
 - WHEN all complete
-- THEN 10 distinct visitors exist, `uses_count = 10` and the display names are numbered 1 to
-  10 without duplicates
+- THEN 10 distinct visitors exist and `uses_count = 10`
+
+#### Scenario: Concurrent same-email redemptions yield exactly one participant
+
+- GIVEN 5 parallel redemptions of one valid link with the same email, and separately 2 parallel
+  redemptions with the same email through two different links of one project, in separate
+  processes against a real PostgreSQL database
+- WHEN all complete
+- THEN exactly one returns 200 and the others return 409 `duplicate_enrolment`, exactly one
+  participant holds the email, and the total `uses_count` increase equals 1
+
+#### Scenario: A 409 burns nothing
+
+- GIVEN a redemption that ends in 409
+- WHEN the link row, the participants and the event dispatch log are read
+- THEN `uses_count` and `last_used_at` are unchanged, no participant was added and
+  `ParticipantCreated` was not dispatched
 
 #### Scenario: A mint failure burns nothing
 
 - GIVEN the candidate JWT mint throws
-- WHEN the token is redeemed
+- WHEN the token is redeemed with a valid identity
 - THEN the request fails, no participant exists, `uses_count` and `last_used_at` are unchanged
   and `ParticipantCreated` was not dispatched
 
@@ -1026,6 +1289,103 @@ refused after it (generic 404); a visitor MUST NEVER be created after the disabl
 - GIVEN a successful redemption
 - WHEN the transaction and event dispatch are traced
 - THEN `ParticipantCreated` fires exactly once, after the commit
+
+### Requirement: A Duplicate Email In The Same Project Is Refused With 409 And Never Resumed
+
+Inside the redemption transaction, AFTER the link row is locked and the disabled flag
+re-checked, the redemption MUST check, case-insensitively, whether a participant of the SAME
+project (the link's own organization and project) already holds the normalized email. If one
+does, the response MUST be HTTP 409 with exactly the body `{"message": "duplicate_enrolment"}`
+(the internal API's convention of a machine code in `message`, reusing the platform's published
+term). A violation of the `(project_id, email)` unique constraint raised by the insert (a
+concurrent enrolment through any path) MUST be mapped to the same 409. Only that constraint
+maps to 409.
+
+A 409 MUST roll the transaction back completely: no participant is created, `uses_count` and
+`last_used_at` are unchanged, no `ParticipantCreated` is dispatched, no `webhook_deliveries`
+row is created and no token is minted. The redemption MUST NEVER resume, re-mint a token for,
+update, or take over the existing participant, whatever its status or origin (visitor of any
+link, SSO-created, M2M-created, operator-created): the 409 body carries nothing about it. A 409
+is reachable only after the token, project and gate checks have passed, so only a holder of a
+valid, enabled link on an open project can observe it, and it can only reveal enrolment in that
+one project; the same email in another project or another organization MUST NOT conflict, and
+no response discloses any other tenant. A disabled link (404) and a failing gate (403) take
+precedence over 409; invalid identity (422) takes precedence over everything.
+
+#### Scenario: An exact duplicate is refused and nothing is written
+
+- GIVEN project P already holds a participant with `email = "ada@example.com"`, and an enabled
+  link L on P with `uses_count = 3`
+- WHEN L is redeemed with `email = "ada@example.com"` and a valid name
+- THEN the response is HTTP 409 with body exactly `{"message":"duplicate_enrolment"}`
+- AND no participant is added, `uses_count` is still 3, `last_used_at` is unchanged, no event
+  is dispatched and no `webhook_deliveries` row exists
+- AND the body contains no `access_token`
+
+#### Scenario: The comparison is case-insensitive and trim-insensitive
+
+- GIVEN project P holds a participant created by the admin entry link with `email =
+  "Ada@Example.com"` (stored as received)
+- WHEN a link on P is redeemed with `email = " ADA@example.COM "`
+- THEN the response is HTTP 409 `duplicate_enrolment` and nothing is written
+
+#### Scenario: The existing enrolment is never resumed or touched
+
+- GIVEN project P holds an existing participant for `ada@example.com` in status `in_corso` (and
+  separately `completato`, `errore`, `in_attesa`), created by a visitor of another link, by SSO
+  exchange, by M2M, or by an operator
+- WHEN a link on P is redeemed with that email
+- THEN the response is HTTP 409 for each, and the existing participant's status, session and
+  data are unchanged
+- AND no candidate token for the existing participant is minted
+
+#### Scenario: The same email in another project or organization succeeds
+
+- GIVEN `ada@example.com` is enrolled in project P1 of organization A
+- WHEN a link on project P2 of organization A, and a link on project Q of organization B, are
+  redeemed with that email
+- THEN both return HTTP 200 and each creates its own visitor
+- AND a redemption on P1 with that email returns 409 without any hint of P2 or Q
+
+#### Scenario: Precedence of the other refusals
+
+- GIVEN a duplicate email
+- WHEN the link is disabled, then separately the project is closed, then separately the
+  identity is otherwise invalid, then separately the token is malformed
+- THEN the responses are, in that order, the generic 404, the generic 403, 422, and the generic
+  404
+- AND with a duplicate email and an enabled link on an open project the response is 409
+
+#### Scenario: Two same-email submits through one link are serialized
+
+- GIVEN two concurrent redemptions of the same link with the same email, in two processes
+  against a real PostgreSQL database
+- WHEN both complete
+- THEN exactly one returns 200 and one returns 409, exactly one participant holds that email,
+  and `uses_count` is increased by exactly 1
+
+#### Scenario: Two same-email submits through different links of one project are resolved by the constraint
+
+- GIVEN two enabled links on the same project and two concurrent redemptions, one per link,
+  with the same email
+- WHEN both complete
+- THEN exactly one returns 200 and the other returns 409 `duplicate_enrolment` (never a 500),
+  and exactly one participant holds the email
+- AND the losing link's `uses_count` is unchanged
+
+#### Scenario: A concurrent enrolment through another path is resolved by the constraint
+
+- GIVEN an operator enrols the same normalized email in the project at the same moment as a
+  redemption
+- WHEN both complete
+- THEN exactly one participant holds the email and the loser is a 409 (redemption) or the
+  path's own duplicate refusal (operator), never a 500
+
+#### Scenario: The visitor can retry with another email
+
+- GIVEN a 409 for `ada@example.com`
+- WHEN the same link is redeemed with `ada.l@example.com`
+- THEN the response is 200 and a visitor is created
 
 ### Requirement: A Link Has No Expiry Of Its Own
 
@@ -1151,76 +1511,154 @@ accepted and is bounded only by the redemption limiters and by Disable.
 - WHEN it is redeemed beyond 100 times in an hour, then disabled
 - THEN the 101st is throttled and every redemption after the disable returns the generic 404
 
-### Requirement: Anonymous Visitors Cannot Be Matched To A Person (Documented Limitation)
+### Requirement: Visitors Are Identified By A Self-Declared Name And Email
 
-A visitor carries no name or email of a person: `display_name` is the link label plus a
-number and `email` is a placeholder. A transcript or recording of a visitor is nevertheless
-personal data in fact. BEAI therefore CANNOT match a visitor to a data subject for an access
-or erasure request by any identifier it holds. This is a documented limitation, NOT a legal
-conclusion and NOT a statement that no data-subject right applies: the retention/GDPR
-sign-off (CLAUDE.md ruling 2, open decision #2) MUST name visitor participants and their
-artifacts as a class it covers, and the existing purge classes apply to them unchanged. The
-link `label` is operator-authored text and MUST be named by the same sign-off. A kiosk
-privacy notice is out of scope here.
+A visitor MUST carry the name and email the visitor entered, so that every interview started
+from a reusable link is attributable to an identifiable person and an access or erasure request
+can be matched to the visitor row by email or name. Redemption MUST NOT create a visitor
+without both. The identity is SELF-DECLARED and UNVERIFIED: BEAI does not verify ownership of
+the address (no one-time code, no confirmation link, no verification state in any column or
+response); the visitor's presence at the device is the only assurance. This is a documented
+limitation, not a legal conclusion.
 
-#### Scenario: No lookup by a person's identity resolves a visitor
+Cross-tenant isolation is unchanged: every read of a visitor stays scoped by `organization_id`;
+an operator's participant search by name or email resolves visitors of that operator's
+organization only, and no endpoint answers where else an address appears.
 
-- GIVEN visitors exist and an operator searches the participants list with a person's email
-  address or name
-- WHEN the search runs
-- THEN no visitor is returned on that basis, and no endpoint answers "which visitor is this
-  person"
+Visitor rows created before this change (placeholder email
+`<candidate_ref>@invalid.beai.local`, name `<label> #<n>`) are NOT backfilled, rewritten or
+deleted by this change; they remain valid participants, remain covered by the placeholder mail
+guard, and remain named by the retention sign-off. The retention/GDPR sign-off text (CLAUDE.md
+product decision 2) MUST state that participants created by reusable-link redemption are now
+identified by a self-declared, unverified name and email entered before the interview, that
+legacy anonymous rows created before this change remain, and that their transcripts,
+recordings, evaluations and the operator-authored link `label` are covered, as a documented
+default pending sign-off and not a legal conclusion. The privacy notice shown to the visitor is
+specified in `interview-frontend`; confirmation of its wording by legal is an owner follow-up
+and not part of this requirement.
+
+The purge MUST treat visitors like any participant: at the `participant_pii` window
+`display_name` is overwritten with the sentinel `[purged]` AND `email` is replaced with the
+participant's non-identifying placeholder, derived only from its own `candidate_ref` (`<sha256
+hex of candidate_ref>@purged.beai.invalid`, see `data-retention`, "The Participant Purge Also
+Redacts The Email"); `candidate_ref` and `reusable_interview_link_id` are unchanged. No new
+retention duration, class or key exists.
+
+(Corrected by precedence: the original delta said the purge changes only `display_name` and
+does not alter which columns it touches. The `data-retention` delta of the same change
+supersedes that statement, because the owner required full GDPR compliance, so the email
+survives the purge nowhere.)
+
+#### Scenario: A visitor is found by the email or name it declared
+
+- GIVEN a visitor with `display_name = "Ada Lovelace"` and `email = "ada@example.com"` in
+  organization A, and an operator of A
+- WHEN the participants list is searched with `q=ada@example.com` and with `q=Lovelace`
+- THEN the visitor is returned in each case
+- AND the same search by an operator of organization B returns nothing for it
+
+#### Scenario: No visitor is created without an identity
+
+- GIVEN any request to the redeem endpoint
+- WHEN it omits either identity field or carries an invalid one
+- THEN no participant row is created, so no new visitor ever exists without a name and an email
+
+#### Scenario: The address is not verified
+
+- GIVEN a successful redemption
+- WHEN the response, the participant row and the mail queue are inspected
+- THEN the response is only `{"access_token": ...}`, no verification state or code exists, and
+  no mail was queued
+
+#### Scenario: Legacy anonymous rows are untouched
+
+- GIVEN a visitor row created before this change with `email = "rlv_X@invalid.beai.local"` and
+  `display_name = "Milan fair stand #4"`
+- WHEN the change is deployed and the row is read
+- THEN both values are unchanged and invitation mail to it is still refused
 
 #### Scenario: The purge treats visitors like any participant
 
 - GIVEN a visitor older than the `participant_pii` window
 - WHEN the purge runs
-- THEN `display_name` is overwritten with the sentinel while `candidate_ref`, `email`'s
-  placeholder and `reusable_interview_link_id` are unchanged
+- THEN `display_name` is overwritten with the sentinel `[purged]` and `email` with the
+  participant's own placeholder (`<sha256 hex of candidate_ref>@purged.beai.invalid`), while
+  `candidate_ref` and `reusable_interview_link_id` are unchanged, exactly as for any
+  participant
 
-#### Scenario: The sign-off inventory names visitors
+#### Scenario: The sign-off inventory names the new identity and the legacy rows
 
 - GIVEN the retention/GDPR documentation that accompanies this change (CLAUDE.md, product
   decision 2)
 - WHEN it is inspected
-- THEN it states that participants created by reusable-link redemption (anonymous visitors)
-  and their transcripts, recordings and evaluations, and the link label, are covered by the
-  pending sign-off, as a documented default and not a legal conclusion
+- THEN it states that reusable-link participants are identified by a self-declared, unverified
+  name and email, that legacy anonymous rows remain, and that their artifacts and the link
+  label are covered by the pending sign-off as a documented default and not a legal conclusion
 
 ### Requirement: No Mail Is Ever Sent To A Visitor Address
 
-Every code path that mails a participant MUST go through ONE shared "placeholder address"
-predicate (`PlaceholderEmail::is()`) that recognizes the `@invalid.beai.local` suffix
-(covering visitors and the backfilled rows the convention already covers) and MUST refuse to
-send to such an address. The convention (the domain and the construction of the address) is
-owned by that one class and used by the redemption, the SSO exchange fallback and the
-invitation job. A refusal MUST be logged with a message that states the address is a
-placeholder (it MUST NOT claim the row "predates the mandatory-email column"). The
-operator's "Generate new link" on a visitor (`send_email` defaults to true in the API) MUST
-still return the link and MUST queue no mail; the backoffice re-issue already sends
-`send_email: false`, so the guard is a second line of defence.
+Redemption MUST send no email of any kind (no welcome, no confirmation, no notification). No
+code path MAY mail a participant that is a visitor (carries the link marker
+`reusable_interview_link_id`) or whose address is a placeholder. The placeholder rule is ONE
+shared predicate, `PlaceholderEmail::is()`, which recognizes the two reserved domains
+`@invalid.beai.local` and `@purged.beai.invalid` (covering legacy anonymous visitors, the
+backfilled rows the convention already covers and purged participants) and is applied by the
+invitation job; the visitor rule is applied at the dispatch site, the operator entry-link
+controller (see the reconciliation below). A visitor's address is self-declared and unverified,
+so mailing it would turn every link holder into a sender of BEAI mail to arbitrary third
+parties. The convention for placeholder addresses (the domains and the construction of the
+address) stays owned by that one class. A refusal MUST be logged with a message that states why
+the send was refused (visitor address or placeholder) and MUST NOT contain the address and MUST
+NOT claim the row "predates the mandatory-email column". The operator's "Generate new link" on
+a visitor (`send_email` defaults to true in the API) MUST still return the link and MUST queue
+no mail; the backoffice re-issue already sends `send_email: false`, so the refusal is a second
+line of defence.
 
-#### Scenario: Re-issue on a visitor queues no mail
+(Previously: the guard recognized only the placeholder address; visitors carried a placeholder,
+so the marker was not needed.)
 
-- GIVEN a visitor at `in_attesa`
+(Reconciled with the implementation: the original delta required ONE shared guard that sees the
+participant and refuses both a visitor and a placeholder. The invitation job is scalar-only: it
+receives the address, the link and display strings, never the participant, so it cannot see the
+visitor marker. The refusal for a visitor therefore happens at the one dispatch site, the
+operator entry-link controller: the
+entry-link minter reports whether the `candidate_ref` it mints for is an existing row carrying
+the link marker, and the controller then queues no invitation, still mints and returns the
+link, and reports `email_sent: false`, so the response stays truthful. It writes one log line
+with no context, neither address nor name. The scalar-only job keeps refusing placeholder
+addresses through `PlaceholderEmail::is()`, which now recognizes both reserved domains,
+`@invalid.beai.local` and `@purged.beai.invalid`, ignoring case and surrounding whitespace, so
+a legacy anonymous visitor and a purged participant are refused there. The observable behaviour
+is as specified: the link is returned, nothing is queued, and no log line carries an address.)
+
+#### Scenario: Redemption queues no mail
+
+- GIVEN a mail fake and a successful redemption with a real-looking address
+- WHEN the request completes and the queue is inspected
+- THEN no mailable or notification is queued or sent
+
+#### Scenario: Re-issue on a visitor with a real address queues no mail
+
+- GIVEN a visitor created by redemption (real-looking self-declared email) at `in_attesa`
 - WHEN an operator mints a new entry link for it with `send_email` true (the default)
 - THEN the link is returned and no invitation mail is queued or sent
 
-#### Scenario: Backfilled placeholder rows stay refused
+#### Scenario: Backfilled and legacy placeholder rows stay refused
 
 - GIVEN a legacy participant whose email is `<candidate_ref>@invalid.beai.local`
 - WHEN an invitation is attempted
-- THEN it is refused by the same shared predicate
+- THEN it is refused by the same shared guard
 
-#### Scenario: The refusal log is accurate
+#### Scenario: The refusal log is accurate and carries no address
 
 - GIVEN a refused send to a visitor
 - WHEN the log line is inspected
-- THEN it states the address is a placeholder and does not mention the mandatory-email column
+- THEN it states the refusal reason, does not contain the address, and does not mention the
+  mandatory-email column
 
-#### Scenario: A real address still receives its invitation
+#### Scenario: A real address of an ordinary participant still receives its invitation
 
-- GIVEN a participant with a real email
+- GIVEN a participant with a real email and no link marker
 - WHEN an invitation is sent
 - THEN it is sent exactly as before this change
 
@@ -1320,42 +1758,50 @@ is not an administrative mutation and MUST NOT produce an audit row; its record 
 The Scramble export MUST describe the three admin operations and the redeem operation with
 typed schemas. The operations are `reusableInterviewLink.index`, `reusableInterviewLink.store`,
 `reusableInterviewLink.destroy` and `reusableLinkRedeem.redeem`. The link resource schema
-carries the ten keys of the list item and none of the forbidden ones; create returns 201,
-list 200, disable 204, each with the error statuses Scramble emits (401, 403, 404, 409 and
-422 as applicable). The redeem operation MUST declare the body parameter `link_token` and the
-responses 200 (`{access_token: string}`), 403 (`{message, redirect_url}`), 404 (`{message}`)
-and 429 (`{message}`).
+carries the ten keys of the list item and none of the forbidden ones; create returns 201, list
+200, disable 204, each with the error statuses Scramble emits (401, 403, 404, 409 and 422 as
+applicable). The redeem operation MUST declare the body parameters `link_token`, `display_name`
+and `email`, and the responses 200 (`{access_token: string}`), 403 (`{message, redirect_url}`),
+404 (`{message}`), 409 (`{message}`, whose only value is `duplicate_enrolment`), 422 (the
+standard validation error with `errors` over `display_name` and `email`) and 429 (`{message}`).
+
+(Previously: the redeem operation declared only `link_token` and the responses 200, 403, 404
+and 429.)
 
 `link_token` is typed `string`, and its format (`beai_rl_` followed by 43 URL-safe base64
-characters, 51 characters in all) is stated in its description.
+characters, 51 characters in all) is stated in its description. `display_name` is typed
+`string` (at most 255 characters) and `email` is typed `string` with email format (at most 255
+characters); both are required.
 
 (Reconciled with the implementation: the original delta required a `pattern` on the body
 parameter. Scramble cannot express a `pattern` on a body parameter declared through an
-attribute, so the format lives in the description and the strict format is enforced at
-runtime and by the unit tests on the generator. The explicit 403 `entry_link_project_closed`
-and 422 `PROJECT_NOT_INTERVIEWABLE` bodies of create are not documented separately, because
-Scramble keeps one schema per status code, the same as the existing `POST /api/entry-links`.)
+attribute, so the format lives in the description and the strict format is enforced at runtime
+and by the unit tests on the generator. The explicit 403 `entry_link_project_closed` and 422
+`PROJECT_NOT_INTERVIEWABLE` bodies of create are not documented separately, because Scramble
+keeps one schema per status code, the same as the existing `POST /api/entry-links`.)
 
-The public `/v1` surface (`openapi.v1.json` and its SDKs) MUST be byte-identical to before
-this change; the public contract under `docs/specs/public-api/` does not change.
+The public `/v1` surface (`openapi.v1.json` and its SDKs) MUST be byte-identical to before this
+change; the public contract under `docs/specs/public-api/` does not change; no field is added
+to `T-EXPOSE-001` (`ExposureCatalogue`).
 
 #### Scenario: The internal export documents the operations
 
 - GIVEN a fresh `scramble:export` against PostgreSQL
 - WHEN `openapi.json` is inspected
-- THEN the four operations exist with the schemas and status codes above, the link resource
-  schema has no hash, token, `expires_at` or internal id, and `link_token` is typed as a
-  string
+- THEN the four operations exist with the schemas and status codes above, the redeem body
+  declares `link_token`, `display_name` and `email`, the responses include 409 and 422, the
+  link resource schema has no hash, token, `expires_at` or internal id, and `link_token` is
+  typed as a string
 
 #### Scenario: The public export is unchanged
 
-- GIVEN `openapi.v1.json` before and after this change
+- GIVEN `openapi.v1.json` and the generated SDKs before and after this change
 - WHEN they are compared
 - THEN they are byte-identical and contain no reusable-link path
 
 #### Scenario: Export drift is detected
 
-- GIVEN `openapi.json` committed without the new operations
+- GIVEN `openapi.json` committed without the new body parameters and statuses
 - WHEN the export-drift check runs
 - THEN it fails until the export is regenerated
 
@@ -1419,10 +1865,12 @@ solve and what the owner decided, so that nobody discovers them in production.
 2. **Per-visit cost.** A leaked link can start at most 100 interviews per hour until it is
    disabled, and each completed visit costs real provider and LLM spend (visitors are LIVE).
    This is accepted; the brakes are the limiters and Disable.
-3. **GDPR.** Anonymous visitors cannot be matched to a data subject for an access or erasure
-   request. The retention sign-off (CLAUDE.md ruling 2) must name them, and the link label. This
-   is a documented limitation and a documented default pending sign-off, not a legal
-   conclusion.
+3. **GDPR (closed for new visitors).** Visitors are identified by a self-declared, UNVERIFIED
+   name and email entered before the interview, so an access or erasure request can be matched
+   to a visitor by email. Legacy anonymous rows created before the change remain (placeholder
+   email, `<label> #<n>` name); the retention sign-off (CLAUDE.md ruling 2) still names them,
+   their artifacts and the link label. This is a documented default pending sign-off, not a
+   legal conclusion.
 4. **Webhooks and `/v1` treat visitors like any participant** (decided): the creation
    `progress` webhook, the `evaluation` webhook, `/v1/interviews` lists and exports of the live
    key include them. Integrators tell them apart by the `rlv_` `candidate_ref` prefix.
@@ -1430,9 +1878,10 @@ solve and what the owner decided, so that nobody discovers them in production.
    database) take about 22 seconds and create throwaway databases named `*_conc_*`; a
    hard-killed run can leave one behind on the test server (harmless, drop it manually). The
    throttle matrix takes about 36 seconds. Run broad suites in parallel.
-6. **Wording gap.** The candidate app's terminal `link_invalid` state reuses an existing
-   message that says the link "has expired or is not valid"; "expired" is slightly untrue for a
-   link that never expires.
+6. **Wording gap (closed).** The candidate app's terminal `link_invalid` state once reused a
+   message that said the link "has expired or is not valid", which is slightly untrue for a
+   link that never expires. The copy now says the link "is not valid or is no longer active",
+   and `interview-frontend` pins that it never claims expiry.
 7. **Error-report scrubber pattern parity.** The api uses `beai_rl_[A-Za-z0-9_-]{16,}`; the
    two Nuxt applications use `beai_rl_[A-Za-z0-9_-]{43}`, not end-anchored, so a secret longer
    than 43 characters would leave a tail. The patterns are compatible with this specification
@@ -1440,6 +1889,26 @@ solve and what the owner decided, so that nobody discovers them in production.
 8. **Superadmin without an organization.** Create and disable answer 409 for a superadmin with
    no acting organization (the generic organization-context rule); the backoffice form shows its
    generic error banner, with no dedicated copy.
+9. **Case-sensitive uniqueness residual (G-43).** `participants_project_id_email_unique` is
+   case-sensitive and the admin entry link, M2M and SSO exchange store the address as received.
+   The redemption pre-check is case-insensitive and stores lower case, but a race with a path
+   that stores mixed case is not blocked by the index. Follow-up G-43
+   (`docs/specs/public-api/DECISIONS-NEEDED.md`).
+10. **Email squatting and the project-scoped enrolment oracle.** A link holder can enrol someone
+    else's address (blocking that person's later invite in that project) and can test whether an
+    address is enrolled in THAT one project. This is bounded by the limiter (10 per minute per
+    IP, 100 per hour per link), visible to operators in the participant list with the link
+    marker, and accepted (owner decision OD-1: the identity is unverified).
+11. **Server access logs may carry the participants search term.** The admin participants
+    search sends `q` in the query string of an authenticated GET, and an operator can search by
+    an email address. The error-report scrubber is pinned for it; access logs of the hosting
+    platform are outside this change. Recorded as a follow-up.
+12. **A lost redemption response cannot be retried.** If a redemption succeeds on the server
+    but its response never reaches the page, the visitor is enrolled without a session, and a
+    Retry with the same email is refused with 409 `duplicate_enrolment` because the enrolment
+    is never resumed. An idempotency key on the redemption would let a retry return the
+    original result. Out of scope for this change; recorded as a follow-up (see
+    `interview-frontend`, "Reusable Entry Route").
 
 ---
 
@@ -1459,3 +1928,7 @@ places; the implementation won, and each is recorded inline above:
 | 7 | `link_token` string with a pattern | `link_token` string with the format in the description |
 | 8 | scrubber pattern `{43}` | api `{16,}`, apps `{43}`; `token_prefix` as a key is denied (fail closed) |
 | 9 | participants index on `(organization_id, reusable_interview_link_id)` | the same columns, partial (`WHERE reusable_interview_link_id IS NOT NULL`) |
+| 10 | visitor identity: anonymous visitor (placeholder email, `<label> #<n>` name) | self-declared name and email, 409 `duplicate_enrolment`, `TrimStrings` skipped for `link_token` only |
+| 11 | one shared mail guard that sees the participant | the invitation job is scalar-only: the visitor refusal is at the dispatch site (entry-link minter flag, `email_sent: false`), the job keeps refusing placeholder addresses |
+| 12 | no refusal of a typed reserved placeholder address | `NotPlaceholderEmail` refuses `@invalid.beai.local` and `@purged.beai.invalid` at redemption (422) and on the four other enrolment paths, with the own-placeholder exception on the two re-issue paths |
+| 13 | `TrimStrings` skipped on the route | `TrimStrings` skipped for the input KEY `link_token`, application-wide, with an architecture test on its readers |

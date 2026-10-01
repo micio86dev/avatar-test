@@ -1814,6 +1814,13 @@ searchable, so searching by source or external ID returns the matching rows.
 - WHEN the operator types `acme` and then `4471` in the search box
 - THEN each search requests the list with `q` set to that term and the row is shown
 
+#### Scenario: The search box says it also matches the email
+
+- GIVEN the participants list in English and in Italian
+- WHEN the search box placeholder is read
+- THEN it reads "Search by name, email, reference, source or external ID" and "Cerca per nome,
+  email, riferimento, origine o ID esterno", and a unit test pins both strings
+
 ### Requirement: Participant Detail Shows The External Reference
 
 The participant detail page header (`participants/[id].vue`) MUST render one line, below
@@ -1930,25 +1937,37 @@ the project-row drawer (`ProjectTable.vue`), and the reusable checkbox is offere
 The Invite form in the Invite drawer MUST render, as its FIRST control (before every
 identity, timing and delivery field), a `CheckboxField` (the DESIGN.md §16.13 standard)
 labelled "Generate a reusable interview link that never expires" with the description
-"Anyone who opens it starts a new interview for this project. Use it for demos, events and
-testing." It MUST be unchecked every time the drawer opens. The description MUST be a
-`FieldDescription` nested in its `Field`.
+"Anyone who opens it starts a new interview for this project. Each visitor enters their name
+and email before starting. Use it for demos, events and testing." (Italian: label "Genera un
+link di colloquio riutilizzabile che non scade mai", description "Chiunque lo apra avvia un
+nuovo colloquio per questo progetto. Ogni visitatore inserisce nome ed email prima di
+iniziare. Utile per demo, eventi e prove."). It MUST be unchecked every time the drawer
+opens. The description MUST be a `FieldDescription` nested in its `Field`.
 
-When checked, every other control of the form MUST NOT be rendered at all (hidden, not merely
-disabled; none of their values is submitted): the candidate reference, display name, email,
-the External reference fieldset, the timing controls and the send-email control. They are
-replaced by one optional text field "Link name" (at most 120 characters; help text example
-"Milan fair stand"). The form has no role or language control (both come from the project), so
-there is nothing to hide for them. The hiding is one wrapper around the existing fields, so a
-future field cannot be forgotten. The form follows the existing "Form Field Validation And
+(Previously: the description was "Anyone who opens it starts a new interview for this
+project. Use it for demos, events and testing." with no mention of visitor identity.)
+
+When checked, every other control of the form MUST NOT be rendered at all (hidden, not
+merely disabled; none of their values is submitted): the candidate reference, display name,
+email, the External reference fieldset, the timing controls and the send-email control. They
+are replaced by one optional text field "Link name" (at most 120 characters; help text
+"Names the link, e.g. Milan fair stand."; Italian "Dà un nome al link, ad esempio Stand
+fiera di Milano."). The help text MUST NOT claim that the link name is applied to the
+interviews started from the link: visitors now supply their own names, so the label only
+names the link. The form has no role or language control (both come from the project), so
+there is nothing to hide for them. The hiding is one wrapper around the existing fields, so
+a future field cannot be forgotten. The form follows the existing "Form Field Validation And
 Banner Contract" (`novalidate` with equivalent script validation, `FieldError` with
-`aria-invalid` and `aria-describedby`, i18n-keyed messages shown after blur, server 422 mapped
-onto the Link name field). Submitting in the reusable mode MUST call
-`POST /api/projects/{project}/reusable-links` (with the project's integer id) with only
-`label` and MUST NOT call `POST /api/entry-links`; the label is trimmed and OMITTED when empty,
-so an empty name sends `{}`. The reusable submission emits `reusable-created`, never the
+`aria-invalid` and `aria-describedby`, i18n-keyed messages shown after blur, server 422
+mapped onto the Link name field). Submitting in the reusable mode MUST call `POST
+/api/projects/{project}/reusable-links` (with the project's integer id) with only `label`
+and MUST NOT call `POST /api/entry-links`; the label is trimmed and OMITTED when empty, so
+an empty name sends `{}`. The reusable submission emits `reusable-created`, never the
 single-use `success` event. When unchecked, the form and its submission MUST be exactly the
 existing single-use form.
+
+(Previously: the Link name help text was "Names the link and the interviews started from it,
+e.g. Milan fair stand.")
 
 (Reconciled with the implementation: the design sketched `{label: null}` for an empty name;
 the specified and implemented payload is `{}`, which the API accepts equally.)
@@ -1956,8 +1975,8 @@ the specified and implemented payload is `{}`, which the API accepts equally.)
 The checkbox MUST be offered only where the Invite action is offered and enabled: never to a
 `viewer`, never on the participant-detail "Generate new link" re-issue (always one specific
 candidate; that surface does not render the form), and never when the Invite action is
-disabled for a project that is not `active`, not yet live or past its deadline (the API still
-answers 403).
+disabled for a project that is not `active`, not yet live or past its deadline (the API
+still answers 403).
 
 #### Scenario: The checkbox is the first control
 
@@ -1965,6 +1984,22 @@ answers 403).
 - WHEN the form renders
 - THEN the first focusable control is the checkbox with the label and description above,
   unchecked
+
+#### Scenario: The description tells operators that visitors enter their identity
+
+- GIVEN the Invite form in English and in Italian
+- WHEN the checkbox description is read
+- THEN it contains the sentence "Each visitor enters their name and email before starting."
+  (English) or "Ogni visitatore inserisce nome ed email prima di iniziare." (Italian), and
+  the Vitest i18n pin asserts both strings
+
+#### Scenario: The Link name help no longer claims to name interviews
+
+- GIVEN the reusable mode is checked
+- WHEN the Link name help text is read in English and in Italian
+- THEN it reads "Names the link, e.g. Milan fair stand." and "Dà un nome al link, ad esempio
+  Stand fiera di Milano." and contains neither "interviews started from it" nor "colloqui
+  avviati da esso"
 
 #### Scenario: Checking it swaps the fields
 
@@ -1985,8 +2020,8 @@ answers 403).
 
 - GIVEN the checkbox is checked and "Link name" is `Milan fair stand`
 - WHEN the form is submitted
-- THEN `POST /api/projects/{project}/reusable-links` is called with
-  `{"label": "Milan fair stand"}` and no other key, and no `/entry-links` request is made
+- THEN `POST /api/projects/{project}/reusable-links` is called with `{"label": "Milan fair
+  stand"}` and no other key, and no `/entry-links` request is made
 - AND with an empty name the payload is `{}`
 
 #### Scenario: Link name length is validated
@@ -2030,23 +2065,33 @@ answers 403).
 ### Requirement: Reusable Link Disclosure Is Shown Before The Copy
 
 After a reusable link is created, `EntryLinkPanel` MUST render its reusable variant (the
-component's props are a discriminated union on `kind: 'single-use' | 'reusable'`, defaulting to
-single-use; `expires_at` is absent only for `reusable`). In the same view, in this DOM and
-visual order, and visible without any interaction before the copy control can be used: (1) a
-warning `Alert` reading "This link does not expire and can be used many times. Anyone who has
-it can start this interview, so share it only where you mean to. This is the only time the
-full link is shown."; (2) a line "Never expires · Reusable" with the note "It stops working if
-the project closes or the link is disabled. Desktop browsers only."; (3) the full URL as
-selectable text; (4) a Copy control copying the complete URL including its fragment. The
-reusable variant MUST NOT render a "Generate new link" button, an absolute expiry, or any word
-meaning revoke or regenerate. The clipboard-blocked hint of the single-use panel is kept, because
-the selectable URL is the same fallback.
+component's props are a discriminated union on `kind: 'single-use' | 'reusable'`, defaulting
+to single-use; `expires_at` is absent only for `reusable`). In the same view, in this DOM
+and visual order, and visible without any interaction before the copy control can be used:
+(1) a warning `Alert` reading "This link does not expire and can be used many times. Anyone
+who has it can start this interview, so share it only where you mean to. This is the only
+time the full link is shown." followed, inside the same Alert, by the sentences "Visitors
+enter their name and email before the interview. On a shared device, use a private browser
+window." (Italian: "Questo link non scade e può essere usato molte volte. Chiunque lo
+possieda può avviare questo colloquio, quindi condividilo solo dove serve. Il link completo
+viene mostrato solo questa volta." followed by "I visitatori inseriscono nome ed email prima
+del colloquio. Su un dispositivo condiviso, usa una finestra del browser privata."); (2) a
+line "Never expires · Reusable" with the note "It stops working if the project closes or the
+link is disabled. Desktop browsers only."; (3) the full URL as selectable text; (4) a Copy
+control copying the complete URL including its fragment. The reusable variant MUST NOT
+render a "Generate new link" button, an absolute expiry, or any word meaning revoke or
+regenerate. The clipboard-blocked hint of the single-use panel is kept, because the
+selectable URL is the same fallback.
 
-The disclosure MUST NOT be deferred to a post-copy toast. The URL is show-once: it MUST exist
-only in component state for this drawer session and MUST be discarded, never re-shown, when the
-drawer closes or the route changes; it MUST NOT be written to local or session storage, a query
-cache, the browser URL or history. The single-use variant MUST remain byte-for-byte what it is
-today (its rendered DOM is pinned, comments and placeholders excluded).
+(Previously: the Alert carried only the first three sentences; there was no statement about
+visitor identity or private browser windows.)
+
+The disclosure MUST NOT be deferred to a post-copy toast. The URL is show-once: it MUST
+exist only in component state for this drawer session and MUST be discarded, never re-shown,
+when the drawer closes or the route changes; it MUST NOT be written to local or session
+storage, a query cache, the browser URL or history. The single-use variant MUST remain
+byte-for-byte what it is today (its rendered DOM is pinned, comments and placeholders
+excluded).
 
 #### Scenario: The disclosure precedes the copy
 
@@ -2054,6 +2099,14 @@ today (its rendered DOM is pinned, comments and placeholders excluded).
 - WHEN the panel renders
 - THEN the warning, the "Never expires · Reusable" line, the URL and then the Copy control
   appear in that order, all visible without interaction
+
+#### Scenario: The disclosure states the visitor identity and the private-window advice
+
+- GIVEN a reusable link was just created, in English and in Italian
+- WHEN the warning Alert is read
+- THEN it contains "Visitors enter their name and email before the interview. On a shared
+  device, use a private browser window." (English) or the Italian sentences above, and the
+  Vitest i18n pin asserts both
 
 #### Scenario: No generate button and no expiry
 
@@ -2078,7 +2131,7 @@ today (its rendered DOM is pinned, comments and placeholders excluded).
 - GIVEN a single-use link is minted
 - WHEN the panel renders
 - THEN its DOM equals the pre-change snapshot (disclosure, absolute expiry, URL, Copy,
-  "Generate new link")
+  "Generate new link"), and the new sentences are absent
 
 ### Requirement: The Reusable Links Panel Lists Links And Disables Them
 
