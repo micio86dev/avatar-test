@@ -3600,6 +3600,17 @@ jobs:
             echo "SELF-TEST FAILED: scrubber_pattern_divergence flagged an identical set: $SCRUB_CLEAN"
             FAILED=1
           fi
+          # The same identical set with semicolon-terminated TS declarations
+          # (the conventional style) must pass too.
+          scrub_tree "$FIXTURE/scrub-semi" "$SCRUB_BODY" "$SCRUB_BODY" "$SCRUB_BODY"
+          printf 'const REUSABLE_LINK_TOKEN_PATTERN = /%s/g;\n' "$SCRUB_BODY" > "$FIXTURE/scrub-semi/frontend/app/utils/sentry-scrub.ts"
+          printf 'const REUSABLE_LINK_TOKEN_PATTERN = /%s/g;\n' "$SCRUB_BODY" > "$FIXTURE/scrub-semi/backoffice/app/utils/sentry-scrub.ts"
+          if SCRUB_SEMI=$(scrubber_pattern_divergence "$FIXTURE/scrub-semi"); then
+            echo "  ok — scrubber_pattern_divergence reads semicolon-terminated TS declarations"
+          else
+            echo "SELF-TEST FAILED: scrubber_pattern_divergence could not read a semicolon-terminated declaration: $SCRUB_SEMI"
+            FAILED=1
+          fi
           scrub_tree "$FIXTURE/scrub-narrow" "$SCRUB_BODY" "$SCRUB_BODY" 'beai_rl_[A-Za-z0-9_-]{43}'
           expect_caught "scrubber pattern parity (backoffice narrowed to {43})" \
             "$(scrubber_pattern_divergence "$FIXTURE/scrub-narrow")"

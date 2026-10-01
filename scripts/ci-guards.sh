@@ -3172,7 +3172,9 @@ ci_scrubber_pattern_body() {
     php)
       CI_SPB_BODIES=$(sed -n "s|^[^*/]*const[[:space:]]\{1,\}REUSABLE_LINK_TOKEN_PATTERN[[:space:]]*=[[:space:]]*'/\(.*\)/[A-Za-z]*'[[:space:]]*;.*\$|\1|p" "$1") ;;
     *)
-      CI_SPB_BODIES=$(sed -n "s|^[^*/]*const[[:space:]]\{1,\}REUSABLE_LINK_TOKEN_PATTERN[[:space:]]*=[[:space:]]*/\(.*\)/[A-Za-z]*[[:space:]]*\$|\1|p" "$1") ;;
+      # A trailing `;` is optional: the apps omit it today, but a formatter
+      # that adds it must not turn a correct declaration into "unreadable".
+      CI_SPB_BODIES=$(sed -n "s|^[^*/]*const[[:space:]]\{1,\}REUSABLE_LINK_TOKEN_PATTERN[[:space:]]*=[[:space:]]*/\(.*\)/[A-Za-z]*[[:space:]]*;\{0,1\}[[:space:]]*\$|\1|p" "$1") ;;
   esac
   [ -n "$CI_SPB_BODIES" ] || return 1
   # More than one declaration is ambiguous: which one scrubs?

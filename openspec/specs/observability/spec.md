@@ -822,8 +822,8 @@ string:
 
 All three scrubbers (the api and the two Nuxt apps) MUST use this one pattern, deliberately
 over-inclusive and not end-anchored: a truncated token, a token followed by more URL-safe
-characters, and a token of any length are all scrubbed, while the 8-character display prefix
-(`beai_rl_` plus 8 characters) and a 15-character tail are not. The two Nuxt scrubbers MUST apply
+characters, and a token of any length are all scrubbed, while the 16-character display prefix
+(`beai_rl_` plus 8 characters) and `beai_rl_` followed by a 15-character tail are not. The two Nuxt scrubbers MUST apply
 the same rule, pinned by the same fixture set in both so they cannot drift apart:
 `tests/unit/fixtures/reusable-link-scrub-cases.ts` (`REUSABLE_LINK_REDACTION_CASES`) is
 byte-identical in the `frontend` and `backoffice` repositories, and each application's static
@@ -836,9 +836,11 @@ key literally named `token_prefix` is filtered too (the fail-closed side). `toke
 identification aid and not a credential: its 16-character VALUE under a neutral key is NOT
 scrubbed, and neither is a near miss.
 
-The three patterns are unified. A wrapper guard that compares the two Nuxt scrubber patterns, the
-api pattern and the two fixture copies (`cmp`) is a release-time task: it can only run against
-the pinned submodules, so it lands together with the pin bump that carries the unified patterns.
+The three patterns are unified and a wrapper CI guard enforces it: `scrubber_pattern_divergence`
+(scripts/ci-guards.sh, step c2 of wrapper-ci.yml, with self-test fixtures) compares the api
+pattern, the two Nuxt patterns and the two fixture copies (`cmp`). It reads the pinned submodules,
+so it entered the wrapper together with the pin bump to the releases that carry the unified
+patterns, never on its own.
 
 #### Scenario: api scrubs the body key, the hash key and the pattern
 
