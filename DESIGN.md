@@ -1259,7 +1259,8 @@ Usage:
 
 1. **Structure.** `FieldGroup` > `Field` > `FieldLabel` + control + `FieldError` /
    `FieldDescription` (shadcn-vue). Never a raw `div` with `space-y-*`. `FieldSet` +
-   `FieldLegend` for grouped checkboxes/radios (e.g. a competency picker).
+   `FieldLegend` for grouped checkboxes/radios (e.g. a competency picker) and for a small
+   group of related optional inputs (e.g. the invite form's "External reference" fieldset).
 2. **Base styling.** `@tailwindcss/forms` stays installed as a Preflight-level reset
    only — it normalizes native control appearance so shadcn-vue's own classes have a
    consistent base to override, not the other way around. Visual state (default, focus,

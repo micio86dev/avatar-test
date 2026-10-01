@@ -408,6 +408,183 @@ no session yields an estimate, the total MUST be absent, never zero.
 - WHEN the detail is read
 - THEN the cost field is absent, not zero
 
+### Requirement: Participants List Carries The External Reference
+
+The participants list resource (`GET /api/participants`) MUST carry `external_id`
+(integer or null) and `source` (string or null) for every row. Both keys MUST always
+be present; an absent value is `null`, never a missing key, `0`, or `""`. `external_id`
+MUST be emitted as a JSON number (never a string), which is exact because it is capped
+at 9007199254740991.
+
+#### Scenario: A row with both fields
+
+- GIVEN a participant with `external_id = 4471` and `source = "acme-ats"`
+- WHEN the list is read
+- THEN that row has `external_id = 4471` (number) and `source = "acme-ats"`
+
+#### Scenario: A row with only external_id
+
+- GIVEN a participant with `external_id = 4471` and no source
+- WHEN the list is read
+- THEN the row has `external_id = 4471` and `source = null`
+
+#### Scenario: A row with only source
+
+- GIVEN a participant with `source = "acme-ats"` and no external_id
+- WHEN the list is read
+- THEN the row has `source = "acme-ats"` and `external_id = null`
+
+#### Scenario: A row with neither
+
+- GIVEN a participant with no external reference
+- WHEN the list is read
+- THEN the row contains both keys with `null` values
+
+#### Scenario: The list adds no per-row query
+
+- GIVEN a page of participants
+- WHEN the list is read
+- THEN exposing the two fields issues no additional query per row
+
+### Requirement: Participant Detail Carries The External Reference
+
+The participant detail resource (`GET /api/participants/{id}`) MUST carry `external_id`
+(integer or null) and `source` (string or null), always present, alongside the existing
+summary fields. Access rules, the cross-tenant 404, and the lifecycle read-gate are
+unchanged.
+
+#### Scenario: Detail exposes the reference
+
+- GIVEN a participant with `external_id = 4471` and `source = "acme-ats"`
+- WHEN the detail is read by any authorized role
+- THEN the response carries both values
+
+#### Scenario: Detail with no reference
+
+- GIVEN a participant with no external reference
+- WHEN the detail is read
+- THEN `external_id` and `source` are present and null
+
+#### Scenario: Cross-tenant detail is still not found
+
+- GIVEN a participant of Org B with an external reference
+- WHEN an Org A user reads its detail
+- THEN HTTP 404 is returned and no field of the record is disclosed
+
+### Requirement: Participants List Search Matches The External Reference
+
+The `q` parameter of `GET /api/participants` MUST match, always inside the caller's
+`organization_id`:
+
+- `candidate_ref`, `display_name` and `source`: case-insensitive substring match. The
+  `LIKE` wildcards `%` and `_` and the escape character `\` in the term MUST be matched
+  literally, never as wildcards (a term of `_` matches only values containing an
+  underscore).
+- `external_id`: exact numeric equality, applied ONLY when the trimmed term is a whole
+  number from 1 to 9007199254740991 (ASCII digits only). A term that is not such a
+  number MUST NOT be compared to `external_id` and MUST NOT raise an error, including an
+  all-digit term above the cap (no `external_id` comparison; the other fields are still
+  evaluated).
+
+The matches are OR-ed with each other, and the OR group remains AND-ed with the `status`
+filter and the organization scope (it MUST NOT be able to escape the scope). A
+participant with a NULL `source` never matches on `source`.
+(Previously, before `candidate-external-reference`: `candidate_ref` and `display_name`
+were matched with a case-sensitive, unescaped `LIKE`, so `q=maria` did not find
+"Maria Rossi" and a `%` in the term acted as a wildcard. Aligning them is a bug fix made
+in the same change so the three text fields behave identically.)
+
+#### Scenario: q matches source case-insensitively and partially
+
+- GIVEN a participant with `source = "Acme ATS"`
+- WHEN `q=acme` is searched
+- THEN that participant is returned
+
+#### Scenario: q matches candidate_ref and display_name case-insensitively
+
+- GIVEN a participant with `candidate_ref = "EXT-ABC-001"` and another with
+  `display_name = "Maria Rossi"`
+- WHEN `q=ext-abc` and `q=maria` are searched
+- THEN the first and the second participant are returned respectively
+
+#### Scenario: A numeric q matches external_id exactly
+
+- GIVEN participants with `external_id` 4471, 44710, and 14471 (and unrelated sources)
+- WHEN `q=4471` is searched
+- THEN the participant with `external_id = 4471` is returned
+- AND the participants with 44710 and 14471 are not returned by the external_id branch
+
+#### Scenario: A numeric q also matches a source containing the digits
+
+- GIVEN a participant with `source = "job-4471"` and no external_id
+- WHEN `q=4471` is searched
+- THEN that participant is returned via the `source` match
+
+#### Scenario: A non-numeric q never touches external_id
+
+- GIVEN participants with external ids
+- WHEN `q=44x` or `q=acme` is searched
+- THEN HTTP 200 is returned without error
+- AND no row is returned solely because of an `external_id` comparison
+
+#### Scenario: An all-digit q above the cap does not error
+
+- GIVEN `q=99999999999999999999999`
+- WHEN the list is searched
+- THEN HTTP 200 is returned without a database error
+- AND rows matching on `candidate_ref`, `display_name`, or `source` are still returned
+
+#### Scenario: LIKE wildcards in the term are literal
+
+- GIVEN participants whose values are `abc`, `a_c`, `50%`, and `back\slash`
+- WHEN `q=a_c`, `q=_`, `q=%` and `q=\` are searched
+- THEN `q=a_c` returns only `a_c` (not `abc`)
+- AND `q=_` and `q=%` return only rows containing a literal underscore or percent sign
+- AND `q=\` treats the backslash literally
+- AND the same holds when the value sits in `source`
+
+#### Scenario: q stays combinable with the status filter
+
+- GIVEN participants matching `q=acme` at different statuses
+- WHEN `q=acme&status=in_attesa` is searched
+- THEN only matching participants at `in_attesa` are returned
+
+#### Scenario: Search never crosses organizations
+
+- GIVEN Org A and Org B each hold a participant with `source = "acme-ats"` and
+  `external_id = 4471`
+- WHEN an Org A user searches `q=acme-ats` and `q=4471`
+- THEN only Org A's participant is returned
+
+### Requirement: External Reference Fields Are Typed In The OpenAPI Export
+
+Every resource that carries the external reference MUST declare it in a
+Scramble-resolvable shape so the export types `external_id` as nullable `integer` and
+`source` as nullable `string` — never Scramble's `string` default for `external_id`.
+This covers `Admin\ParticipantResource`, `Admin\ParticipantDetailResource`, and the
+operator/M2M participant resource `ParticipantEnrolmentResource`. The candidate-facing
+participant schema (`App.Http.Resources.ParticipantResource`) MUST NOT contain either
+field.
+
+#### Scenario: external_id exports as a nullable integer
+
+- GIVEN a fresh `scramble:export` against PostgreSQL
+- WHEN the schema of each carrying resource is inspected
+- THEN `external_id` is `integer` with null allowed and `source` is `string` with null
+  allowed
+
+#### Scenario: The candidate session schema omits the fields
+
+- GIVEN the same export
+- WHEN the schema of the candidate session response is inspected
+- THEN neither `external_id` nor `source` appears
+
+#### Scenario: Export drift is detected
+
+- GIVEN `openapi.json` and `openapi.v1.json` committed without the new fields
+- WHEN the export-drift check runs after this change
+- THEN it fails until the exports are regenerated
+
 ### Requirement: Downloadable Artifacts Are Limited to Transcript and Evaluation
 
 Only the transcript (assembled from `Utterance` rows, `text/plain`) and the

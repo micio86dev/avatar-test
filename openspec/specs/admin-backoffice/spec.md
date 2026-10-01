@@ -1487,10 +1487,13 @@ that is absent.
 The participant detail view MUST offer a **"Generate new link"** action that
 re-issues an entry link for that already-known participant, pre-filled from the
 participant's own `project_id`, `candidate_ref`, `display_name`, `role_code`, and
-`language`. The participants list MUST offer a separate **"Invite candidate"**
+`language`, and carrying the participant's stored `external_id` and `source`
+through unchanged when they are present (and sending neither key when they are
+absent). The participants list MUST offer a separate **"Invite candidate"**
 action that mints an entry link for someone not yet in the system, via a form
-collecting `project_id`, `candidate_ref`, `display_name`, and optional
-`role_code`/`lang`. Both call the same `POST /api/entry-links` endpoint; they
+collecting `project_id`, `candidate_ref`, `display_name`, optional
+`role_code`/`lang`, and the optional external reference fieldset. Both call the
+same `POST /api/entry-links` endpoint; they
 differ only in where the input comes from — one entity already exists, the other
 does not yet.
 
@@ -1498,6 +1501,8 @@ Neither control MAY be rendered for a `viewer` — minting starts an assessment,
 is not a read, and `ParticipantPolicy::create` denies viewer server-side. A
 control that renders and then fails with 403 teaches the operator the product is
 broken rather than that they lack the right.
+(Previously: the re-issue pre-fill and the Invite form did not include the external
+reference.)
 
 #### Scenario: Re-issue action is available on participant detail
 
@@ -1518,6 +1523,20 @@ broken rather than that they lack the right.
 - GIVEN a signed-in user with the `viewer` role
 - WHEN they open the participant detail page or the participants list
 - THEN neither "Generate new link" nor "Invite candidate" is rendered
+
+#### Scenario: Re-issue carries the stored reference through
+
+- GIVEN a participant at `in_attesa` with `external_id = 4471` and `source = "Acme ATS"`
+- WHEN the operator uses "Generate new link"
+- THEN the `POST /api/entry-links` payload contains `external_id = 4471` and
+  `source = "Acme ATS"`
+- AND after the new link is exchanged the stored reference is unchanged
+
+#### Scenario: Re-issue without a stored reference sends no keys
+
+- GIVEN a participant with no external reference
+- WHEN the operator uses "Generate new link"
+- THEN the payload contains neither `external_id` nor `source`
 
 ### Requirement: Single-Use and Expiry Are Disclosed Before the Copy
 
@@ -1602,6 +1621,267 @@ authorization.
   (disabled state bypassed or stale)
 - WHEN `POST /api/entry-links` is called
 - THEN HTTP 403 is returned regardless of what the UI displayed
+
+### Requirement: Invite Form Offers An Optional External Reference Fieldset
+
+The "Invite candidate" form MUST render an optional fieldset titled "External
+reference" with two inputs: "External ID" and "Source" (both text inputs; the External
+ID input is `type="text"` with `inputmode="numeric"`, not `type="number"`, so there is no
+scroll-wheel stepping, no `e`-notation and no `parseFloat` precision loss above 2^53),
+and exactly one help line stating when they are needed ("Only needed when another
+system created this candidate."). The help line MUST be rendered as a `FieldDescription`
+nested inside a `Field`, never a loose sibling inside `FieldGroup`.
+
+The fieldset MUST follow the existing "Form Field Validation And Banner Contract":
+`novalidate` with equivalent JavaScript validation, `FieldError` under each field with
+`aria-invalid` / `aria-describedby`, messages i18n-keyed and shown after blur, and
+server 422 responses mapped through the shared mapper onto `external_id` / `source` (a
+422 naming a field with no control still surfaces in the form-level banner).
+
+Client-side validation MUST mirror the API and is a hint only (the server is the
+authority): External ID must be a whole number that is a safe integer
+(`1 <= value <= 9007199254740991`, so `9007199254740992` and above are rejected before
+submit); Source must be at most 180 characters. Empty inputs MUST be omitted from the
+request payload entirely (not sent as `null` or `""`). The External ID is sent as a JSON
+number, never a numeric string (the API rejects one), and Source is sent trimmed. A form
+left with both inputs empty MUST submit exactly as before (byte-identical payload), in
+both timing modes (scheduled and immediate). The fieldset is rendered only where the
+Invite action is rendered (never for `viewer`).
+
+#### Scenario: The fieldset is present and optional
+
+- GIVEN an operator opens the Invite candidate form
+- WHEN the form renders
+- THEN an "External reference" fieldset with an External ID input, a Source text input,
+  and one help line is visible
+- AND the form can be submitted with both inputs empty
+
+#### Scenario: The help line is nested in a Field
+
+- GIVEN the fieldset help line
+- WHEN the DOM is inspected
+- THEN it is a `FieldDescription` nested inside a `Field`, not a sibling of `Field`
+  inside `FieldGroup`
+
+#### Scenario: Both values are submitted
+
+- GIVEN External ID `4471` and Source `Acme ATS` are entered with the other fields valid
+- WHEN the form is submitted
+- THEN the `POST /api/entry-links` payload contains `external_id = 4471` (number) and
+  `source = "Acme ATS"`
+
+#### Scenario: Only External ID is submitted
+
+- GIVEN only External ID `4471` is entered
+- WHEN the form is submitted
+- THEN the payload contains `external_id` and no `source` key
+
+#### Scenario: Only Source is submitted
+
+- GIVEN only Source `Acme ATS` is entered
+- WHEN the form is submitted
+- THEN the payload contains `source` and no `external_id` key
+
+#### Scenario: Neither is submitted
+
+- GIVEN both inputs are empty
+- WHEN the form is submitted
+- THEN the payload contains neither key and is identical to the payload sent before this
+  change
+
+#### Scenario: Invalid External ID blocks submit with a field error
+
+- GIVEN External ID is `0`, `-3`, `1.5`, `abc`, or `9007199254740992`
+- WHEN the field is blurred or the form is submitted
+- THEN a `FieldError` renders under External ID with `aria-invalid="true"` and
+  `aria-describedby` set
+- AND no request is sent
+- AND External ID `9007199254740991` is accepted
+
+#### Scenario: Source length is validated
+
+- GIVEN Source of 181 characters
+- WHEN the field is blurred or the form is submitted
+- THEN a `FieldError` renders under Source and no request is sent
+- AND a Source of 180 characters is accepted
+
+#### Scenario: A server 422 maps onto the field
+
+- GIVEN the API responds 422 naming `external_id`
+- WHEN the response is handled
+- THEN the message renders under the External ID field via the shared mapper, not
+  silently dropped
+
+#### Scenario: The fieldset is absent where Invite is absent
+
+- GIVEN a signed-in `viewer`
+- WHEN the participants list renders
+- THEN no Invite action and no External reference fieldset is rendered
+
+### Requirement: Participants List Shows The External Reference As A Sub-Line
+
+`CandidateTable.vue` MUST render, under the `candidate_ref` in each row, a muted
+single-line sub-line formatted `Source · #external_id` (separator U+00B7 middle dot)
+ONLY when the participant has an external reference; no new column is added.
+Composition:
+
+- both present: `Acme ATS · #4471`
+- only `external_id`: `#4471`
+- only `source`: `Acme ATS`
+- neither: no sub-line element is rendered at all (no empty container, no lone
+  separator)
+
+`external_id` MUST render as its plain decimal digits (no locale grouping or
+separators: it is an identifier, not a quantity). `source` MUST render as escaped plain
+text, never as HTML. The sub-line carries a visually hidden prefix naming it ("External
+reference") so a screen reader does not read a bare `Acme ATS · #4471`. The list search
+box sends its term as `q`, and its placeholder MUST say that source and external ID are
+searchable, so searching by source or external ID returns the matching rows.
+
+#### Scenario: Both fields render
+
+- GIVEN a row with `source = "Acme ATS"` and `external_id = 4471`
+- WHEN the list renders
+- THEN the sub-line under its `candidate_ref` reads `Acme ATS · #4471`
+
+#### Scenario: Only external_id renders
+
+- GIVEN a row with `external_id = 4471` and `source = null`
+- WHEN the list renders
+- THEN the sub-line reads `#4471` with no separator
+
+#### Scenario: Only source renders
+
+- GIVEN a row with `source = "Acme ATS"` and `external_id = null`
+- WHEN the list renders
+- THEN the sub-line reads `Acme ATS` with no separator and no `#`
+
+#### Scenario: Nothing renders when absent
+
+- GIVEN a row with neither field
+- WHEN the list renders
+- THEN no sub-line element exists in that row's DOM
+
+#### Scenario: A large id has no grouping
+
+- GIVEN a row with `external_id = 1234567`
+- WHEN the list renders in `it` and in `en`
+- THEN the sub-line shows `#1234567` in both locales
+
+#### Scenario: Source is rendered as text
+
+- GIVEN a row whose `source` is `<b>x</b>`
+- WHEN the list renders
+- THEN the literal text `<b>x</b>` is shown and no element is injected
+
+#### Scenario: No new column
+
+- GIVEN the participants list
+- WHEN the table header is inspected
+- THEN its column set is unchanged by this change
+
+#### Scenario: Searching by source or external ID finds the row
+
+- GIVEN a participant with `source = "Acme ATS"` and `external_id = 4471`
+- WHEN the operator types `acme` and then `4471` in the search box
+- THEN each search requests the list with `q` set to that term and the row is shown
+
+### Requirement: Participant Detail Shows The External Reference
+
+The participant detail page header (`participants/[id].vue`) MUST render one line, below
+the `candidate_ref · role_code · language` line, carrying the external reference ONLY
+when the participant has one. The detail line is LABELLED, because the header has room
+for it: `External ID 4471 · Source Acme ATS`, each part only when present (a single field
+alone renders without separator), digits without grouping, `source` as escaped text. When
+neither is present nothing MUST be rendered for it (no label, no placeholder dash). The
+line MUST be visible to every role authorized to view the participant.
+(Reconciled with the design: the spec draft reused the list's `Source · #external_id`
+composition here; the implemented `labelled` variant is the intended detail wording.)
+
+#### Scenario: Detail shows both fields
+
+- GIVEN a participant with `source = "Acme ATS"` and `external_id = 4471`
+- WHEN the detail page renders
+- THEN the header shows `External ID 4471 · Source Acme ATS`
+
+#### Scenario: Detail shows a single field alone
+
+- GIVEN a participant with only `external_id = 4471`, and another with only
+  `source = "Acme ATS"`
+- WHEN each detail page renders
+- THEN the header shows `External ID 4471` and `Source Acme ATS` respectively, without
+  separator
+
+#### Scenario: Detail renders nothing when absent
+
+- GIVEN a participant with no external reference
+- WHEN the detail page renders
+- THEN no external-reference line, label, or placeholder is in the DOM
+
+#### Scenario: A viewer sees the line
+
+- GIVEN a signed-in `viewer` opening a participant that has an external reference
+- WHEN the detail page renders
+- THEN the line is visible
+
+### Requirement: External Reference Copy Is Localised In it And en
+
+Every user-facing string of the external reference UI MUST be i18n-keyed and present in
+both `it` and `en`, under one namespace (`externalReference`): the fieldset title, the
+two field labels (which also label the detail line and prefix the list sub-line), the
+help line, and the External ID validation message (`externalIdInvalid`, covering both "not
+a whole number" and "out of range", interpolating the maximum). The Source length message
+reuses the existing shared `entryLink.form.tooLong` key. The values themselves (`source`,
+`external_id`) and the `·` and `#` glyphs are data and MUST NOT be translated or
+locale-formatted.
+(Reconciled with the design: the spec draft listed three validation messages; the
+implementation uses two keys, because "not an integer" and "out of range" share one
+message.)
+
+#### Scenario: Both locales are complete
+
+- GIVEN the `it` and `en` locale files
+- WHEN the keys used by the fieldset, validation messages, and lines are checked
+- THEN every key exists in both files with non-empty text
+- AND no such string is hard-coded in a component
+
+#### Scenario: Switching locale changes the copy, not the data
+
+- GIVEN a participant with `source = "Acme ATS"` and `external_id = 4471`
+- WHEN the locale is switched between `it` and `en`
+- THEN the fieldset labels and help change language
+- AND the rendered `Acme ATS · #4471` sub-line is identical
+
+### Requirement: The External Reference Client Types Come From Regeneration
+
+`backoffice/types/api.ts` and `openapi.json` MUST be regenerated (`bun run codegen`) in
+the same change that consumes the new fields; `codegen:check` MUST be green. Generated
+types MUST be `external_id: number | null` and `source: string | null` on the
+participant list and detail resources, and MUST NOT appear on the candidate session
+type. Fixtures MUST use real numbers, never numeric strings. No cast (`as number`,
+`as any`) may be added to satisfy the compiler. The error-report scrubber
+(`sentry-scrub.ts`) MUST deny `external_id` and `external_ids`, matching the api
+scrubber.
+
+#### Scenario: Drift check is green
+
+- GIVEN the regenerated `openapi.json` and `types/api.ts`
+- WHEN `bun run codegen:check` runs
+- THEN it exits 0
+
+#### Scenario: Types match the wire
+
+- GIVEN the generated participant list and detail types
+- WHEN the two fields are inspected
+- THEN `external_id` is `number | null` and `source` is `string | null`
+
+#### Scenario: End-to-end invite shows the reference
+
+- GIVEN an operator invites a candidate with an external reference and the candidate
+  exchanges the link (Playwright, Chromium and WebKit)
+- WHEN the participants list and the participant detail are opened
+- THEN the list sub-line and the detail line show the reference
+- AND a participant invited without one shows neither
 
 ## ADDED Requirements (self-service-password-reset)
 
