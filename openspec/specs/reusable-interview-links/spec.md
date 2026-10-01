@@ -1245,9 +1245,9 @@ The api error-report scrubber MUST filter the keys `link_token`, `token_hash` an
 depth and in every carrier, including the URL-path pass (a token pasted into a client-chosen
 URL path segment is the one carrier the query and fragment cut does not reach). The
 `{16,}` form is a deliberate superset of the 51-character token: it also catches a truncated
-token, while the 16-character display prefix alone and a 10-character near miss stay
-untouched. The Nuxt applications use the stricter `beai_rl_[A-Za-z0-9_-]{43}` (see
-`observability`).
+token and a token followed by more URL-safe characters, while the 16-character display prefix
+alone (`beai_rl_` plus 8 characters) and a 15-character tail stay untouched. The Nuxt
+applications use the same pattern (see `observability`).
 
 (Reconciled with the implementation: any key containing the word `token` at any position is
 already denied by the scrubbers' content-word rule, so a key literally named `token_prefix`
@@ -1265,7 +1265,7 @@ credential".)
 #### Scenario: Sentry events are scrubbed
 
 - GIVEN an error event whose request body has `link_token`, whose URL, message and breadcrumbs
-  embed a string matching `beai_rl_[A-Za-z0-9_-]{43}`, and whose context has `token_hash`
+  embed a string matching `beai_rl_[A-Za-z0-9_-]{16,}`, and whose context has `token_hash`
 - WHEN the scrubber runs
 - THEN the body key, every pattern match in any string at any depth, and `token_hash` are
   replaced by the filtered placeholder, and unrelated keys are untouched
@@ -1430,13 +1430,12 @@ solve and what the owner decided, so that nobody discovers them in production.
    database) take about 22 seconds and create throwaway databases named `*_conc_*`; a
    hard-killed run can leave one behind on the test server (harmless, drop it manually). The
    throttle matrix takes about 36 seconds. Run broad suites in parallel.
-6. **Wording gap.** The candidate app's terminal `link_invalid` state reuses an existing
-   message that says the link "has expired or is not valid"; "expired" is slightly untrue for a
-   link that never expires.
-7. **Error-report scrubber pattern parity.** The api uses `beai_rl_[A-Za-z0-9_-]{16,}`; the
-   two Nuxt applications use `beai_rl_[A-Za-z0-9_-]{43}`, not end-anchored, so a secret longer
-   than 43 characters would leave a tail. The patterns are compatible with this specification
-   and are not unified; unifying them is a follow-up.
+6. **Wording gap (closed).** The candidate app's terminal `link_invalid` state now shows copy
+   that is true for expired single-use links and for unknown or disabled reusable links (see
+   `interview-frontend`).
+7. **Error-report scrubber pattern parity (closed).** The api and the two Nuxt applications now
+   use the same `beai_rl_[A-Za-z0-9_-]{16,}` pattern (see `observability`); a wrapper guard that
+   compares them lands with the pin bump that carries the unified patterns.
 8. **Superadmin without an organization.** Create and disable answer 409 for a superadmin with
    no acting organization (the generic organization-context rule); the backoffice form shows its
    generic error banner, with no dedicated copy.

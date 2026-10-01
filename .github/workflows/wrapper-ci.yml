@@ -31,6 +31,8 @@
 #       render) is byte-identical to api/openapi.v1.json
 #   (b) the committed openapi.json is semantically identical across api/frontend/backoffice
 #   (c) each app's check-client-drift.sh exits 0 (generated TS client matches openapi.json)
+#   (c2) the reusable-link token scrubber uses one pattern in the api and both Nuxt
+#       apps, and the two Nuxt scrub-case fixtures are byte-identical
 #   (d) the framework catalog, in full. Parity between the authored source and
 #       the vendored copy; every declared role has BARS or a committed entry in
 #       scripts/framework-known-gaps.txt; every declared role×competency PAIR
@@ -542,6 +544,30 @@ jobs:
       - name: Check backoffice TS client drift
         working-directory: backoffice
         run: bash scripts/check-client-drift.sh
+
+      # -----------------------------------------------------------------------
+      # (c2) Reusable-link token scrubber parity. The api's SentryScrubber and
+      #      the sentry-scrub.ts of both Nuxt apps redact the same bearer
+      #      credential and MUST use one pattern; the two Nuxt fixtures that
+      #      prove it MUST be byte-identical (openspec `observability` spec).
+      #      Each repo's own tests only prove ITS scrubber against ITS fixture,
+      #      so only the wrapper, which sees all three, can compare them.
+      #      `scrubber_pattern_divergence` lives in scripts/ci-guards.sh and is
+      #      proven against known-bad fixtures by the self-test step below.
+      # -----------------------------------------------------------------------
+      - name: Verify the reusable link token scrubber is the same in api/frontend/backoffice
+        run: |
+          . ./scripts/ci-guards.sh
+
+          if SCRUB_DRIFT=$(scrubber_pattern_divergence .); then
+            echo "The three reusable-link token scrubbers share one pattern, and the two Nuxt fixtures are byte-identical."
+          else
+            echo "ERROR: the reusable link token scrubbers have drifted apart:"
+            printf '%s\n' "$SCRUB_DRIFT" | sed 's/^/  /'
+            echo "  A scrubber narrower than its siblings leaves a readable token tail in an error report."
+            echo "  Move the api SentryScrubber, both sentry-scrub.ts files and the two fixtures together."
+            exit 1
+          fi
 
       # -----------------------------------------------------------------------
       # (d) The framework catalog exists in two places, and must not drift —
@@ -3551,6 +3577,66 @@ jobs:
             echo "SELF-TEST FAILED: bun_version_divergence could not run against the committed tree."
             FAILED=1
           fi
+
+          # scrubber_pattern_divergence: the reusable-link token scrubber parity.
+          # Each tree is a complete api/frontend/backoffice trio so a row fails
+          # for the ONE reason it names, never because a sibling file is absent.
+          scrub_tree() {
+            # $1 = dir, $2 = PHP body, $3 = frontend body, $4 = backoffice body
+            mkdir -p "$1/api/app/Support/Observability" "$1/frontend/app/utils" "$1/backoffice/app/utils" \
+                     "$1/frontend/tests/unit/fixtures" "$1/backoffice/tests/unit/fixtures"
+            printf "    private const REUSABLE_LINK_TOKEN_PATTERN = '/%s/';\n" "$2" \
+              > "$1/api/app/Support/Observability/SentryScrubber.php"
+            printf 'const REUSABLE_LINK_TOKEN_PATTERN = /%s/g\n' "$3" > "$1/frontend/app/utils/sentry-scrub.ts"
+            printf 'const REUSABLE_LINK_TOKEN_PATTERN = /%s/g\n' "$4" > "$1/backoffice/app/utils/sentry-scrub.ts"
+            printf 'export const CASES = []\n' > "$1/frontend/tests/unit/fixtures/reusable-link-scrub-cases.ts"
+            printf 'export const CASES = []\n' > "$1/backoffice/tests/unit/fixtures/reusable-link-scrub-cases.ts"
+          }
+          SCRUB_BODY='beai_rl_[A-Za-z0-9_-]{16,}'
+          scrub_tree "$FIXTURE/scrub-ok" "$SCRUB_BODY" "$SCRUB_BODY" "$SCRUB_BODY"
+          if SCRUB_CLEAN=$(scrubber_pattern_divergence "$FIXTURE/scrub-ok"); then
+            echo "  ok — scrubber_pattern_divergence passes three identical patterns and identical fixtures"
+          else
+            echo "SELF-TEST FAILED: scrubber_pattern_divergence flagged an identical set: $SCRUB_CLEAN"
+            FAILED=1
+          fi
+          # The same identical set with semicolon-terminated TS declarations
+          # (the conventional style) must pass too.
+          scrub_tree "$FIXTURE/scrub-semi" "$SCRUB_BODY" "$SCRUB_BODY" "$SCRUB_BODY"
+          printf 'const REUSABLE_LINK_TOKEN_PATTERN = /%s/g;\n' "$SCRUB_BODY" > "$FIXTURE/scrub-semi/frontend/app/utils/sentry-scrub.ts"
+          printf 'const REUSABLE_LINK_TOKEN_PATTERN = /%s/g;\n' "$SCRUB_BODY" > "$FIXTURE/scrub-semi/backoffice/app/utils/sentry-scrub.ts"
+          if SCRUB_SEMI=$(scrubber_pattern_divergence "$FIXTURE/scrub-semi"); then
+            echo "  ok — scrubber_pattern_divergence reads semicolon-terminated TS declarations"
+          else
+            echo "SELF-TEST FAILED: scrubber_pattern_divergence could not read a semicolon-terminated declaration: $SCRUB_SEMI"
+            FAILED=1
+          fi
+          scrub_tree "$FIXTURE/scrub-narrow" "$SCRUB_BODY" "$SCRUB_BODY" 'beai_rl_[A-Za-z0-9_-]{43}'
+          expect_caught "scrubber pattern parity (backoffice narrowed to {43})" \
+            "$(scrubber_pattern_divergence "$FIXTURE/scrub-narrow")"
+          scrub_tree "$FIXTURE/scrub-api" 'beai_rl_[A-Za-z0-9_-]{43}' "$SCRUB_BODY" "$SCRUB_BODY"
+          expect_caught "scrubber pattern parity (api narrowed to {43})" \
+            "$(scrubber_pattern_divergence "$FIXTURE/scrub-api")"
+          scrub_tree "$FIXTURE/scrub-nopattern" "$SCRUB_BODY" "$SCRUB_BODY" "$SCRUB_BODY"
+          printf 'export const OTHER = 1\n' > "$FIXTURE/scrub-nopattern/frontend/app/utils/sentry-scrub.ts"
+          expect_caught "scrubber pattern parity (pattern missing from frontend)" \
+            "$(scrubber_pattern_divergence "$FIXTURE/scrub-nopattern")"
+          scrub_tree "$FIXTURE/scrub-nofile" "$SCRUB_BODY" "$SCRUB_BODY" "$SCRUB_BODY"
+          rm "$FIXTURE/scrub-nofile/api/app/Support/Observability/SentryScrubber.php"
+          expect_caught "scrubber pattern parity (api scrubber file missing)" \
+            "$(scrubber_pattern_divergence "$FIXTURE/scrub-nofile")"
+          scrub_tree "$FIXTURE/scrub-comment" "$SCRUB_BODY" "$SCRUB_BODY" "$SCRUB_BODY"
+          printf '// see const REUSABLE_LINK_TOKEN_PATTERN = /x/g\n' > "$FIXTURE/scrub-comment/frontend/app/utils/sentry-scrub.ts"
+          expect_caught "scrubber pattern parity (the name only in a comment is not a declaration)" \
+            "$(scrubber_pattern_divergence "$FIXTURE/scrub-comment")"
+          scrub_tree "$FIXTURE/scrub-fixture" "$SCRUB_BODY" "$SCRUB_BODY" "$SCRUB_BODY"
+          printf 'export const CASES = [1]\n' > "$FIXTURE/scrub-fixture/backoffice/tests/unit/fixtures/reusable-link-scrub-cases.ts"
+          expect_caught "scrubber fixture parity (the two Nuxt fixtures differ)" \
+            "$(scrubber_pattern_divergence "$FIXTURE/scrub-fixture")"
+          scrub_tree "$FIXTURE/scrub-nofixture" "$SCRUB_BODY" "$SCRUB_BODY" "$SCRUB_BODY"
+          rm "$FIXTURE/scrub-nofixture/frontend/tests/unit/fixtures/reusable-link-scrub-cases.ts"
+          expect_caught "scrubber fixture parity (a fixture file missing)" \
+            "$(scrubber_pattern_divergence "$FIXTURE/scrub-nofixture")"
 
           rm -rf "$FIXTURE"
 

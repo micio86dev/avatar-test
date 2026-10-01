@@ -81,7 +81,7 @@ Tests: `T-AUTH-001..009` — valid key, revoked key, wrong prefix, key in query,
 - IDs: prefixed ULIDs stored in a `public_id` column (G-05) — `org_…` organization, `prj_…` project, `int_…` interview, `exp_…` export, `evt_…` event. Webhook deliveries use `whd_` + the existing `delivery_id` UUID. Path parameters are validated by regex; mismatched prefix → `404`.
 - Timestamps: ISO 8601 UTC with `Z`. Durations in **seconds**.
 - Pagination: cursor-based. `?limit=` (default 25, max 100), `?cursor=`. Response envelope `{ "data": [...], "next_cursor": "…"|null, "has_more": bool }`. Stable ordering by `created_at desc, id desc`.
-- Filtering on list endpoints: `status`, `project_id`, `created_after`, `created_before`, `metadata[key]=value` (exact match, max 3 metadata filters). `GET /v1/interviews` additionally filters on `email`, `candidate_ref`, `external_id` and `source` (§3.3).
+- Filtering on list endpoints: `status`, `project_id`, `created_after`, `created_before`, `metadata[key]=value` (exact match, max 3 metadata filters). `GET /v1/interviews` additionally filters on `email`, `candidate_ref`, `external_id` and `source` (§3.3). For every filter on every list endpoint an empty value (`?status=`, `?source=`, `?metadata[a]=`, or a value of only whitespace) means the filter was not provided, so the response is the unfiltered list; a non-empty value that is malformed answers `400 validation_failed`, and so does an array sent to a filter that takes a single value (`?status[]=` as much as `?status[]=x`).
 - Expansion: `?expand=project` on interview reads to inline the project.
 - Errors: **RFC 9457 Problem Details**, `application/problem+json`:
   ```json
