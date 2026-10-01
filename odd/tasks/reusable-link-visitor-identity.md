@@ -156,7 +156,15 @@ orchestrator pushed them (api backend#104 to #111, frontend #46, #47, #50, #51, 
       anonymous wording is empty (the Previously line of the token-oracle requirement was rephrased so the legacy
       `validate()` sentence no longer appears). `scan_bun_only` over `openspec/specs` clean; AGENTS.md still a symlink to
       CLAUDE.md. `task test:scripts`: the same single pre-existing failure.
-- [ ] wrapper-2b (VI-wr-2b.*) live specs: interview-frontend and observability [D]. Evidence: pending.
+- [x] wrapper-2b (VI-wr-2b.1 to 2b.3) live specs: interview-frontend and observability [D]. Evidence: commit 7ef288e on
+      `feature/vi-wrapper-2b` (stacked on 2a; 3 files, +489/-80 before this record). Requirement counts:
+      interview-frontend 40 -> 44 (4 added, 1 replaced in full), observability 18 -> 19 (1 added); no duplicate names,
+      every requirement keeps at least one scenario. Reconciled with the merged frontend (read-only): the exit is an
+      awaited `router.replace`, busy and failed replace the form with a notice and a Retry control, an unmappable 422 is
+      the retryable failed state, field errors are `role="alert"` and the privacy notice describes the submit button,
+      the reopen state is the terminal route with reason `link_reopen`. The wording-gap limitation of
+      reusable-interview-links was closed because the `link_invalid` copy no longer claims expiry. `scan_bun_only` over
+      `openspec/specs` clean; AGENTS.md still a symlink.
 - [ ] wrapper-2c (VI-wr-2c.*) live specs: admin-backoffice, data-retention, admin-read-api correction [D]. Evidence:
       pending.
 - [ ] api-R, fe-R, bo-R (VI-api-R.*, VI-fe-R.*, VI-bo-R.*) release preparation, gated [D]. Evidence: pending.
@@ -240,4 +248,7 @@ pre-existing failure.
 - 2026-10-01: the api chain (1a to 5), the frontend chain (fe-1a to fe-3) and bo-1 were implemented, pushed as stacked PRs
   and reviewed natively by the orchestrator (see the review record).
 - 2026-10-01: wrapper-2a (1beb683) merged the reusable-interview-links and participant-sso deltas into the live specs,
-  reconciled with the merged api code. Next: wrapper-2b and wrapper-2c, then release preparation.
+  reconciled with the merged api code. A follow-up commit on the same branch (cd7bbec) made the merged bodies follow the
+  implementation (mail refusal at the dispatch site, trim exception on the key, reserved-domain rule).
+- 2026-10-01: wrapper-2b (7ef288e) merged the interview-frontend and observability deltas. Next: wrapper-2c, then
+  release preparation.
