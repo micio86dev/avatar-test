@@ -165,8 +165,18 @@ orchestrator pushed them (api backend#104 to #111, frontend #46, #47, #50, #51, 
       the reopen state is the terminal route with reason `link_reopen`. The wording-gap limitation of
       reusable-interview-links was closed because the `link_invalid` copy no longer claims expiry. `scan_bun_only` over
       `openspec/specs` clean; AGENTS.md still a symlink.
-- [ ] wrapper-2c (VI-wr-2c.*) live specs: admin-backoffice, data-retention, admin-read-api correction [D]. Evidence:
-      pending.
+- [x] wrapper-2c (VI-wr-2c.1 to 2c.4) live specs: admin-backoffice, data-retention, admin-read-api correction [D].
+      Evidence: commit 8af9adf on `feature/vi-wrapper-2c` (stacked on 2b; 3 files, +380/-70 before this record).
+      Requirement counts: admin-backoffice 70 -> 70 (2 replaced in full), data-retention 6 -> 7 (1 added, the inventory
+      replaced), admin-read-api 24 -> 24 (the search requirement modified, three scenarios added, name kept). Reconciled
+      with the merged api (read-only): the purge placeholder is `<sha256 hex of candidate_ref>@purged.beai.invalid`
+      (84 characters; PHP and SQL twins agree), each row is written alone and a 23505 collision is skipped with a
+      warning that carries only the id, the count is the rows actually written, a legacy anonymous row is kept only when
+      it is exactly its own legacy placeholder. The Purpose sentence now names `participants.email`; no statement says
+      the email is retained. One scenario was added beyond the delta: the participants search box placeholder names the
+      email (decision R4, pinned in bo-1). Wrapper chain checks: every requirement named in the spec index exists exactly
+      once, none has zero scenarios, no duplicate names, `scan_bun_only` over `openspec/specs` clean, AGENTS.md still a
+      symlink to CLAUDE.md.
 - [ ] api-R, fe-R, bo-R (VI-api-R.*, VI-fe-R.*, VI-bo-R.*) release preparation, gated [D]. Evidence: pending.
 - [ ] release chain (VI-wr-R.1 to R.4) gated on an explicit user request; no deploy is inferred [I]. Evidence: pending.
 - [ ] wrapper-3 (VI-wr-3.1, 3.2) pins and close [D]. Evidence: pending.
@@ -250,5 +260,8 @@ pre-existing failure.
 - 2026-10-01: wrapper-2a (1beb683) merged the reusable-interview-links and participant-sso deltas into the live specs,
   reconciled with the merged api code. A follow-up commit on the same branch (cd7bbec) made the merged bodies follow the
   implementation (mail refusal at the dispatch site, trim exception on the key, reserved-domain rule).
-- 2026-10-01: wrapper-2b (7ef288e) merged the interview-frontend and observability deltas. Next: wrapper-2c, then
-  release preparation.
+- 2026-10-01: wrapper-2b (7ef288e) merged the interview-frontend and observability deltas.
+- 2026-10-01: wrapper-2c (8af9adf) merged the admin-backoffice and data-retention deltas and corrected the admin-read-api
+  search. The deltas of this change are fully applied to the live specs: 11 requirements added, 12 replaced in full and
+  1 removed (the index counts), plus the admin-read-api search requirement modified by the owner decision. Next:
+  release preparation (api-R, fe-R, bo-R), then the gated release chain and wrapper-3, none of which is started.
