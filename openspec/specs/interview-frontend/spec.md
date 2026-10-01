@@ -1959,12 +1959,17 @@ text and only from that form, and its metadata extraction returns nothing when t
 comments included, contains a function-form call; a file-name prefix alone is NOT enough). At
 the default order the router plugin reads `window.location` first and its `app:created` replay
 writes the fragment back into the address bar and into `history.state.current`. The plugin MUST
-also strip and discard a `#beai_rl_` fragment pasted into the same tab later (`hashchange`).
+also strip and discard a `#beai_rl_` fragment pasted into the same tab later (`hashchange`). The
+strip MUST also remove the token from `history.state.current`: on a hash-only change `popstate`
+fires before `hashchange`, and the router writes the fragment-bearing location into the state
+first, so an address-bar strip alone would leave the token in the history state.
 
 On mount, in this order:
 1. Read the URL fragment (without `#`). If a non-empty `beai_rl_` fragment exists, it is the
    link token. Strip the fragment from the address bar with `history.replaceState` keeping
-   `history.state` (replacing the current history entry, never pushing) BEFORE any network call
+   `history.state`, except that a string `current` whose fragment starts with `#beai_rl_` is
+   rewritten to the part before the `#` (replacing the current history entry, never pushing)
+   BEFORE any network call
    and before any other asynchronous work (the page also captures idempotently itself, so it
    does not depend on the plugin's timing). The token is held only in page memory from here on,
    in a one-shot holder: it is taken once and cleared. A fragment that does not match
@@ -2033,7 +2038,8 @@ nuovo link a chi te lo ha inviato."
 - GIVEN the page mounts with a fragment
 - WHEN the network and `history` calls are ordered
 - THEN `history.replaceState` removing the fragment happens before the redemption request is
-  issued, `history.state` is preserved, and no history entry is added
+  issued, `history.state` is preserved apart from a `current` that carried the fragment (which
+  is cleaned), and no history entry is added
 
 #### Scenario: The plugin strips the fragment before the router can write it back
 
@@ -2047,7 +2053,9 @@ nuovo link a chi te lo ha inviato."
 
 - GIVEN the application is running on any route
 - WHEN a `#beai_rl_...` fragment appears through a same-document navigation
-- THEN it is stripped and discarded and never redeemed from there
+- THEN it is stripped from the address bar AND from `history.state.current`, no history entry
+  keeps it, it is discarded, and it is never redeemed from there, including by a later in-app
+  navigation to the entry route
 
 #### Scenario: Always a new visitor, never the previous one
 
