@@ -29,7 +29,7 @@ zero coverage on `POST /avatar-templates/{id}/deactivate`, `/evaluations*` witho
 - [x] T5 (c6e990c 10f12df; 60 routes, 420 cases, 6 mutations caught, suite 5568/0 failed) Superadmin-only domains: catalogue (21), avatar-templates (12), framework, admin/*, llm-credentials/models — non-superadmin 403 on every write
 - [x] T6 (eaba2ce 73477cd e562edc; 514 cases; 13 mutations, 2 survivors explained; KQ-5/KQ-6 found) Candidate JWT (cross-participant/org isolation), M2M, Public API `/v1/*` scopes + cross-org
 - [x] T7 (b8665e1 75a2d99; suite 6138/0 failed; 5 skips legit: redis/live LLM) Health/embed/sso/entry-links exposure; triage the 7 skipped tests
-- [ ] T8 Mutation check (break a policy → matrix fails), full suite green, coverage on scoring/tenant/state-machine zones
+- [x] T8 (api backend#122, 6af3134; per-task mutation checks T4-T6 + EvaluationPolicy/ParticipantStatusGuard; suite 7857/0 failed/18 skipped, 95.7% lines; critical-zone classes 98.5-100%; native review approved+acknowledged after one bounded correction) Mutation check, full suite green, coverage on scoring/tenant/state-machine zones
 
 ## Acceptance
 Full suite green, no route without matrix entry, mutation of any policy/middleware is caught.
@@ -39,4 +39,4 @@ Full suite green, no route without matrix entry, mutation of any policy/middlewa
 - Route declaration: T1-T2 delegated writer (mapping trigger already used for audit).
 
 ## Next step
-T1 + T2.
+All tasks done (2026-10-02). Unreachable lines: ScoreCompetency 138-141 (dead catch), AdminEvaluationSerializer 384 (FK-enforced).
