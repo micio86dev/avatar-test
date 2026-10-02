@@ -218,6 +218,26 @@ services:
       # the container still reported healthy.
       - "${API_PORT:-8000}:8000"
     depends_on: *api-depends-on
+    # LOCAL ONLY: migrate, then serve. A long-lived Postgres volume once sat
+    # four migrations behind freshly built images: /api/health (liveness)
+    # stayed green while real requests 500ed on a missing table. Overriding the
+    # command here, not the image's entrypoint, keeps production unchanged:
+    # there Railway migrates ONCE per deploy via preDeployCommand
+    # (`php artisan beai:deploy`), and an entrypoint migrate would race between
+    # replicas (see api/docker/entrypoint.sh).
+    #
+    # The tail reproduces the Dockerfile CMD exactly; `exec` keeps supervisord
+    # as PID 1 so it still receives SIGTERM. `&&` with no `|| true`: a failed
+    # migration exits the container non-zero and `restart` surfaces it instead
+    # of serving on a broken schema. Nothing is healthy before the
+    # migration finishes (nginx only starts after it), so worker, scheduler,
+    # frontend and backoffice, which all wait on api `service_healthy`, never
+    # start on a stale schema. Guarded by compose_api_migrates_before_serving
+    # in scripts/ci-guards.sh.
+    command:
+      - sh
+      - -c
+      - php artisan migrate --force && exec supervisord -c /etc/supervisor/supervisord.conf
     healthcheck:
       # Probe the real HTTP surface. The previous check ran `php-fpm -t`, which
       # only validates an fpm config file — it returned success even when nothing
@@ -374,7 +394,12 @@ services:
       # purge reports success while doing nothing — which is worse, because
       # nobody goes looking.
       - api_storage:/var/www/storage/app
-    depends_on: *api-depends-on
+    depends_on:
+      <<: *api-depends-on
+      # Wait for api healthy, which only happens after it has migrated (see the
+      # `api` command above), so the scheduler never ticks over a stale schema.
+      api:
+        condition: service_healthy
     deploy:
       replicas: 1
     # Deliberately NO healthcheck, and the reasoning is worth keeping because
