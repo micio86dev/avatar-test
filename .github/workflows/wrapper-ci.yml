@@ -28,7 +28,9 @@
 #       `uses:` references are SHA-pinned; AGENTS.md is a symlink to
 #       CLAUDE.md rather than a second copy of the rules; and
 #       backoffice/docs-src/openapi.v1.json (the copy the developer docs
-#       render) is byte-identical to api/openapi.v1.json
+#       render) is byte-identical to api/openapi.v1.json; the local compose `api`
+#       service migrates before it serves, the shared api entrypoint never
+#       migrates, and scripts/stack-doctor.sh still probes /api/health/ready
 #   (b) the committed openapi.json is semantically identical across api/frontend/backoffice
 #   (c) each app's check-client-drift.sh exits 0 (generated TS client matches openapi.json)
 #   (c2) the reusable-link token scrubber uses one pattern in the api and both Nuxt
@@ -52,6 +54,9 @@
 #       build — still rejects a known-bad fixture, including the five scan_*
 #       guards used by (g) and the reality-check functions used by (h), both of
 #       which run after it.
+#       The stack-drift guards of (a) are the exception to that sentence: their
+#       known-good and known-bad fixtures live in scripts/tests/stack-drift-guards.test.sh,
+#       which runs in the bash lint step, not in a row of (f).
 #
 #       Stated narrowly on purpose. This line used to claim "every guard in
 #       this file", which was never true: the control-file PARSERS

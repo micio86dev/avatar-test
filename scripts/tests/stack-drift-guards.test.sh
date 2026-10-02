@@ -5,7 +5,7 @@
 # Each guard is exercised against a known-good and a known-bad fixture, so a
 # guard that can no longer tell them apart (inverted, dead) fails here rather
 # than approving a stack that boots on a stale schema.
-# shellcheck disable=SC2016  # fixture scripts contain literal  on purpose
+# shellcheck disable=SC2016  # fixture scripts contain literal \$ expressions on purpose
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
