@@ -21,6 +21,11 @@
 # No jq: the reason is a machine constant, extracted with sed and restricted to
 # [A-Za-z0-9_] before it is printed. Nothing from the environment is printed.
 #
+# Then the proxy edges (nginx :3001, Nuxt :3000) are probed: they resolve `api`
+# once, so a RECREATED api leaves them 502/504 (FAIL with the fix). Not running
+# is a NOTE; other codes a WARNING. The frontend answers /api/health itself, so
+# it is probed via /api/health/ready, which proxies.
+#
 # Usage:  scripts/stack-doctor.sh            (API_URL defaults to localhost:8000)
 #         STACK_DOCTOR_STRICT=1 scripts/stack-doctor.sh
 #         API_URL=http://localhost:8001 scripts/stack-doctor.sh
@@ -53,6 +58,27 @@ fail() {
   exit 1
 }
 
+# edge NAME URL — 502/504 is the stale-upstream signature.
+edge() {
+  fetch "$2"
+  case "$HTTP_CODE" in
+    200) printf 'stack-doctor: %s edge ok (%s)\n' "$1" "$2" ;;
+    000) printf 'stack-doctor: NOTE - %s edge not checked (not reachable at %s)\n' "$1" "$2" ;;
+    502 | 504)
+      fail "the $1 edge answered HTTP $HTTP_CODE at $2" \
+        "Fix:  docker compose restart backoffice frontend" \
+        "Why:  nginx keeps the old api IP after the api container is recreated."
+      ;;
+    *) printf 'stack-doctor: WARNING - %s edge answered HTTP %s at %s\n' "$1" "$HTTP_CODE" "$2" >&2 ;;
+  esac
+}
+
+check_edges() {
+  edge backoffice "${BACKOFFICE_URL:-http://localhost:3001}/api/health"
+  edge frontend "${FRONTEND_URL:-http://localhost:3000}/api/health/ready"
+  exit 0
+}
+
 # 1. Liveness.
 fetch "$API_URL/api/health"
 if [ "$HTTP_CODE" = "000" ]; then
@@ -80,14 +106,14 @@ if [ "$HTTP_CODE" = "404" ]; then
     exit 1
   fi
   printf 'stack-doctor: WARNING - %s\n' "$MSG" >&2
-  exit 0
+  check_edges
 fi
 STATUS="$(field status)"
 REASON="$(field reason)"
 
 if [ "$HTTP_CODE" = "200" ] && [ "$STATUS" = "ok" ]; then
   printf 'stack-doctor: ready - liveness and readiness are both ok (%s)\n' "$API_URL"
-  exit 0
+  check_edges
 fi
 
 if [ "$HTTP_CODE" = "200" ]; then
