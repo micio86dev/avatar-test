@@ -48,7 +48,8 @@ feature set with real E2E runs and native reviews, and leave local containers on
 - [x] H7 [env] build cache freed; the three local images rebuilt one at a time; pinned-container E2E green.
 - [x] H8 [all] native reviews with the owner's consent (see the record below), findings fixed or refuted.
 - [x] H9 [wrapper] this document, specs and the public contract updated.
-- [ ] H10 [open decision] anonymous reusable-link visitors versus asking name and email (GDPR); the owner decides.
+- [x] H10 [decision] anonymous reusable-link visitors versus asking name and email (GDPR). Resolved by the
+      `reusable-link-visitor-identity` feature: visitors enter a full name and an email, released in api 0.65.x.
 - [ ] H11 [release, authorized by the owner on 2026-10-01: "pubblica sempre usando Git flow"] push, PRs, merge, release
       0.49.0 with the pin bump and SDKs (the scrubber guard is already on this branch and is enabled by that pin bump),
       the first Railway build of `avatar-test`.
