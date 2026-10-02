@@ -240,10 +240,20 @@ if printf '%s' "$OUT" | grep -qF "restart backoffice frontend"; then
 fi
 stop_edge
 
+start_edge 504; EDGE_B="http://127.0.0.1:$EDGE_PORT"
+run_subject "$API_PORT"
+check "backoffice edge 504: exit 1 with the fix" 1 "docker compose restart backoffice" "frontend re-resolves"
+stop_edge
+
 EDGE_B="http://127.0.0.1:1"
 start_edge 504; EDGE_F="http://127.0.0.1:$EDGE_PORT"
 run_subject "$API_PORT"
 check "frontend edge 504: exit 1 with the fix" 1 "docker compose restart frontend" "docker compose logs frontend"
+stop_edge
+
+start_edge 502; EDGE_F="http://127.0.0.1:$EDGE_PORT"
+run_subject "$API_PORT"
+check "frontend edge 502: exit 1 with the fix" 1 "docker compose restart frontend" "docker compose logs frontend"
 stop_edge
 
 EDGE_F="http://127.0.0.1:1"
