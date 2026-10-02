@@ -65,9 +65,14 @@ edge() {
     200) printf 'stack-doctor: %s edge ok (%s)\n' "$1" "$2" ;;
     000) printf 'stack-doctor: NOTE - %s edge not checked (not reachable at %s)\n' "$1" "$2" ;;
     502 | 504)
+      if [ "$1" = backoffice ]; then
+        fail "the $1 edge answered HTTP $HTTP_CODE at $2" \
+          "Fix:  docker compose restart backoffice" \
+          "Why:  nginx keeps the old api IP after the api container is recreated; the frontend re-resolves and is not affected."
+      fi
       fail "the $1 edge answered HTTP $HTTP_CODE at $2" \
-        "Fix:  docker compose restart backoffice frontend" \
-        "Why:  nginx keeps the old api IP after the api container is recreated."
+        "Fix:  docker compose restart $1" \
+        "Why:  the $1 could not reach the api; check \`docker compose logs $1\`."
       ;;
     *) printf 'stack-doctor: WARNING - %s edge answered HTTP %s at %s\n' "$1" "$HTTP_CODE" "$2" >&2 ;;
   esac

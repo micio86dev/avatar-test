@@ -44,10 +44,17 @@ A new organization created through the admin endpoint lists one pinnable version
 the Potential picker enables MTG and LAT.
 
 ## Open
-- Wrapper release 0.51.0 pending.
-- nginx stale-upstream 502 on the backoffice after the api container is recreated locally; proposed fix not done.
+- Wrapper 0.51.0 and 0.51.1 are released (tags `v0.51.0`, `v0.51.1` on the remote); nothing is pending there.
+- The local nginx stale-upstream 502 (the backoffice keeps the old api IP after the api container is recreated) is
+  MITIGATED, not removed: `depends_on.api.restart: true` restarts backoffice on `docker compose restart api`, but NOT
+  on `up -d --force-recreate api` or `up -d --build api`; for those, `task stack:check` detects the 502 and prints
+  `docker compose restart backoffice`. Only the backoffice goes stale: after the api moved IP (2026-10-02, twice) :3001
+  answered a real 502 while the frontend on :3000 kept answering 200, since Node re-resolves `api` per connection
+  (beai#60 and beai#61 wrongly included the frontend). The Dockerfile's literal `proxy_pass` is shared with production and was deliberately not changed.
 - Playwright webkit flake seen once on `catalogue-edit-publish.spec.ts:294`, not reproducible (CI rerun green, 15 + 10
   local repeats green).
+- Native reviews: the post-0.51.0 slice ended `correction_required` with hidden finding text. The likely cause is the
+  inaccurate claim of beai#60 (recreating the api restarts the edge), corrected by beai#61; this is an inference.
 
 ## Route declaration and trigger evidence
 Delegated writers per repo (2+ non-trivial files each); orchestrator did git, PRs, release and deploy.

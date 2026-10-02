@@ -19,9 +19,11 @@ PASS=0
 FAIL=0
 WORK="$(mktemp -d)"
 SERVER_PID=""
+EDGE_PID=""
 
 cleanup() {
   [[ -n "$SERVER_PID" ]] && kill "$SERVER_PID" 2>/dev/null
+  [[ -n "$EDGE_PID" ]] && kill "$EDGE_PID" 2>/dev/null
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -133,13 +135,22 @@ open(sys.argv[1], "w").write(str(s.server_address[1]))
 s.serve_forever()
 ' "$WORK/eport" "$1" &
   EDGE_PID=$!
-  until [[ -s "$WORK/eport" ]]; do sleep 0.1; done
+  local waited=0
+  until [[ -s "$WORK/eport" ]]; do
+    sleep 0.1
+    waited=$((waited + 1))
+    if ((waited > 50)); then
+      echo "FIXTURE ERROR: edge server did not start" >&2
+      exit 2
+    fi
+  done
   EDGE_PORT="$(<"$WORK/eport")"
 }
 
 stop_edge() {
   kill "$EDGE_PID" 2>/dev/null
   wait "$EDGE_PID" 2>/dev/null
+  EDGE_PID=""
 }
 
 # Same, with STACK_DOCTOR_STRICT=1.
@@ -223,7 +234,6 @@ run_subject "$DEAD_PORT"
 check "unreachable api exits 1 and explains how to start the stack" 1 \
   "not reachable" "docker compose up"
 
-FIX="docker compose restart backoffice frontend"
 start_server 200 200 '{"status":"ok"}'
 API_PORT="$PORT"
 start_edge 200; EDGE_B="http://127.0.0.1:$EDGE_PORT"
@@ -234,13 +244,27 @@ stop_edge
 
 start_edge 502; EDGE_B="http://127.0.0.1:$EDGE_PORT"
 run_subject "$API_PORT"
-check "backoffice edge 502: exit 1 with the fix" 1 "$FIX" "recreated"
+check "backoffice edge 502: exit 1 with the fix" 1 "docker compose restart backoffice" "frontend re-resolves"
+if printf '%s' "$OUT" | grep -qF "restart backoffice frontend"; then
+  FAIL=$((FAIL + 1))
+  echo "  FAIL backoffice 502 must not tell to restart frontend"
+fi
+stop_edge
+
+start_edge 504; EDGE_B="http://127.0.0.1:$EDGE_PORT"
+run_subject "$API_PORT"
+check "backoffice edge 504: exit 1 with the fix" 1 "docker compose restart backoffice" "frontend re-resolves"
 stop_edge
 
 EDGE_B="http://127.0.0.1:1"
 start_edge 504; EDGE_F="http://127.0.0.1:$EDGE_PORT"
 run_subject "$API_PORT"
-check "frontend edge 504: exit 1 with the fix" 1 "$FIX"
+check "frontend edge 504: exit 1 with the fix" 1 "docker compose restart frontend" "docker compose logs frontend"
+stop_edge
+
+start_edge 502; EDGE_F="http://127.0.0.1:$EDGE_PORT"
+run_subject "$API_PORT"
+check "frontend edge 502: exit 1 with the fix" 1 "docker compose restart frontend" "docker compose logs frontend"
 stop_edge
 
 EDGE_F="http://127.0.0.1:1"

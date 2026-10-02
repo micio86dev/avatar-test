@@ -50,9 +50,15 @@ feature set with real E2E runs and native reviews, and leave local containers on
 - [x] H9 [wrapper] this document, specs and the public contract updated.
 - [x] H10 [decision] anonymous reusable-link visitors versus asking name and email (GDPR). Resolved by the
       `reusable-link-visitor-identity` feature: visitors enter a full name and an email, released in api 0.65.x.
-- [ ] H11 [release, authorized by the owner on 2026-10-01: "pubblica sempre usando Git flow"] push, PRs, merge, release
+- [x] H11 [release, authorized by the owner on 2026-10-01: "pubblica sempre usando Git flow"] push, PRs, merge, release
       0.49.0 with the pin bump and SDKs (the scrubber guard is already on this branch and is enabled by that pin bump),
-      the first Railway build of `avatar-test`.
+      the first Railway build of `avatar-test`. Evidence (2026-10-02): releases 0.49.0 to 0.51.1 shipped. The
+      `avatar-test` config change (rootDirectory `/legacy-demo`, watch `/legacy-demo/**`) is proven: releases that do
+      not touch the demo are SKIPPED instead of FAILED (0.49.0, 0.50.0, 0.51.0). The first build (manual
+      `railway redeploy --from-source`) exposed a second defect, `questions.json` left at the repo root while
+      `legacy-demo/src/lib/prompt.ts` imports `../../questions.json` (it failed locally too); fixed by beai#59. The
+      0.51.1 release then built `avatar-test` from `main`: deployment `6a3e8839` SUCCESS, `/` answers 200, the log shows
+      `legacy-demo@0.1.1 start` listening.
 
 ## Route declaration and trigger evidence
 - Every code task touches 2+ non-trivial files in repos of their own: one bounded writer per repo (writer trigger).
