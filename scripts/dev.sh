@@ -297,6 +297,10 @@ FAILED=0
 # The wait is split in two, with migrations in between, and the ordering is
 # load-bearing rather than tidy.
 #
+# (Since the compose `api` service migrates before it serves, `api` healthy now
+# implies a migrated schema; the split and the explicit migrate below remain as
+# a belt-and-braces step and for the seed ordering.)
+#
 # `/api/health/queue` — which the worker's healthcheck probes — runs
 # `DB::table('failed_jobs')->count()` (QueueHealthController.php:73). On a fresh
 # clone that table does not exist until `migrate` runs, so the endpoint 500s,
@@ -437,6 +441,22 @@ if api_exec 'php artisan --version' >/dev/null 2>&1; then
   fi
 else
   warn "Could not reach artisan inside the api container — skipping migrations."
+fi
+
+# ---------------------------------------------------------------- readiness
+# `migrate` above reports its own exit status, but a stack is "up" only when the
+# api itself says the schema is current. /api/health (liveness) never touches
+# the database, which is how a stale schema once sat behind a green dashboard.
+# stack-doctor.sh asks /api/health/ready and prints the exact fix on failure.
+# The port is read the same way `port()` does further down (that helper is
+# defined after this point).
+step "Readiness (schema)"
+READY_PORT="$(grep -E '^API_PORT=' "$ROOT/.env" 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '"' || true)"
+if API_URL="http://localhost:${READY_PORT:-8000}" sh "$ROOT/scripts/stack-doctor.sh"; then
+  ok "api readiness: schema current, database reachable"
+else
+  warn "api is NOT ready (see above) — the stack is not usable until this passes."
+  FAILED=1
 fi
 
 # ---------------------------------------------------------------- app tier health

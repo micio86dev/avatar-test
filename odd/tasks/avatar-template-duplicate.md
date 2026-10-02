@@ -23,9 +23,9 @@ propagation are a SEPARATE follow-up (needs SDD: tenancy rule change), see "Out 
 - Branches: api stacked on feature/avatar-voice-preview; backoffice stacked on fix/org-logo-same-origin-url.
 
 ## Tasks
-- [ ] D1 API: `POST /api/avatar-templates/{id}/duplicate` body `{target_organization_ids: int[] (1..N, existing orgs)}`,
+- [x] D1 API: `POST /api/avatar-templates/{id}/duplicate` body `{target_organization_ids: int[] (1..N, existing orgs)}`,
       service, audit, tests, AuthMatrix, openapi
-- [ ] D2 Backoffice: "Copy to organizations" action on a template (superadmin), multi-select of orgs incl. "all organizations",
+- [x] D2 Backoffice: "Copy to organizations" action on a template (superadmin), multi-select of orgs incl. "all organizations",
       result summary, refresh, i18n, tests
 - [ ] D3 Verify: suites, mutations on authz/tenant stamping, rebuild containers, user tries it
 
@@ -34,7 +34,19 @@ Global templates shared by all orgs with edit propagation: per-org activation se
 effect on live projects when a global template changes, org-admin read-only visibility, TenantScoped/FK changes.
 
 ## Progress / evidence
-(empty)
+Reconciled 2026-10-02 against `origin/develop` (read-only mapping, not a test run). Shipped: api PR #81 (6cf1edc, v0.60.0),
+backoffice PR #47 (29d1a7d, v0.43.0). Current prod: api v0.65.1, backoffice v0.47.1.
+- D1: `POST /api/avatar-templates/{id}/duplicate` (`AvatarTemplateDuplicateController`, `authorize('create')`), body
+  `target_organization_ids` (required, distinct, existing orgs), refuses the source org among targets, one `DB::transaction`
+  in `DuplicateAvatarTemplate`, each copy under `TenantContextScope::runFor`, copy inactive, provider-side sync fields not
+  copied, ` (copy)` / ` (copy N)` suffix, audit after commit without config content. `AvatarTemplateDuplicateTest` (15
+  tests: all-or-nothing, suffix, audit, cross-tenant), AuthMatrix entry + fixture, openapi path.
+- D2: `CopyTemplateDialog` (multi-select, select all, result summary, inactive note), used on the avatar-templates and
+  platform-templates pages, i18n it/en, Vitest 15 tests.
+- Follow-up "global templates" is also shipped: api PR #87 (30c922b, v0.61.0), `organization_id NULL` = platform row,
+  `POST /admin/avatar-templates/{id}/duplicate`; backoffice 709c8dd (v0.44.0). Edit propagation and per-org activation
+  semantics were not checked in this pass.
+- D3 PENDING (human): rebuild containers and try the copy dialog against real organizations.
 
 ## Next step
-D1 (api) and the CSP/photo fix (backoffice) run in parallel (different repos).
+D3: manual try-out of the copy dialog (owner).

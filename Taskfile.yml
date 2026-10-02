@@ -66,6 +66,17 @@ tasks:
       # is how the next harness gets written and never run.
       - bash "{{.ROOT_DIR}}/scripts/tests/docker-disk-check.test.sh"
       - bash "{{.ROOT_DIR}}/scripts/tests/verify-openapi-parity.test.sh"
+      - bash "{{.ROOT_DIR}}/scripts/tests/stack-doctor.test.sh"
+      - bash "{{.ROOT_DIR}}/scripts/tests/stack-drift-guards.test.sh"
+
+  stack:check:
+    desc: "Check the running local api is live AND ready (schema current, database reachable); prints the fix when not"
+    cmds:
+      # Liveness (/api/health) never touches the database, so a stack whose
+      # schema is behind the code looks healthy. This asks /api/health/ready as
+      # well and names the command that fixes each failure. API_URL overrides
+      # the default http://localhost:8000. See docs/dev-setup.md.
+      - sh "{{.ROOT_DIR}}/scripts/stack-doctor.sh"
 
   doctor:disk:
     desc: "Check free space on the volume hosting Docker's data (exits non-zero when low or unmounted)"

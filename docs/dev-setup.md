@@ -425,6 +425,47 @@ bun run dev
 
 ---
 
+## Schema drift and `task stack:check`
+
+**What it is.** `GET /api/health` is liveness and never touches the database, so a
+stack whose schema is *behind* the code (typically a long-lived Postgres volume under
+freshly built images) answers 200 while real requests fail with
+`relation "..." does not exist`. `GET /api/health/ready` is the readiness probe that
+does look.
+
+**Check it.** `task stack:check` (`scripts/stack-doctor.sh`, `API_URL` overrides
+`http://localhost:8000`) asks liveness, then readiness, and exits 0 only when both are
+`200 {"status":"ok"}` (a 404 on readiness is the warning case below). `./scripts/dev.sh` runs the same check after its migrate step
+and fails the boot if the api is not ready.
+
+**Older api images.** An api that predates `/api/health/ready` answers 404 there; the
+doctor then prints a WARNING ("schema state NOT verified") and exits 0. Set
+`STACK_DOCTOR_STRICT=1` to make that an error (exit 1): intended for CI and the
+real-stack e2e once the pinned api carries the endpoint.
+
+**How compose self-heals.** The local `api` service runs
+`php artisan migrate --force && exec supervisord ...` before it serves, so
+`docker compose up` brings a stale volume current. A failed migration exits the
+container non-zero; `restart: unless-stopped` then loops it, so read
+`docker compose logs api` for the cause. `worker`, `scheduler`, `frontend` and `backoffice` wait for `api`
+to be healthy, so none of them starts on a stale schema.
+
+**How production migrates.** Not through the container: Railway runs
+`php artisan beai:deploy` once per deploy (`preDeployCommand`). The shared image
+entrypoint deliberately does not migrate, because it runs once per replica and would
+race. `scripts/ci-guards.sh` fails CI if the entrypoint ever gains a `migrate`.
+
+**Reason codes** (`/api/health/ready` returns 503 `{"status":"down","reason":...}`;
+machine constants, never localized):
+
+| Reason | Meaning | Fix |
+|---|---|---|
+| `pending_migrations` | Schema is behind the code | `docker compose exec api php artisan migrate --force` |
+| `database_unavailable` | The api cannot reach Postgres | `docker compose ps postgres`, then `docker compose up -d postgres` |
+| anything else | Unrecognised | Printed literally; `docker compose logs --tail=50 api` |
+
+The script also reports "not reachable" (api down: `docker compose up -d`).
+
 ## Running Tests
 
 ```bash

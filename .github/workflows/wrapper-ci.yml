@@ -17,7 +17,7 @@
 # itself, checked before anything sources it), scripts/verify-openapi-parity.sh,
 # which step (b) below now calls, AND sdks/generate.sh + sdks/smoke.sh, which
 # the third job below runs — and the
-# lint of every bash script under scripts/ with the docker-disk-check suite.
+# lint of every bash script under scripts/ with the docker-disk-check, stack-doctor and stack-drift-guard suites.
 # The openapi-parity fixture suite runs LATER, immediately before step (b),
 # because it needs Bun and `Set up Bun` comes after these two. All are listed
 # here because a step absent from the index is a step nobody renumbers.
@@ -28,7 +28,9 @@
 #       `uses:` references are SHA-pinned; AGENTS.md is a symlink to
 #       CLAUDE.md rather than a second copy of the rules; and
 #       backoffice/docs-src/openapi.v1.json (the copy the developer docs
-#       render) is byte-identical to api/openapi.v1.json
+#       render) is byte-identical to api/openapi.v1.json; the local compose `api`
+#       service migrates before it serves, the shared api entrypoint never
+#       migrates, and scripts/stack-doctor.sh still probes /api/health/ready
 #   (b) the committed openapi.json is semantically identical across api/frontend/backoffice
 #   (c) each app's check-client-drift.sh exits 0 (generated TS client matches openapi.json)
 #   (c2) the reusable-link token scrubber uses one pattern in the api and both Nuxt
@@ -52,6 +54,9 @@
 #       build — still rejects a known-bad fixture, including the five scan_*
 #       guards used by (g) and the reality-check functions used by (h), both of
 #       which run after it.
+#       The stack-drift guards of (a) are the exception to that sentence: their
+#       known-good and known-bad fixtures live in scripts/tests/stack-drift-guards.test.sh,
+#       which runs in the bash lint step, not in a row of (f).
 #
 #       Stated narrowly on purpose. This line used to claim "every guard in
 #       this file", which was never true: the control-file PARSERS
@@ -184,9 +189,10 @@ jobs:
         # verify:openapi` locally, so a bashism in it breaks the gate in CI and
         # nowhere else, which is the least useful place to find out.
         run: |
-          shellcheck -s sh scripts/ci-guards.sh scripts/verify-openapi-parity.sh sdks/generate.sh sdks/smoke.sh
+          shellcheck -s sh scripts/ci-guards.sh scripts/verify-openapi-parity.sh scripts/stack-doctor.sh sdks/generate.sh sdks/smoke.sh
           dash -n scripts/ci-guards.sh
           dash -n scripts/verify-openapi-parity.sh
+          dash -n scripts/stack-doctor.sh
           dash -n sdks/generate.sh
           dash -n sdks/smoke.sh
 
@@ -224,7 +230,7 @@ jobs:
           # verify-openapi-parity.sh is sh for the same reason ci-guards.sh is
           # (it sources it and runs under `sh` in step (b)), and a rule that
           # binds one file and not its twin is a preference, not a rule.
-          BASH_SCRIPTS=$(find scripts -name '*.sh' ! -name 'ci-guards.sh' ! -name 'verify-openapi-parity.sh' | sort)
+          BASH_SCRIPTS=$(find scripts -name '*.sh' ! -name 'ci-guards.sh' ! -name 'verify-openapi-parity.sh' ! -name 'stack-doctor.sh' | sort)
           if [ -z "$BASH_SCRIPTS" ]; then
             echo "ERROR: no shell scripts found under scripts/ — zero files is a lint that FAILED TO RUN."
             exit 1
@@ -233,6 +239,11 @@ jobs:
           # shellcheck disable=SC2086
           shellcheck -s bash $BASH_SCRIPTS
           bash scripts/tests/docker-disk-check.test.sh
+          # stack-doctor.sh (POSIX sh, linted above) against a throwaway local
+          # fake api, and the schema-drift guards against known-good/bad fixtures.
+          # Python 3 is preinstalled on ubuntu-latest; no Docker needed.
+          bash scripts/tests/stack-doctor.test.sh
+          bash scripts/tests/stack-drift-guards.test.sh
 
       # -----------------------------------------------------------------------
       # (a) docker compose config — validates the compose file parses cleanly
@@ -268,6 +279,36 @@ jobs:
             echo "  scripts/ci-guards.sh in the same commit, and re-read (g)'s rationale."
             exit 1
           fi
+          # Stack schema-drift guards (see the block comment in
+          # scripts/ci-guards.sh). The local `api` service must migrate before
+          # it serves; the shared entrypoint must NOT (production migrates once
+          # per deploy through preDeployCommand, and an entrypoint migrate would
+          # race between replicas); and `task stack:check` must probe readiness.
+          if ! compose_api_migrates_before_serving "$(docker compose config)"; then
+            echo "ERROR: the compose \`api\` service no longer runs 'php artisan migrate --force && exec <serve>'."
+            echo "  A local volume behind the code would then serve 500s on a green /api/health."
+            exit 1
+          fi
+          if [ ! -f api/docker/entrypoint.sh ]; then
+            echo "ERROR: api/docker/entrypoint.sh not found. The replica-race guard cannot verify what it cannot read."
+            exit 1
+          fi
+          rc=0
+          entrypoint_has_migrate api/docker/entrypoint.sh || rc=$?
+          if [ "$rc" -eq 0 ]; then
+            echo "ERROR: api/docker/entrypoint.sh runs migrate. It runs once per REPLICA and would race."
+            echo "  Production migrates through preDeployCommand (beai:deploy); keep local self-healing in docker-compose.yml."
+            exit 1
+          elif [ "$rc" -ne 1 ]; then
+            echo "ERROR: api/docker/entrypoint.sh is unreadable (rc=$rc); the replica-race guard cannot verify it."
+            exit 1
+          fi
+          if ! stack_doctor_present scripts/stack-doctor.sh; then
+            echo "ERROR: scripts/stack-doctor.sh is missing, not executable, or no longer probes /api/health/ready."
+            exit 1
+          fi
+          echo "Stack drift guards hold: api migrates before serving, entrypoint does not, doctor probes readiness."
+
           # Derived from CI_EXPECTED_COMPOSE_SERVICES, not hardcoded — a
           # count asserted by a comment is exactly the defect this step's own
           # header paragraph argues against; the count above it is CHECKED

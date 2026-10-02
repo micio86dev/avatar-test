@@ -586,6 +586,20 @@ not that the current request failed.
 
 **Definition**: `bars_available` is `true` when the competency has ≥1 `framework_bars_indicators` row scoped to the requested role (i.e. it is BARS-covered for that role). It is `false` only for a role×competency pair with no indicator rows — a state no real declared pair is in after this change; all 83 declared pairs, including all 18 SRX pairs, have `bars_available=true`.
 
+A potential competency (MTG, LAT) belongs to no role, so `GET /api/framework/potential-competencies` MUST NOT apply the role×competency definition. There `bars_available` is `true` when the competency has ≥1 `framework_bars_indicators` row with `role_id IS NULL` in its own catalogue revision, and `false` otherwise. A role-bound indicator row does not count. Reporting `false` for every potential competency would disable them in the backoffice `CompetencyPicker`, so a Potential project could not select its competencies.
+
+#### Scenario: Potential competencies MTG and LAT report bars_available=true
+
+- GIVEN the seeder has run against the complete catalogue (MTG and LAT have 3 role-less indicators each)
+- WHEN GET /api/framework/potential-competencies is called
+- THEN MTG and LAT have `bars_available=true`
+
+#### Scenario: A potential competency without a role-less indicator reports false
+
+- GIVEN a potential competency whose only indicator rows are role-bound, or that has none
+- WHEN GET /api/framework/potential-competencies is called
+- THEN that competency has `bars_available=false`
+
 #### Scenario: All declared pairs report bars_available=true after catalogue completion
 
 - GIVEN the seeder has run against the complete catalogue (83 declared pairs, all anchored)

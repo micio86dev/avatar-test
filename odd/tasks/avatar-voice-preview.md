@@ -26,9 +26,9 @@ inputs and combobox rows), to judge the Italian accent before activating a templ
 - Local containers are built images: rebuild api + backoffice before asking the user to test ([[local-containers-are-built-images]]).
 
 ## Tasks
-- [ ] P1 API: `POST /api/avatar-templates/voice-preview` (+FormRequest, service, cache, config, throttle, policy) + tests + T-EXPOSE-001 + AuthMatrix entries — route: delegated writer
-- [ ] P2 API catalogue: Cartesia `expand[]=preview_file_url` -> `preview_audio_url`; HeyGen preview fetch; fix stale docblock; tests
-- [ ] P3 Backoffice: reusable VoicePreviewButton molecule (play/stop/loading/error/unavailable), wired next to every voice field/combobox row; blob playback; i18n; tests; DESIGN.md
+- [x] P1 API: `POST /api/avatar-templates/voice-preview` (+FormRequest, service, cache, config, throttle, policy) + tests + T-EXPOSE-001 + AuthMatrix entries — route: delegated writer
+- [x] P2 API catalogue: Cartesia `expand[]=preview_file_url` -> `preview_audio_url`; HeyGen preview fetch; fix stale docblock; tests
+- [x] P3 Backoffice: reusable VoicePreviewButton molecule (play/stop/loading/error/unavailable), wired next to every voice field/combobox row; blob playback; i18n; tests; DESIGN.md
 - [ ] P4 Verify: suites, mutation checks on the endpoint authz, rebuild containers, user listens (Cartesia IT voice, HeyGen, Tavus)
 
 ## Acceptance
@@ -36,15 +36,32 @@ Every voice field/row has a working listen control or a clear "preview unavailab
 no key exposure; matrix/exposure guards green.
 
 ## Progress / evidence
-(empty)
+Reconciled 2026-10-02 against `origin/develop` (read-only mapping, not a test run). Shipped: api PR #81 (6cf1edc, v0.60.0),
+Tavus persona path api PR #82 (42bfab4, v0.60.0); backoffice PR #45 (9af6544, v0.43.0), PR #48 (50f60f4, v0.43.0).
+Current prod: api v0.65.1, backoffice v0.47.1 (Railway deployments SUCCESS since 2026-10-01).
+- P1: route `POST /api/avatar-templates/voice-preview` (routes/api.php, before `/{id}`, `throttle:avatar-voice-preview`,
+  10/min/user), `AvatarVoicePreviewController` (`authorize('create')`), `AvatarVoicePreviewRequest` (voice_id
+  `^[A-Za-z0-9_-]{1,80}$`, no text field), `VoicePreviewService`, `config/avatar_preview.php` (phrase_version v1, it/en),
+  AuthMatrix catalogue + fixture, `tests/Feature/C14/AvatarVoicePreviewTest.php` (33 tests, `Http::fake`), openapi path.
+  T-EXPOSE-001 does NOT apply: that guard diffs admin-versus-public JSON resource fields, and this endpoint returns binary
+  audio and adds no resource field.
+- P2: Cartesia `expand[]=preview_file_url` -> `preview_audio_url` in `AvatarProviderCatalogue`; HeyGen is fetched on demand in
+  the service (one call per voice in the catalogue was rejected). The `UNVERIFIED against a live account` docblocks are
+  kept on purpose: they stay true until P4 is done with real keys.
+- P3: `VoicePreviewButton` molecule + `useVoicePreview` composable, wired in `AvatarTemplateForm` and the combobox rows,
+  i18n it/en, Vitest 21 + 15 tests.
+- P5/P6: `provider: tavus` + `pal_id`, reason codes `pal_azure_engine`, `pal_no_voice_configured`, `pal_uses_tavus_voice`,
+  `tavus_stock_voice`; `layers`/`api_key` never leave the server; persona listen block with the save-overrides note.
+- P4 PENDING (human): rebuild containers, listen to a Cartesia IT voice, HeyGen and a Tavus persona; confirm the wire
+  formats flagged UNVERIFIED.
 
 ## Next step
-P1.
+P4: manual listening with real provider keys (owner).
 
 ## Addendum 2026-09-29 (user): hear the voice of a Tavus PERSONA (PAL) from the "ID persona" picker
-- P5 API: extend `POST /api/avatar-templates/voice-preview` with `provider: tavus` + `pal_id` (mutually exclusive with `voice_id`): the SERVER reads
+- [x] P5 API: extend `POST /api/avatar-templates/voice-preview` with `provider: tavus` + `pal_id` (mutually exclusive with `voice_id`): the SERVER reads
   `GET /v2/pals/{pal_id}` (Tavus key, read-only, short cache), resolves `layers.tts` (engine cartesia|elevenlabs + external_voice_id + tts_model_name),
   then synthesises the Italian sample like the voice path; unavailable (tavus-auto / no external voice / azure / persona not found) -> 422/404 with a reason code.
   `layers`, `api_key`, system prompt NEVER leave the server (no new fields in the catalogue).
-- P6 Backoffice: in the `pal` picker panel show a labelled "Listen to this persona's voice" block (the current "Preview not available" square stays only for pickers with nothing to play),
+- [x] P6 Backoffice: in the `pal` picker panel show a labelled "Listen to this persona's voice" block (the current "Preview not available" square stays only for pickers with nothing to play),
   with reasons for unavailable and a note that saving the template overrides the persona's stored voice.

@@ -906,6 +906,50 @@ compose_service_diff() {
 }
 
 # ---------------------------------------------------------------------------
+# Stack schema-drift guards (incident 2026-10-02).
+#
+# A long-lived local Postgres volume sat 4 migrations behind freshly built
+# images: /api/health (liveness, never touches the DB) was green while real
+# requests 500ed. Three rules keep that from coming back:
+#
+#   1. The LOCAL compose `api` service migrates before it serves, and a failed
+#      migration stops the container (no `|| true`). worker and scheduler wait
+#      on api healthy, so they inherit the guarantee.
+#   2. The shared image entrypoint does NOT migrate. Production runs one
+#      replica per service and migrates once per deploy through Railway's
+#      preDeployCommand (`beai:deploy`); an entrypoint migrate would race
+#      between replicas. So rule 1 must stay a compose-level override.
+#   3. scripts/stack-doctor.sh (`task stack:check`) exists, is executable, and
+#      asks the READINESS endpoint, not only liveness.
+# ---------------------------------------------------------------------------
+
+# $1 is the text of `docker compose config`. Exit 0 when the `api` service's
+# command runs `migrate --force` chained with && into an `exec` of the real
+# serve command. A `|| true`, a `;` or a missing exec all fail.
+compose_api_migrates_before_serving() {
+  printf '%s\n' "$1" | awk '
+    /^  api:[[:space:]]*$/ { inapi = 1; next }
+    inapi && /^  [A-Za-z0-9_-]+:/ { inapi = 0 }
+    inapi { print }
+  ' | grep -E 'artisan migrate --force && exec [^ ]' | grep -vqE '\|\|'
+}
+
+# $1 is the entrypoint path. Exit 0 when it RUNS a migrate (a violation of rule
+# 2); 1 when it is clean; 2 when it cannot be read, which is not clean.
+# Comment lines are ignored: the file's own header explains migrate at length.
+entrypoint_has_migrate() {
+  [ -f "$1" ] && [ -r "$1" ] || return 2
+  grep -v '^[[:space:]]*#' "$1" | grep -q 'migrate'
+}
+
+# $1 is the doctor script path. Only a real `fetch .../api/health/ready` call
+# counts: comments and message strings naming the path must not satisfy it.
+stack_doctor_present() {
+  [ -f "$1" ] && [ -x "$1" ] &&
+    grep -v '^[[:space:]]*#' "$1" | grep -qE '^[[:space:]]*fetch[[:space:]].*/api/health/ready'
+}
+
+# ---------------------------------------------------------------------------
 # Minimum-evidence guard for the compose image-pin check.
 #
 # `docker compose config | grep -E '^\s*image:' | while read -r _ REF; do ...`

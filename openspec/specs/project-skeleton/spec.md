@@ -172,6 +172,100 @@ Mandate requirement's machine-readable exemption).
 
 ---
 
+### Requirement: Readiness Endpoint and Schema Drift Guard
+
+The api and consumer parts take effect with the next api release and submodule pin bump; until
+then the doctor treats a `404` on readiness as an unverified warning, not a failure.
+
+The `api` app MUST expose `GET /api/health/ready`, reachable without authentication, that
+answers whether the database is reachable and its schema is current. It MUST answer `200` with
+`{ "status": "ok" }` when the database is reachable and every migration shipped with the code
+has been run. It MUST answer `503` with `{ "status": "down", "reason": "pending_migrations" }`
+when at least one migration has not been run (including when the migrations table does not
+exist yet), and `503` with `{ "status": "down", "reason": "database_unavailable" }` when the
+database cannot be reached. The payload is a **machine-readable status payload and MUST NOT be
+localized**, and a reason MUST NOT carry a migration name, SQL, a host name or exception text.
+The liveness route `GET /api/health` MUST stay free of database access, so a database outage
+never makes the platform look dead to the container healthcheck. The readiness answer MUST NOT
+be cached.
+
+The local compose stack MUST NOT start the `api` service against a schema behind the code: the
+`api` service runs `php artisan migrate --force` before it serves, and a failing migration MUST
+exit the container non-zero. The shared api entrypoint MUST NOT migrate: production migrates
+once per deploy through the Railway pre-deploy command, and an entrypoint migration would race
+between replicas.
+
+`scripts/stack-doctor.sh` (also `task stack:check`) MUST probe both routes and exit non-zero,
+printing the exact fix, on `pending_migrations`, `database_unavailable`, an unrecognised reason
+or an unreachable api. When the readiness route answers `404` (an api that predates it) it MUST
+print a warning that the schema state is not verified and exit zero, unless
+`STACK_DOCTOR_STRICT=1`, in which case it MUST exit non-zero.
+
+An opt-in real-stack end-to-end tier (`BEAI_E2E_STACK=1`) in `backoffice` and `frontend` MUST
+run against the real local stack with no mocked api, MUST abort before any test when readiness
+is not ok, and MUST refuse any origin whose parsed hostname is not `localhost`, `127.0.0.1` or
+`::1` unless `BEAI_E2E_ALLOW_NON_LOCAL=1`. The default (mocked) end-to-end suites MUST be
+unchanged by it.
+
+#### Scenario: Ready on a current schema
+
+- GIVEN the database is reachable and every migration has been run
+- WHEN an unauthenticated GET is made to `/api/health/ready`
+- THEN the response status is 200
+- AND the body is exactly `{ "status": "ok" }`
+
+#### Scenario: Pending migrations are reported without leaking names
+
+- GIVEN at least one migration shipped with the code is missing from the migrations table
+- WHEN GET `/api/health/ready` is called
+- THEN the response status is 503
+- AND the body is exactly `{ "status": "down", "reason": "pending_migrations" }`
+- AND GET `/api/health` still answers 200 with no database query
+
+#### Scenario: Unreachable database is reported
+
+- GIVEN the database cannot be reached
+- WHEN GET `/api/health/ready` is called
+- THEN the response status is 503
+- AND the body is exactly `{ "status": "down", "reason": "database_unavailable" }`
+- AND no connection error text, host name or SQL appears in the response
+
+#### Scenario: A stale local volume heals itself on startup
+
+- GIVEN a local Postgres volume whose schema is behind the checked-out code
+- WHEN `docker compose up` starts the `api` service
+- THEN the migrations are applied before the service serves traffic
+- AND `GET /api/health/ready` answers 200
+
+#### Scenario: The doctor flags a stale schema with the fix
+
+- GIVEN `GET /api/health/ready` answers 503 with reason `pending_migrations`
+- WHEN `scripts/stack-doctor.sh` runs
+- THEN it exits non-zero
+- AND it prints `docker compose exec api php artisan migrate --force`
+
+#### Scenario: The doctor is explicit about an api that predates readiness
+
+- GIVEN `GET /api/health/ready` answers 404
+- WHEN `scripts/stack-doctor.sh` runs without `STACK_DOCTOR_STRICT`
+- THEN it exits zero and prints a warning that the schema state is not verified
+- AND with `STACK_DOCTOR_STRICT=1` it exits non-zero
+
+#### Scenario: The real-stack tier refuses a non-local origin
+
+- GIVEN `BEAI_E2E_STACK_URL` or `BEAI_E2E_API_URL` names a host other than `localhost`,
+  `127.0.0.1` or `::1`
+- WHEN the real-stack tier starts without `BEAI_E2E_ALLOW_NON_LOCAL=1`
+- THEN it aborts before any login or request to that host
+
+#### Scenario: The real-stack tier fails when a migration is missing
+
+- GIVEN a table the reusable-link flow needs does not exist in the database
+- WHEN the real-stack tier runs the flow
+- THEN the test fails with the api's 5xx answer instead of passing
+
+---
+
 ### Requirement: OpenAPI Publication & Typed Client Codegen
 
 The `api` app MUST publish an OpenAPI document (`openapi.json`) via Scramble
