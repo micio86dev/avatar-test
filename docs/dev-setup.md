@@ -435,7 +435,7 @@ does look.
 
 **Check it.** `task stack:check` (`scripts/stack-doctor.sh`, `API_URL` overrides
 `http://localhost:8000`) asks liveness, then readiness, and exits 0 only when both are
-`200 {"status":"ok"}`. `./scripts/dev.sh` runs the same check after its migrate step
+`200 {"status":"ok"}` (a 404 on readiness is the warning case below). `./scripts/dev.sh` runs the same check after its migrate step
 and fails the boot if the api is not ready.
 
 **Older api images.** An api that predates `/api/health/ready` answers 404 there; the

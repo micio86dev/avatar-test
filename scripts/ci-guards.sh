@@ -938,13 +938,15 @@ compose_api_migrates_before_serving() {
 # 2); 1 when it is clean; 2 when it cannot be read, which is not clean.
 # Comment lines are ignored: the file's own header explains migrate at length.
 entrypoint_has_migrate() {
-  [ -r "$1" ] || return 2
+  [ -f "$1" ] && [ -r "$1" ] || return 2
   grep -v '^[[:space:]]*#' "$1" | grep -q 'migrate'
 }
 
-# $1 is the doctor script path.
+# $1 is the doctor script path. Only a real `fetch .../api/health/ready` call
+# counts: comments and message strings naming the path must not satisfy it.
 stack_doctor_present() {
-  [ -f "$1" ] && [ -x "$1" ] && grep -q '/api/health/ready' "$1"
+  [ -f "$1" ] && [ -x "$1" ] &&
+    grep -v '^[[:space:]]*#' "$1" | grep -qE '^[[:space:]]*fetch[[:space:]].*/api/health/ready'
 }
 
 # ---------------------------------------------------------------------------

@@ -174,6 +174,9 @@ Mandate requirement's machine-readable exemption).
 
 ### Requirement: Readiness Endpoint and Schema Drift Guard
 
+The api and consumer parts take effect with the next api release and submodule pin bump; until
+then the doctor treats a `404` on readiness as an unverified warning, not a failure.
+
 The `api` app MUST expose `GET /api/health/ready`, reachable without authentication, that
 answers whether the database is reachable and its schema is current. It MUST answer `200` with
 `{ "status": "ok" }` when the database is reachable and every migration shipped with the code
