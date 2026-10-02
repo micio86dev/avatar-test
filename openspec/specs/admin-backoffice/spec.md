@@ -1402,6 +1402,22 @@ behavioural anchors for this role yet"), i18n-keyed in `it` and `en`.
 - WHEN the picker renders for role ICO
 - THEN the coverage line states 0 of 15 have no anchors yet
 
+### Requirement: Role-Less Projects Use Role-Free Picker Wording
+
+For a project without a role (a Potential project), the picker MUST NOT show
+wording that refers to a role: the "no behavioural anchors" reason, the
+"already in this project but uncovered" reason and the group coverage summary
+MUST use role-free i18n keys (`it` and `en`). Standard projects MUST keep the
+role-scoped wording.
+
+#### Scenario: A Potential project's picker never mentions a role
+
+- GIVEN a Potential project (no role) with an uncovered competency
+- WHEN the picker renders in Italian
+- THEN the reason reads "Nessuna ancora comportamentale — non è valutabile, quindi non è selezionabile."
+- AND the coverage line reads "{n} competenze su {m} non hanno ancora ancore comportamentali."
+- AND no picker text refers to a role
+
 ### Requirement: An Already-Selected Uncovered Competency Stays Checked, Flagged, And Removable
 
 Selection state MUST be evaluated independently of coverage: a competency
@@ -2667,3 +2683,18 @@ independent of this UI gate.
 - WHEN that session calls a catalogue-write endpoint
 - THEN the server still returns HTTP 403 — the UI ability is not trusted as
   access control
+
+### Requirement: Catalogue Role Competencies Form States That Potential Competencies Belong To No Role
+
+The catalogue role competencies form MUST always show a note (i18n key
+`catalogue.roles.competencies.potentialNote`, `it` and `en`) stating that the
+potential competencies (MTG, LAT) belong to no role, are scored on Potential
+projects and are chosen there. Assigning a potential competency to a role
+remains refused by the api and by the publish sweep; the note MUST NOT be
+replaced by any client-side override.
+
+#### Scenario: The note is visible on every role
+
+- GIVEN a superadmin opens the competencies form of any role
+- WHEN the form renders
+- THEN the potential-competencies note is visible, whatever the role's assignments
