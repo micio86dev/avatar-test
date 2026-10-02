@@ -70,7 +70,7 @@ tasks:
       - bash "{{.ROOT_DIR}}/scripts/tests/stack-drift-guards.test.sh"
 
   stack:check:
-    desc: "Check the running local api is live AND ready (schema current, database reachable); prints the fix when not"
+    desc: "Check the running local api is live AND ready (schema current, database reachable) and the :3000/:3001 proxy edges are not stale; prints the fix when not"
     cmds:
       # Liveness (/api/health) never touches the database, so a stack whose
       # schema is behind the code looks healthy. This asks /api/health/ready as

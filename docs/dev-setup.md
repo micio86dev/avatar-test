@@ -443,9 +443,10 @@ doctor then prints a WARNING ("schema state NOT verified") and exits 0. Set
 `STACK_DOCTOR_STRICT=1` to make that an error (exit 1): intended for CI and the
 real-stack e2e once the pinned api carries the endpoint.
 
-**Recreating `api`.** `frontend` and `backoffice` declare `depends_on.api.restart: true`,
-so recreating or restarting `api` restarts them too. Before, a 502 on :3001 meant
-`docker compose restart backoffice frontend` (nginx resolves `api` once at start).
+**Recreating `api`.** `depends_on.api.restart: true` makes `docker compose restart api`
+restart `frontend` and `backoffice`; it does NOT fire for `docker compose up -d --force-recreate api`
+or `up -d --build api`. nginx resolves `api` once at start, so after those a 502 on :3001 follows.
+`task stack:check` detects the stale proxy and prints `docker compose restart backoffice frontend`.
 
 **How compose self-heals.** The local `api` service runs
 `php artisan migrate --force && exec supervisord ...` before it serves, so
