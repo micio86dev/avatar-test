@@ -105,6 +105,58 @@ guard MUST reject any update or delete of that record.
 
 ---
 
+### Requirement: Default Framework Version for Every Organization
+
+Every organization MUST have a `FrameworkVersion` to pin, otherwise no project
+can be created. `CreateOrganization::create()` (used by
+`POST /api/admin/organizations` and `beai:provision-organization`) MUST call
+`EnsureDefaultFrameworkVersion` inside its transaction: when the organization
+has no `FrameworkVersion` at all, it MUST create exactly one with
+`version=1.0.0`, label `Default framework version`, `is_locked=false`, pinned
+to the latest PUBLISHED catalogue revision (never a draft). When the
+organization already has any version, locked or not, nothing MUST be added. When
+no catalogue revision is published, nothing MUST be created, a warning MUST be
+logged, and the organization MUST still be created.
+
+`beai:ensure-framework-versions [--org=<slug>] [--dry-run]` MUST backfill
+organizations that have no version, using the same rule. It MUST be idempotent
+and tenant-isolated, `--org` MUST limit it to that organization, and
+`--dry-run` MUST write nothing. `beai:deploy` MUST run it after the catalogue
+seed as a NON-fatal step: its failure MUST NOT fail the deploy.
+
+#### Scenario: A new organization gets one default version it can pin
+
+- GIVEN a published catalogue revision R exists
+- WHEN POST /api/admin/organizations creates org A
+- THEN org A has exactly one FrameworkVersion: `1.0.0`, unlocked, pinned to R
+- AND GET /api/framework/versions for org A returns it
+- AND POST /api/projects referencing it answers HTTP 201 and locks it
+
+#### Scenario: An organization that already has a version gets none added
+
+- GIVEN org A already has a FrameworkVersion, locked or unlocked
+- WHEN `EnsureDefaultFrameworkVersion` or the backfill runs for org A
+- THEN no FrameworkVersion is created for org A
+
+#### Scenario: No published revision creates nothing and keeps the organization
+
+- GIVEN no catalogue revision is published (only drafts exist)
+- WHEN an organization is created
+- THEN the organization exists and has no FrameworkVersion
+- AND a warning is logged
+
+#### Scenario: The backfill is idempotent, tenant-isolated and dry-runnable
+
+- GIVEN org A has no version and org B has one
+- WHEN `beai:ensure-framework-versions --dry-run` runs
+- THEN nothing is written
+- WHEN it runs without `--dry-run`, then a second time
+- THEN org A has exactly one default version and org B is untouched
+- AND `--org=<slug>` limits the run to that organization
+- AND a failing run inside `beai:deploy` does not fail the deploy
+
+---
+
 ### Requirement: assessment_type Invariants
 
 Assessment type MUST be one of `standard` or `potential`. The invariants
