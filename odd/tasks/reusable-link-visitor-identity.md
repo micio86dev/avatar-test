@@ -177,11 +177,15 @@ orchestrator pushed them (api backend#104 to #111, frontend #46, #47, #50, #51, 
       email (decision R4, pinned in bo-1). Wrapper chain checks: every requirement named in the spec index exists exactly
       once, none has zero scenarios, no duplicate names, `scan_bun_only` over `openspec/specs` clean, AGENTS.md still a
       symlink to CLAUDE.md.
-- [ ] api-R, fe-R, bo-R (VI-api-R.*, VI-fe-R.*, VI-bo-R.*) release preparation, gated [D]. Evidence: api 0.65.0 and
-      frontend 0.22.0 are reported released (see the review and checks record); the executor did not run these tasks, so
-      they stay unchecked until their own evidence is recorded; bo-R is not reported.
-- [ ] release chain (VI-wr-R.1 to R.4) gated on an explicit user request; no deploy is inferred [I]. Evidence: pending.
-- [ ] wrapper-3 (VI-wr-3.1, 3.2) pins and close [D]. Evidence: pending.
+- [x] api-R, fe-R, bo-R (VI-api-R.*, VI-fe-R.*, VI-bo-R.*) release preparation, gated [D]. Evidence (verified
+      2026-10-02): VI work merged in `main` of all three repos (api PRs #104-#106, frontend #46/#47/#50/#51, backoffice
+      #64) and tagged api v0.65.0 then v0.65.1, frontend v0.22.0 then v0.22.1, backoffice v0.47.0 then v0.47.1.
+- [x] release chain (VI-wr-R.1 to R.4) gated on an explicit user request [I]. Evidence: owner authorized on 2026-10-01
+      ("pubblica sempre usando Git flow"); wrapper v0.50.0 released (PR #51) and back-merged (PR #52). Railway
+      deployments of project `beai` are SUCCESS since 2026-10-01 20:32 UTC at the exact pinned commits: api 399010c,
+      frontend 9e3f01e, backoffice dc7d1f3.
+- [x] wrapper-3 (VI-wr-3.1, 3.2) pins and close [D]. Evidence: wrapper 0.50.0 pins api v0.65.1, backoffice v0.47.1,
+      frontend v0.22.1 (`git submodule status`); wrapper-ci green on develop, main and the back-merge branch.
 
 ## Route declaration and trigger evidence
 Planning artifacts came from sdd-* agents (mapping and preparation triggers). Every implementation slice touched 2+
