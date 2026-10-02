@@ -290,9 +290,9 @@ jobs:
             exit 1
           fi
           rc=0
-          compose_edge_restarts_with_api "$(docker compose config)" || rc=$?
+          compose_backoffice_restarts_with_api "$(docker compose config)" || rc=$?
           if [ "$rc" -ne 0 ]; then
-            echo "ERROR: frontend and backoffice must list api under depends_on with restart: true (rc=$rc)."
+            echo "ERROR: backoffice must list api under depends_on with restart: true (rc=$rc)."
             echo "  Otherwise recreating api leaves backoffice nginx on a stale IP: 502 on :3001."
             exit 1
           fi
