@@ -492,11 +492,8 @@ services:
     depends_on:
       api:
         condition: service_healthy
-        # nginx/SSR resolve `api` once at start: a recreated api (new IP) means
-        # 502 until restarted. Fires on `docker compose restart api` ONLY, not on
-        # `up -d --force-recreate|--build api` (`task stack:check` detects that).
-        # Guarded by compose_edge_restarts_with_api.
-        restart: true
+        # The frontend re-resolves `api` per connection and does not go stale
+        # (verified live), so it needs no restart.
     healthcheck:
       # The SSR runtime image (node:24.11-slim, pinned in docs/version-catalog.md
       # — never a bare major, which is what tag_pinned exists to reject) ships
@@ -592,10 +589,11 @@ services:
     depends_on:
       api:
         condition: service_healthy
-        # nginx/SSR resolve `api` once at start: a recreated api (new IP) means
-        # 502 until restarted. Fires on `docker compose restart api` ONLY, not on
-        # `up -d --force-recreate|--build api` (`task stack:check` detects that).
-        # Guarded by compose_edge_restarts_with_api.
+        # nginx resolves the literal `proxy_pass http://api:8000;` once at start
+        # (the Dockerfile is shared with production, unchanged). This restarts
+        # backoffice on `docker compose restart api` ONLY; after `up -d
+        # --force-recreate|--build api` the 502 persists and `task stack:check`
+        # detects it. Guarded by compose_backoffice_restarts_with_api.
         restart: true
     healthcheck:
       # nginx answers /health with a 301 to /health/ (directory-style route from

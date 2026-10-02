@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tests for the stack-schema-drift guards in scripts/ci-guards.sh:
-#   compose_api_migrates_before_serving, compose_edge_restarts_with_api,
+#   compose_api_migrates_before_serving, compose_backoffice_restarts_with_api,
 #   entrypoint_has_migrate, stack_doctor_present.
 #
 # Each guard is exercised against a known-good and a known-bad fixture, so a
@@ -89,11 +89,11 @@ edge_fixture() { # edge_fixture FRONTEND_RESTART BACKOFFICE_RESTART WORKER_RESTA
     printf '        required: true\n    image: x\n'
   done
 }
-expect "frontend and backoffice restart with api: accepted" 0 compose_edge_restarts_with_api "$(edge_fixture yes yes no)"
-expect "backoffice lacks restart: rejected" 1 compose_edge_restarts_with_api "$(edge_fixture yes no yes)"
-expect "frontend lacks restart: rejected" 1 compose_edge_restarts_with_api "$(edge_fixture no yes yes)"
-expect "only worker restarts with api: rejected" 1 compose_edge_restarts_with_api "$(edge_fixture no no yes)"
-expect "empty compose text for edge guard: unreadable" 2 compose_edge_restarts_with_api ""
+expect "backoffice restarts with api, frontend does not: accepted" 0 compose_backoffice_restarts_with_api "$(edge_fixture no yes no)"
+expect "backoffice and frontend both restart: accepted" 0 compose_backoffice_restarts_with_api "$(edge_fixture yes yes no)"
+expect "backoffice lacks restart, frontend has it: rejected" 1 compose_backoffice_restarts_with_api "$(edge_fixture yes no no)"
+expect "only worker restarts with api: rejected" 1 compose_backoffice_restarts_with_api "$(edge_fixture no no yes)"
+expect "empty compose text for edge guard: unreadable" 2 compose_backoffice_restarts_with_api ""
 
 printf '#!/bin/sh\n# migrations are deliberately NOT here: migrate --force would race\nset -eu\nexec "$@"\n' >"$WORK/clean.sh"
 printf '#!/bin/sh\nphp artisan migrate --force\nexec "$@"\n' >"$WORK/dirty.sh"

@@ -223,7 +223,6 @@ run_subject "$DEAD_PORT"
 check "unreachable api exits 1 and explains how to start the stack" 1 \
   "not reachable" "docker compose up"
 
-FIX="docker compose restart backoffice frontend"
 start_server 200 200 '{"status":"ok"}'
 API_PORT="$PORT"
 start_edge 200; EDGE_B="http://127.0.0.1:$EDGE_PORT"
@@ -234,13 +233,17 @@ stop_edge
 
 start_edge 502; EDGE_B="http://127.0.0.1:$EDGE_PORT"
 run_subject "$API_PORT"
-check "backoffice edge 502: exit 1 with the fix" 1 "$FIX" "recreated"
+check "backoffice edge 502: exit 1 with the fix" 1 "docker compose restart backoffice" "frontend re-resolves"
+if printf '%s' "$OUT" | grep -qF "restart backoffice frontend"; then
+  FAIL=$((FAIL + 1))
+  echo "  FAIL backoffice 502 must not tell to restart frontend"
+fi
 stop_edge
 
 EDGE_B="http://127.0.0.1:1"
 start_edge 504; EDGE_F="http://127.0.0.1:$EDGE_PORT"
 run_subject "$API_PORT"
-check "frontend edge 504: exit 1 with the fix" 1 "$FIX"
+check "frontend edge 504: exit 1 with the fix" 1 "docker compose restart frontend" "docker compose logs frontend"
 stop_edge
 
 EDGE_F="http://127.0.0.1:1"
