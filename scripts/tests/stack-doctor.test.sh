@@ -39,6 +39,10 @@ ready_body = sys.argv[4]
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path == "/api/health/ready" and ready_status == 0:
+            # Drop the connection with no reply: curl reports HTTP 000.
+            self.close_connection = True
+            return
         if self.path == "/api/health":
             status, body = live_status, json.dumps({"status": "ok"})
         elif self.path == "/api/health/ready":
@@ -108,6 +112,18 @@ run_subject() {
   RC=$?
 }
 
+# Same, with STACK_DOCTOR_STRICT=1.
+run_subject_strict() {
+  OUT="$(STACK_DOCTOR_STRICT=1 API_URL="http://127.0.0.1:$1" sh "$SUBJECT" 2>&1)"
+  RC=$?
+}
+
+# Same, keeping ONLY stderr (stdout discarded), to prove where a message goes.
+run_subject_stderr() {
+  OUT="$(API_URL="http://127.0.0.1:$1" sh "$SUBJECT" 2>&1 >/dev/null)"
+  RC=$?
+}
+
 echo "stack-doctor.sh"
 
 if [[ ! -f "$SUBJECT" ]]; then
@@ -139,7 +155,34 @@ stop_server
 
 start_server 200 200 '{"status":"degraded"}'
 run_subject "$PORT"
-check "200 without status ok is not ready" 1 "status"
+check "200 without status ok is not ready" 1 "'degraded'"
+stop_server
+
+start_server 200 200 'not json at all'
+run_subject "$PORT"
+check "200 with a non-JSON body is not ready" 1 "NOT READY" "'missing'"
+stop_server
+
+# An api that predates /api/health/ready answers 404 there. Liveness alone
+# proves nothing about the schema, so it is a loud warning, not a failure,
+# unless strict mode (CI, real-stack e2e) demands the endpoint.
+start_server 200 404 '{}'
+run_subject_stderr "$PORT"
+check "missing readiness endpoint: exit 0 with a WARNING on stderr" 0 \
+  "WARNING" "NOT verified" "/api/health/ready"
+run_subject_strict "$PORT"
+check "missing readiness endpoint in strict mode: exit 1" 1 "ERROR" "NOT verified"
+stop_server
+
+# Liveness passes, then the readiness request cannot connect (HTTP 000).
+start_server 200 0 '{}'
+run_subject "$PORT"
+check "readiness unreachable after liveness: distinct message, exit 1" 1 \
+  "readiness endpoint not reachable"
+if printf '%s' "$OUT" | grep -qF "HTTP 000"; then
+  FAIL=$((FAIL + 1))
+  echo "  FAIL unreachable readiness must not print 'HTTP 000'"
+fi
 stop_server
 
 # Reserve a port, release it, and point at it: nothing listens there.

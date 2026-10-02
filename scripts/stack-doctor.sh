@@ -10,12 +10,19 @@
 # {"status":"down","reason":"pending_migrations"|"database_unavailable"}.
 #
 # This script asks both, in that order, and turns each failure into the command
-# that fixes it. Exit 0 only when both answer 200 with status ok.
+# that fixes it. Exit 0 when both answer 200 with status ok.
+#
+# One deliberate exception: an api image that PREDATES /api/health/ready answers
+# 404 there. Liveness is fine, the schema is simply unverifiable, so that is a
+# loud WARNING on stderr and exit 0 (a healthy older stack must not look broken).
+# STACK_DOCTOR_STRICT=1 turns it into an ERROR and exit 1: use it in CI and the
+# real-stack e2e once the pinned api carries the endpoint.
 #
 # No jq: the reason is a machine constant, extracted with sed and restricted to
 # [A-Za-z0-9_] before it is printed. Nothing from the environment is printed.
 #
 # Usage:  scripts/stack-doctor.sh            (API_URL defaults to localhost:8000)
+#         STACK_DOCTOR_STRICT=1 scripts/stack-doctor.sh
 #         API_URL=http://localhost:8001 scripts/stack-doctor.sh
 set -u
 
@@ -61,6 +68,20 @@ fi
 
 # 2. Readiness.
 fetch "$API_URL/api/health/ready"
+if [ "$HTTP_CODE" = "000" ]; then
+  fail "the readiness endpoint not reachable at $API_URL/api/health/ready (liveness answered)" \
+    "The api may have restarted mid-check. Retry:  task stack:check" \
+    "Inspect the api:  docker compose logs --tail=50 api"
+fi
+if [ "$HTTP_CODE" = "404" ]; then
+  MSG="api predates /api/health/ready; schema state NOT verified; upgrade the api image/pin"
+  if [ "${STACK_DOCTOR_STRICT:-}" = "1" ]; then
+    printf 'stack-doctor: ERROR - %s\n' "$MSG" >&2
+    exit 1
+  fi
+  printf 'stack-doctor: WARNING - %s\n' "$MSG" >&2
+  exit 0
+fi
 STATUS="$(field status)"
 REASON="$(field reason)"
 

@@ -228,8 +228,9 @@ services:
     #
     # The tail reproduces the Dockerfile CMD exactly; `exec` keeps supervisord
     # as PID 1 so it still receives SIGTERM. `&&` with no `|| true`: a failed
-    # migration exits the container non-zero and `restart` surfaces it instead
-    # of serving on a broken schema. Nothing is healthy before the
+    # migration exits the container non-zero (and `restart: unless-stopped` loops
+    # it; the signal is `docker compose logs api`) instead of serving on a
+    # broken schema. Nothing is healthy before the
     # migration finishes (nginx only starts after it), so worker, scheduler,
     # frontend and backoffice, which all wait on api `service_healthy`, never
     # start on a stale schema. Guarded by compose_api_migrates_before_serving
@@ -246,7 +247,8 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      # nginx only starts after `migrate` finishes: give it room.
+      start_period: 120s
     networks:
       - beai_network
 

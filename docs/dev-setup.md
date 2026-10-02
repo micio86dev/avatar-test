@@ -438,10 +438,16 @@ does look.
 `200 {"status":"ok"}`. `./scripts/dev.sh` runs the same check after its migrate step
 and fails the boot if the api is not ready.
 
+**Older api images.** An api that predates `/api/health/ready` answers 404 there; the
+doctor then prints a WARNING ("schema state NOT verified") and exits 0. Set
+`STACK_DOCTOR_STRICT=1` to make that an error (exit 1): intended for CI and the
+real-stack e2e once the pinned api carries the endpoint.
+
 **How compose self-heals.** The local `api` service runs
 `php artisan migrate --force && exec supervisord ...` before it serves, so
 `docker compose up` brings a stale volume current. A failed migration exits the
-container non-zero. `worker`, `scheduler`, `frontend` and `backoffice` wait for `api`
+container non-zero; `restart: unless-stopped` then loops it, so read
+`docker compose logs api` for the cause. `worker`, `scheduler`, `frontend` and `backoffice` wait for `api`
 to be healthy, so none of them starts on a stale schema.
 
 **How production migrates.** Not through the container: Railway runs

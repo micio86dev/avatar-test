@@ -64,11 +64,18 @@ SWALLOWED_COMPOSE='services:
       - sh
       - -c
       - php artisan migrate --force || true && exec supervisord -c /etc/supervisor/supervisord.conf'
+SWALLOWED_TAIL_COMPOSE='services:
+  api:
+    command:
+      - sh
+      - -c
+      - php artisan migrate --force && exec supervisord -c /etc/supervisor/supervisord.conf || true'
 
 expect "api migrates then execs: accepted" 0 compose_api_migrates_before_serving "$GOOD_COMPOSE"
 expect "migrate only on worker, not api: rejected" 1 compose_api_migrates_before_serving "$NO_MIGRATE_COMPOSE"
 expect "api migrates but does not exec: rejected" 1 compose_api_migrates_before_serving "$NO_EXEC_COMPOSE"
 expect "api swallows a migrate failure with || true: rejected" 1 compose_api_migrates_before_serving "$SWALLOWED_COMPOSE"
+expect "api exec line ending in || true: rejected" 1 compose_api_migrates_before_serving "$SWALLOWED_TAIL_COMPOSE"
 expect "empty compose text: rejected" 1 compose_api_migrates_before_serving ""
 
 printf '#!/bin/sh\n# migrations are deliberately NOT here: migrate --force would race\nset -eu\nexec "$@"\n' >"$WORK/clean.sh"
