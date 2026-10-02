@@ -934,6 +934,23 @@ compose_api_migrates_before_serving() {
   ' | grep -E 'artisan migrate --force && exec [^ ]' | grep -vqE '\|\|'
 }
 
+# $1 is the text of `docker compose config`. Exit 0 when BOTH `frontend` and
+# `backoffice` list `api` under depends_on with `restart: true`; 1 when either
+# lacks it; 2 on empty input. Parsed per service so another service's
+# `restart: true` (worker, scheduler) cannot satisfy it. Why it matters: the
+# backoffice nginx resolves `api` once at start, so a recreated api means 502.
+compose_edge_restarts_with_api() {
+  [ -n "$1" ] || return 2
+  _n=$(printf '%s\n' "$1" | awk '
+    /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { svc = $1; sub(/:$/, "", svc); dep = 0; api = 0; next }
+    /^    [A-Za-z0-9_-]+:/ { dep = ($1 == "depends_on:"); api = 0; next }
+    dep && /^      [A-Za-z0-9_-]+:/ { api = ($1 == "api:"); next }
+    api && /^        restart: true[[:space:]]*$/ && (svc == "frontend" || svc == "backoffice") { seen[svc] = 1 }
+    END { print (seen["frontend"] ? 1 : 0) + (seen["backoffice"] ? 1 : 0) }
+  ')
+  [ "$_n" = 2 ]
+}
+
 # $1 is the entrypoint path. Exit 0 when it RUNS a migrate (a violation of rule
 # 2); 1 when it is clean; 2 when it cannot be read, which is not clean.
 # Comment lines are ignored: the file's own header explains migrate at length.

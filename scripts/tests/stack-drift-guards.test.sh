@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Tests for the stack-schema-drift guards in scripts/ci-guards.sh:
-#   compose_api_migrates_before_serving, entrypoint_has_migrate, stack_doctor_present.
+#   compose_api_migrates_before_serving, compose_edge_restarts_with_api,
+#   entrypoint_has_migrate, stack_doctor_present.
 #
 # Each guard is exercised against a known-good and a known-bad fixture, so a
 # guard that can no longer tell them apart (inverted, dead) fails here rather
@@ -77,6 +78,22 @@ expect "api migrates but does not exec: rejected" 1 compose_api_migrates_before_
 expect "api swallows a migrate failure with || true: rejected" 1 compose_api_migrates_before_serving "$SWALLOWED_COMPOSE"
 expect "api exec line ending in || true: rejected" 1 compose_api_migrates_before_serving "$SWALLOWED_TAIL_COMPOSE"
 expect "empty compose text: rejected" 1 compose_api_migrates_before_serving ""
+
+# Rendered `docker compose config` spelling: restart sits beside condition.
+edge_fixture() { # edge_fixture FRONTEND_RESTART BACKOFFICE_RESTART WORKER_RESTART
+  printf 'services:\n'
+  for svc in backoffice frontend worker; do
+    case $svc in backoffice) r=$2 ;; frontend) r=$1 ;; *) r=$3 ;; esac
+    printf '  %s:\n    depends_on:\n      api:\n        condition: service_healthy\n' "$svc"
+    [ "$r" = yes ] && printf '        restart: true\n'
+    printf '        required: true\n    image: x\n'
+  done
+}
+expect "frontend and backoffice restart with api: accepted" 0 compose_edge_restarts_with_api "$(edge_fixture yes yes no)"
+expect "backoffice lacks restart: rejected" 1 compose_edge_restarts_with_api "$(edge_fixture yes no yes)"
+expect "frontend lacks restart: rejected" 1 compose_edge_restarts_with_api "$(edge_fixture no yes yes)"
+expect "only worker restarts with api: rejected" 1 compose_edge_restarts_with_api "$(edge_fixture no no yes)"
+expect "empty compose text for edge guard: unreadable" 2 compose_edge_restarts_with_api ""
 
 printf '#!/bin/sh\n# migrations are deliberately NOT here: migrate --force would race\nset -eu\nexec "$@"\n' >"$WORK/clean.sh"
 printf '#!/bin/sh\nphp artisan migrate --force\nexec "$@"\n' >"$WORK/dirty.sh"

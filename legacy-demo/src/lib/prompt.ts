@@ -1,4 +1,4 @@
-// Loads the interview script (questions.json at the repo root) and composes the Italian
+// Loads the interview script (legacy-demo/questions.json) and composes the Italian
 // interviewer context injected into each provider's own LLM. The interview runs as a
 // SEQUENCE of single-question sessions, so we compose ONE question at a time (with a
 // recap of prior answers for continuity) rather than the whole list.

@@ -289,6 +289,13 @@ jobs:
             echo "  A local volume behind the code would then serve 500s on a green /api/health."
             exit 1
           fi
+          rc=0
+          compose_edge_restarts_with_api "$(docker compose config)" || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "ERROR: frontend and backoffice must list api under depends_on with restart: true (rc=$rc)."
+            echo "  Otherwise recreating api leaves backoffice nginx on a stale IP: 502 on :3001."
+            exit 1
+          fi
           if [ ! -f api/docker/entrypoint.sh ]; then
             echo "ERROR: api/docker/entrypoint.sh not found. The replica-race guard cannot verify what it cannot read."
             exit 1

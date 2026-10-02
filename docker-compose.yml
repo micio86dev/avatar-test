@@ -492,6 +492,11 @@ services:
     depends_on:
       api:
         condition: service_healthy
+        # nginx/SSR resolve `api` once at start: a recreated api (new IP) means
+        # 502 until restarted. Fires on `docker compose restart api` ONLY, not on
+        # `up -d --force-recreate|--build api` (`task stack:check` detects that).
+        # Guarded by compose_edge_restarts_with_api.
+        restart: true
     healthcheck:
       # The SSR runtime image (node:24.11-slim, pinned in docs/version-catalog.md
       # — never a bare major, which is what tag_pinned exists to reject) ships
@@ -587,6 +592,11 @@ services:
     depends_on:
       api:
         condition: service_healthy
+        # nginx/SSR resolve `api` once at start: a recreated api (new IP) means
+        # 502 until restarted. Fires on `docker compose restart api` ONLY, not on
+        # `up -d --force-recreate|--build api` (`task stack:check` detects that).
+        # Guarded by compose_edge_restarts_with_api.
+        restart: true
     healthcheck:
       # nginx answers /health with a 301 to /health/ (directory-style route from
       # the generated SPA). The previous probe used `wget --spider`, which does

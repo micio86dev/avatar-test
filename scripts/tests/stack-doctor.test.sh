@@ -107,9 +107,39 @@ check() {
   fi
 }
 
+# Edges default to a refused port so a real :3000/:3001 never leaks in.
+EDGE_B="http://127.0.0.1:1"
+EDGE_F="http://127.0.0.1:1"
+
 run_subject() {
-  OUT="$(API_URL="http://127.0.0.1:$1" sh "$SUBJECT" 2>&1)"
+  OUT="$(BACKOFFICE_URL="$EDGE_B" FRONTEND_URL="$EDGE_F" API_URL="http://127.0.0.1:$1" sh "$SUBJECT" 2>&1)"
   RC=$?
+}
+
+start_edge() {
+  rm -f "$WORK/eport"; python3 -c '
+import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+code = int(sys.argv[2])
+class H(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(code)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+    def log_message(self, *a):
+        pass
+s = HTTPServer(("127.0.0.1", 0), H)
+open(sys.argv[1], "w").write(str(s.server_address[1]))
+s.serve_forever()
+' "$WORK/eport" "$1" &
+  EDGE_PID=$!
+  until [[ -s "$WORK/eport" ]]; do sleep 0.1; done
+  EDGE_PORT="$(<"$WORK/eport")"
+}
+
+stop_edge() {
+  kill "$EDGE_PID" 2>/dev/null
+  wait "$EDGE_PID" 2>/dev/null
 }
 
 # Same, with STACK_DOCTOR_STRICT=1.
@@ -192,6 +222,45 @@ stop_server
 run_subject "$DEAD_PORT"
 check "unreachable api exits 1 and explains how to start the stack" 1 \
   "not reachable" "docker compose up"
+
+FIX="docker compose restart backoffice frontend"
+start_server 200 200 '{"status":"ok"}'
+API_PORT="$PORT"
+start_edge 200; EDGE_B="http://127.0.0.1:$EDGE_PORT"
+EDGE_F="$EDGE_B"
+run_subject "$API_PORT"
+check "both edges 200: exit 0" 0 "backoffice edge ok" "frontend edge ok"
+stop_edge
+
+start_edge 502; EDGE_B="http://127.0.0.1:$EDGE_PORT"
+run_subject "$API_PORT"
+check "backoffice edge 502: exit 1 with the fix" 1 "$FIX" "recreated"
+stop_edge
+
+EDGE_B="http://127.0.0.1:1"
+start_edge 504; EDGE_F="http://127.0.0.1:$EDGE_PORT"
+run_subject "$API_PORT"
+check "frontend edge 504: exit 1 with the fix" 1 "$FIX"
+stop_edge
+
+EDGE_F="http://127.0.0.1:1"
+run_subject "$API_PORT"
+check "edges unreachable: exit 0 with a NOTE" 0 "NOTE" "not checked"
+
+start_edge 403; EDGE_B="http://127.0.0.1:$EDGE_PORT"
+run_subject "$API_PORT"
+check "edge 403: exit 0 with a WARNING" 0 "WARNING" "403"
+stop_edge
+stop_server
+
+start_server 200 503 '{"status":"down","reason":"pending_migrations"}'
+API_PORT="$PORT"
+start_edge 200; EDGE_B="http://127.0.0.1:$EDGE_PORT"
+run_subject "$API_PORT"
+check "failing readiness beats a healthy edge" 1 "pending_migrations"
+stop_edge
+stop_server
+EDGE_B="http://127.0.0.1:1"
 
 echo
 echo "stack-doctor: $PASS passed, $FAIL failed"
