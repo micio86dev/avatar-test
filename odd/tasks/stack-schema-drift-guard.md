@@ -64,24 +64,25 @@ Forecast ~250 (api) + ~150 (wrapper) + ~200 (backoffice) + ~200 (frontend) autho
 all under about 400. Strategy: ask-on-risk (default). Slices: one PR per repo.
 
 ## Progress / evidence
-- G1 api (worktree beai-worktrees/api-stack-drift, commit b40f0d4, not pushed): `SchemaStatus` + `HealthReadyController`,
+Merged 2026-10-02, CI green: backend#117, backoffice#69, frontend#56, beai#54.
+- G1 api (worktree beai-worktrees/api-stack-drift, commit b40f0d4, merged): `SchemaStatus` + `HealthReadyController`,
   route `GET /api/health/ready`, openapi.json regenerated, 7 unit + 5 feature tests. RED seen first (class not found, 404).
   Orchestrator spot check: 18/18 pass (health unit + HealthReady + Health + HealthCorsAllowlist). `HealthController`
   untouched. Writer reported 33 full-suite failures, all from tests reading `../docs/...` that does not exist beside a
   worktree (unverified on develop; CI will arbitrate). phpstan: 2 errors in files this change does not touch.
   Native review: medium, 1 lens (reliability), approved, acknowledged (authority burned). Still open: live-spec update in
   openspec/specs/observability/spec.md (wrapper repo).
-- G2 wrapper (worktree beai-worktrees/wrapper-stack-drift, commits 7026e1d, 4ea3142, 433d445, not pushed): compose `api`
+- G2 wrapper (worktree beai-worktrees/wrapper-stack-drift, commits 7026e1d, 4ea3142, 433d445, merged): compose `api`
   migrates before serving (api start_period 120s), `scripts/stack-doctor.sh` (+ `STACK_DOCTOR_STRICT=1`), `task
-  stack:check`, dev.sh readiness step, three ci-guards, two shell test suites (10 + 13 cases), docs. 604 lines in total.
+  stack:check`, dev.sh readiness step, three ci-guards, two shell test suites (10 + 13 cases), docs. 600 lines in total.
   Native review: high risk, 4 lenses, `correction_required` (finding text is not exposed by the tooling). An independent
   read-only review found the likely severe item: the pinned api v0.65.1 has no `/api/health/ready`, so dev.sh and
   `stack:check` would fail on a healthy stack (api-first release order). One scoped correction (85 lines): a 404 on
   /ready is a loud WARNING and exit 0 unless STRICT; plus start_period, comment wording, three weak tests, a 000 message.
   The native targeted validator REJECTED the correction -> `escalated`. No second correction (one per candidate).
   Needs owner decision: ship through ordinary policy (CI arbitrates) or have it re-reviewed by hand.
-- G3 backoffice (worktree backoffice-stack-drift, commits e4d035f, 3ce783b, not pushed) and G4 frontend (worktree
-  frontend-stack-drift, commits 0d742ee, 7c44ada, db189f7, not pushed): opt-in `stack-chromium` / `stack-webkit`
+- G3 backoffice (worktree backoffice-stack-drift, commits e4d035f, 3ce783b, merged) and G4 frontend (worktree
+  frontend-stack-drift, commits 0d742ee, 7c44ada, db189f7, merged): opt-in `stack-chromium` / `stack-webkit`
   Playwright projects (`BEAI_E2E_STACK=1`, `bun run test:e2e:stack`), readiness pre-check with actionable messages, a
   hostname-parsed origin guard (`BEAI_E2E_ALLOW_NON_LOCAL=1` to override), cleanup that fails loudly, and the 5xx list
   always reported. Positive runs on the live stack: both repos green twice in both browsers, no active `e2e-stack-*`

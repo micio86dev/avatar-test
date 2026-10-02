@@ -293,9 +293,14 @@ jobs:
             echo "ERROR: api/docker/entrypoint.sh not found. The replica-race guard cannot verify what it cannot read."
             exit 1
           fi
-          if entrypoint_has_migrate api/docker/entrypoint.sh; then
+          rc=0
+          entrypoint_has_migrate api/docker/entrypoint.sh || rc=$?
+          if [ "$rc" -eq 0 ]; then
             echo "ERROR: api/docker/entrypoint.sh runs migrate. It runs once per REPLICA and would race."
             echo "  Production migrates through preDeployCommand (beai:deploy); keep local self-healing in docker-compose.yml."
+            exit 1
+          elif [ "$rc" -ne 1 ]; then
+            echo "ERROR: api/docker/entrypoint.sh is unreadable (rc=$rc); the replica-race guard cannot verify it."
             exit 1
           fi
           if ! stack_doctor_present scripts/stack-doctor.sh; then
