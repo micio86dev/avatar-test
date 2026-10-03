@@ -27,7 +27,7 @@ propagation are a SEPARATE follow-up (needs SDD: tenancy rule change), see "Out 
       service, audit, tests, AuthMatrix, openapi
 - [x] D2 Backoffice: "Copy to organizations" action on a template (superadmin), multi-select of orgs incl. "all organizations",
       result summary, refresh, i18n, tests
-- [ ] D3 Verify: suites, mutations on authz/tenant stamping, rebuild containers, user tries it
+- [x] D3 Verify (user confirmed copy dialog OK, 2026-10-03): suites, mutations on authz/tenant stamping, rebuild containers, user tries it
 
 ## Out of scope (next: SDD proposal)
 Global templates shared by all orgs with edit propagation: per-org activation semantics (unique active index per org+provider),
