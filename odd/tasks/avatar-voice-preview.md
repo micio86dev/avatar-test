@@ -30,6 +30,7 @@ inputs and combobox rows), to judge the Italian accent before activating a templ
 - [x] P2 API catalogue: Cartesia `expand[]=preview_file_url` -> `preview_audio_url`; HeyGen preview fetch; fix stale docblock; tests
 - [x] P3 Backoffice: reusable VoicePreviewButton molecule (play/stop/loading/error/unavailable), wired next to every voice field/combobox row; blob playback; i18n; tests; DESIGN.md
 - [ ] P4 Verify: suites, mutation checks on the endpoint authz, rebuild containers, user listens (Cartesia IT voice, HeyGen, Tavus)
+      2026-10-03 manual check: Tavus synthesised Italian sample OK; Cartesia "Campione del catalogo" 401 (browser fetched the keyed Cartesia URL) -> fix in progress on feature/cartesia-catalogue-sample-proxy (api + backoffice). Owner also reported HeyGen has no third-party voice selector: new feature, platform templates only (owner decision 2026-10-03).
 
 ## Acceptance
 Every voice field/row has a working listen control or a clear "preview unavailable" reason; costs bounded by cache+throttle;
