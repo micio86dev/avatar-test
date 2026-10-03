@@ -114,7 +114,7 @@ confirmed to exist in its repository when this document was written.
       frontend and backoffice); `sh sdks/generate.sh` run twice with no drift on the second run; the only SDK change
       is the version header (v1 did not change). Wrapper CI (Cross-Stack Consistency, Public API Contract, Public API
       SDKs) green on #42 and #43.
-- [ ] B7b.9 manual local harness on rebuilt images (create from the backoffice, open the URL in a desktop Chromium, a
+- [x] B7b.9 (user confirmed the manual walkthrough OK, 2026-10-03) manual local harness on rebuilt images (create from the backoffice, open the URL in a desktop Chromium, a
       second visit, Disable, reopen, first visitor still finishes). NOT done: no manual browser walkthrough was
       performed, locally or in production. Production was checked with read-only requests only (see Progress).
 - [x] R.1 to R.5 api release `0.63.0`: PR #99, tag `v0.63.0` at `9284001`, back-merge #100. Both migrations ran in the
