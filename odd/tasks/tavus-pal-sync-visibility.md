@@ -30,7 +30,7 @@ User authorization on record (2026-09-29): read persona p89b602b1174 and replay 
 ## Tasks
 - [x] P1 api (merged: api PR #82)
 - [x] P2 backoffice (merged: backoffice PR #48)
-- [ ] P3 verify + user listens
+- [x] P3 verify (user confirmed 2026-10-03: Tavus templates show the green "Persona sincronizzata" tag, correct) + user listens (voice listening is covered by avatar-voice-preview P4)
 
 ## Next step
 P1 (api writer).
